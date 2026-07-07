@@ -1,0 +1,82 @@
+{
+  "shows": [
+    { "id": "amstel-gold", "folderName": "Amstel Gold", "matchKeywords": ["amstel gold"], "type": "one-day" },
+    { "id": "arctic-race-of-norway", "folderName": "Arctic Race of Norway", "matchKeywords": ["arctic race of norway", "arctic race norway"], "type": "stage-race" },
+    { "id": "cegorr", "folderName": "CEGORR", "matchKeywords": ["cegorr"], "type": "one-day" },
+    { "id": "clasica-san-sebastian", "folderName": "Clásica San Sebestián", "matchKeywords": ["clasica san sebastian", "clasica san sebestian", "san sebastian"], "type": "one-day" },
+    { "id": "criterium-du-dauphine", "folderName": "Criterium du Dauphine", "matchKeywords": ["criterium du dauphine", "dauphine"], "type": "stage-race" },
+    { "id": "criterium-du-dauphine-highlights", "folderName": "Criterium du Dauphine HIGHLIGHTS", "filenamePrefix": "Criterium du Dauphine", "matchKeywords": ["criterium du dauphine", "dauphine"], "isHighlights": true, "type": "stage-race" },
+    { "id": "czech-tour", "folderName": "Czech Tour", "matchKeywords": ["czech tour"], "type": "stage-race" },
+    { "id": "documentary", "folderName": "Documentary", "matchKeywords": ["documentary"], "type": "one-day" },
+    { "id": "fleche-wallonne", "folderName": "Fleche Wallonne", "matchKeywords": ["fleche wallonne"], "type": "one-day" },
+    { "id": "giro-ditalia", "folderName": "Giro D'Italia", "matchKeywords": ["giro ditalia", "giro d italia"], "type": "stage-race" },
+    { "id": "giro-ditalia-highlights", "folderName": "Giro D'Italia HIGHLIGHTS", "filenamePrefix": "Giro D'Italia", "matchKeywords": ["giro ditalia", "giro d italia"], "isHighlights": true, "type": "stage-race" },
+    { "id": "giro-donne", "folderName": "Giro Donne", "matchKeywords": ["giro donne"], "type": "stage-race" },
+    { "id": "highlights-tour-femme", "folderName": "HIGHLIGHTS Tour Femme", "filenamePrefix": "Tour de Femmes", "matchKeywords": ["tour de femmes", "tour de france femmes", "tour femme"], "isHighlights": true, "type": "stage-race" },
+    { "id": "la-course", "folderName": "La Course", "matchKeywords": ["la course"], "type": "one-day" },
+    { "id": "liege-bastogne-liege", "folderName": "Liege Bastogne Liege", "matchKeywords": ["liege bastogne liege"], "type": "one-day" },
+    { "id": "milan-san-remo", "folderName": "Milan San Remo", "matchKeywords": ["milan san remo", "milano sanremo"], "type": "one-day" },
+    {
+      "id": "nationals",
+      "folderName": "Nationals",
+      "matchKeywords": ["national championships", "nationals", "national road championships"],
+      "type": "multi-category-dynamic"
+    },
+    {
+      "id": "olympics-road",
+      "folderName": "Olympics Road",
+      "matchKeywords": ["olympics road", "olympic road", "olympics"],
+      "type": "multi-category-fixed",
+      "categories": [
+        { "episode": 1, "title": "Men Road Race", "include": ["men", "road", "race"], "exclude": ["u23", "junior", "tt", "mixed", "women"] },
+        { "episode": 2, "title": "Women Road Race", "include": ["women", "road", "race"], "exclude": ["u23", "junior", "tt", "mixed"] },
+        { "episode": 3, "title": "Men Time Trial", "include": ["men", "tt"], "exclude": ["women", "mixed"] },
+        { "episode": 4, "title": "Women Time Trial", "include": ["women", "tt"], "exclude": ["men", "mixed"] },
+        { "episode": 5, "title": "Mixed Relay Team Time Trial", "include": ["mixed", "ttt"], "exclude": [] }
+      ]
+    },
+    { "id": "paris-nice", "folderName": "Paris Nice", "matchKeywords": ["paris nice"], "type": "stage-race" },
+    { "id": "paris-roubaix", "folderName": "Paris Roubaix", "matchKeywords": ["paris roubaix"], "type": "one-day" },
+    { "id": "strade-bianche", "folderName": "Strade Bianche", "matchKeywords": ["strade bianche"], "type": "one-day" },
+    { "id": "tdf-euro-highlights", "folderName": "TdF Euro Hghlights", "filenamePrefix": "Tour de France", "matchKeywords": ["tour de france eurosport", "tdf eurosport", "tdf euro"], "isHighlights": true, "type": "stage-race" },
+    { "id": "tirreno-adriatico", "folderName": "Tirreno Adriatico", "matchKeywords": ["tirreno adriatico"], "type": "stage-race" },
+    { "id": "tour-down-under", "folderName": "Tour Down Under", "matchKeywords": ["tour down under"], "type": "stage-race" },
+    { "id": "tour-de-femmes", "folderName": "Tour de Femmes", "matchKeywords": ["tour de femmes", "tour de france femmes"], "type": "stage-race" },
+    { "id": "tour-de-france", "folderName": "Tour de France", "matchKeywords": ["tour de france", "tdf"], "type": "stage-race" },
+    { "id": "tour-de-france-highlights", "folderName": "Tour de France HIGHLIGHTS", "filenamePrefix": "Tour de France", "matchKeywords": ["tour de france", "tdf"], "isHighlights": true, "type": "stage-race" },
+    { "id": "tour-de-limousin", "folderName": "Tour de Limousin", "matchKeywords": ["tour de limousin"], "type": "stage-race" },
+    { "id": "tour-de-suisse", "folderName": "Tour de Suisse", "matchKeywords": ["tour de suisse"], "type": "stage-race" },
+    { "id": "tour-de-lain", "folderName": "Tour de l'Ain", "matchKeywords": ["tour de lain", "tour de l ain"], "type": "stage-race" },
+    { "id": "tour-de-lavenir", "folderName": "Tour de l'Avenir", "matchKeywords": ["tour de lavenir", "tour de l avenir"], "type": "stage-race" },
+    { "id": "tour-de-lavenir-femme", "folderName": "Tour de l'Avenir Femme", "matchKeywords": ["tour de lavenir femme", "tour de l avenir femme", "avenir femme"], "type": "stage-race" },
+    { "id": "tour-du-rwanda", "folderName": "Tour du Rwanda", "matchKeywords": ["tour du rwanda"], "type": "stage-race" },
+    { "id": "tour-of-denmark", "folderName": "Tour of Denmark", "matchKeywords": ["tour of denmark"], "type": "stage-race" },
+    { "id": "tour-of-deutschland", "folderName": "Tour of Deutschland", "matchKeywords": ["tour of deutschland", "deutschland tour"], "type": "stage-race" },
+    { "id": "tour-of-guangxi", "folderName": "Tour of Guangxi", "matchKeywords": ["tour of guangxi"], "type": "stage-race" },
+    { "id": "tour-of-norway", "folderName": "Tour of Norway", "matchKeywords": ["tour of norway"], "type": "stage-race" },
+    { "id": "tour-of-wallonia", "folderName": "Tour of Wallonia", "matchKeywords": ["tour of wallonia"], "type": "stage-race" },
+    { "id": "vuelta-a-espana", "folderName": "Vuelta a Espana", "matchKeywords": ["vuelta a espana", "vuelta espana"], "type": "stage-race" },
+    { "id": "vuelta-a-espana-highlights", "folderName": "Vuelta a Espana HIGHLIGHTS", "filenamePrefix": "Vuelta a Espana", "matchKeywords": ["vuelta a espana", "vuelta espana"], "isHighlights": true, "type": "stage-race" },
+    {
+      "id": "world-championships",
+      "folderName": "World Championships",
+      "matchKeywords": ["world championships", "worlds"],
+      "type": "multi-category-fixed",
+      "categories": [
+        { "episode": 1, "title": "Mens Road Race", "include": ["men", "road", "race"], "exclude": ["u23", "junior", "tt", "mixed", "women"] },
+        { "episode": 2, "title": "Mens TT Road Race", "include": ["men", "tt"], "exclude": ["u23", "junior", "women", "ttt"] },
+        { "episode": 3, "title": "Womens Road Race U23", "include": ["women", "u23", "road", "race"], "exclude": ["junior", "tt", "mixed"] },
+        { "episode": 4, "title": "Womens Road Race", "include": ["women", "road", "race"], "exclude": ["u23", "junior", "tt", "mixed"] },
+        { "episode": 5, "title": "Mens U23 Road Race", "include": ["men", "u23", "road", "race"], "exclude": ["junior", "tt"] },
+        { "episode": 6, "title": "Womens TT", "include": ["women", "tt"], "exclude": ["u23", "junior", "ttt"] },
+        { "episode": 7, "title": "Mens Junior Road Race", "include": ["men", "junior", "road", "race"], "exclude": ["tt"] },
+        { "episode": 8, "title": "Womens Junior Road Race", "include": ["women", "junior", "road", "race"], "exclude": ["tt"] },
+        { "episode": 9, "title": "Mens U23 TT", "include": ["men", "u23", "tt"], "exclude": ["junior"] },
+        { "episode": 10, "title": "Womens U23 TT", "include": ["women", "u23", "tt"], "exclude": ["junior"] },
+        { "episode": 11, "title": "Mens Junior TT", "include": ["men", "junior", "tt"], "exclude": [] },
+        { "episode": 12, "title": "Womens Junior TT", "include": ["women", "junior", "tt"], "exclude": [] },
+        { "episode": 13, "title": "Mixed Relay TTT", "include": ["mixed", "ttt"], "exclude": [] }
+      ]
+    }
+  ]
+}

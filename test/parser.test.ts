@@ -1,0 +1,87 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { parseName, mergeParsed } from "../src/parser.js";
+import { REAL_SOURCE_NAMES } from "./fixtures.js";
+
+test("extracts year glued directly onto a prefix (tdf2026-...)", () => {
+  const p = parseName(REAL_SOURCE_NAMES.tdfHighlights);
+  assert.equal(p.year, 2026);
+  assert.equal(p.yearWasExplicit, true);
+  assert.equal(p.stageNum, 4);
+  assert.equal(p.isHighlights, true);
+  assert.ok(p.tokens.includes("tdf"));
+  assert.ok(!p.tokens.includes("2026"));
+});
+
+test("falls back to the current year when none is present", () => {
+  const p = parseName(REAL_SOURCE_NAMES.tdfStage01Sbs);
+  assert.equal(p.yearWasExplicit, false);
+  assert.equal(p.year, new Date().getFullYear());
+  assert.equal(p.stageNum, 1);
+  assert.deepEqual(p.tokens.sort(), ["sbs", "tdf"]);
+});
+
+test("extracts part-with-total from (Part-N-of-M) style names", () => {
+  const p = parseName(REAL_SOURCE_NAMES.tdfStage01Part1);
+  assert.equal(p.year, 2026);
+  assert.equal(p.stageNum, 1);
+  assert.equal(p.partNum, 1);
+  assert.equal(p.partTotal, 2);
+});
+
+test("extracts a 4-part stage correctly", () => {
+  const p1 = parseName(REAL_SOURCE_NAMES.tdfStage04Part1);
+  const p4 = parseName(REAL_SOURCE_NAMES.tdfStage04Part4);
+  assert.equal(p1.partNum, 1);
+  assert.equal(p1.partTotal, 4);
+  assert.equal(p4.partNum, 4);
+  assert.equal(p4.partTotal, 4);
+});
+
+test("extracts bare PartN with no known total (legacy Paris-Roubaix style)", () => {
+  const p = parseName(REAL_SOURCE_NAMES.parisRoubaix2018Part1);
+  assert.equal(p.partNum, 1);
+  assert.equal(p.partTotal, null);
+  assert.equal(p.year, 2018);
+});
+
+test("detects team and route presentation flags", () => {
+  const team = parseName(REAL_SOURCE_NAMES.tdfTeamPresentation);
+  assert.equal(team.isTeamPresentation, true);
+  assert.equal(team.isRoutePresentation, false);
+
+  const route = parseName(REAL_SOURCE_NAMES.tdfRoutePresentation);
+  assert.equal(route.isRoutePresentation, true);
+  assert.equal(route.isTeamPresentation, false);
+});
+
+test("normalizes gender/age plurals and merges split U23 tokens", () => {
+  const p = parseName(REAL_SOURCE_NAMES.worldsMenU23RoadRaceUnderscore);
+  assert.ok(p.tokenSet.has("men"));
+  assert.ok(p.tokenSet.has("u23"));
+  assert.ok(p.tokenSet.has("road"));
+  assert.ok(p.tokenSet.has("race"));
+});
+
+test("strips apostrophes so D'Italia / l'Ain normalize to single tokens", () => {
+  const p = parseName("Giro D'Italia");
+  assert.ok(p.tokenSet.has("ditalia"));
+});
+
+test("mergeParsed prefers the file's explicit fields, falls back to the folder's", () => {
+  const folder = parseName(REAL_SOURCE_NAMES.tdfStage01FolderName);
+  const file = parseName(REAL_SOURCE_NAMES.tdfStage01Part1);
+  const merged = mergeParsed(folder, file);
+  assert.equal(merged.year, 2026);
+  assert.equal(merged.stageNum, 1);
+  assert.equal(merged.partNum, 1);
+  assert.equal(merged.partTotal, 2);
+});
+
+test("mergeParsed unions tokens from both folder and file", () => {
+  const folder = parseName("British.National.Road.Championships.2026.Mens.Road.Race");
+  const file = parseName("video");
+  const merged = mergeParsed(folder, file);
+  assert.ok(merged.tokenSet.has("british"));
+  assert.ok(merged.tokenSet.has("men"));
+});

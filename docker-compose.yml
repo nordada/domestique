@@ -1,0 +1,28 @@
+# Example compose file for running bike-race-archiver on Unraid (TOWER).
+#
+# IMPORTANT: the "dir" value Transmission passes to torrent-done.sh (via
+# TR_TORRENT_DIR) has to resolve to the same file inside THIS container as it
+# does inside Transmission's own container. The easiest way to guarantee that
+# is to mount the source path at the *identical* path in both containers,
+# which is what's shown below (host path == container path). If your
+# Transmission container instead maps that share to something like
+# /downloads internally, mount it the same way here, or adjust the path in
+# scripts/torrent-done.sh before sending it.
+services:
+  bike-race-archiver:
+    build: .
+    container_name: bike-race-archiver
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    environment:
+      LIBRARY_ROOT: /mnt/user/towerMEDIAracing/2021_plex_library
+      CONFIG_PATH: /app/config/shows.json
+      PORT: "8420"
+    volumes:
+      # Transmission's completed-downloads directory (read-only: we only copy from here).
+      - /mnt/user/fastARCHIVE-seeding/complete:/mnt/user/fastARCHIVE-seeding/complete:ro
+      # Plex library root (read-write: this is where renamed files land).
+      - /mnt/user/towerMEDIAracing/2021_plex_library:/mnt/user/towerMEDIAracing/2021_plex_library
+      # Config file bind-mounted so you can edit show mappings without rebuilding the image.
+      - ./config/shows.json:/app/config/shows.json
