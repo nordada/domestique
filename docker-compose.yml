@@ -1,4 +1,4 @@
-# Example compose file for running bike-race-archiver on Unraid (TOWER).
+# Example compose file for running Domestique on Unraid (TOWER).
 #
 # All host-specific values (paths, port) live in .env, not here — copy
 # .env.example to .env and fill it in before running `docker compose up`.
@@ -14,9 +14,9 @@
 # If your Transmission container uses a different internal path, change the
 # ":/downloads" below to match it instead.
 services:
-  bike-race-archiver:
+  domestique:
     build: .
-    container_name: bike-race-archiver
+    container_name: domestique
     restart: unless-stopped
     ports:
       - "${PORT}:${PORT}"

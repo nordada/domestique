@@ -1,8 +1,10 @@
-# bike-race-archiver
+# Domestique
 
-Copies completed bike-race torrent downloads (autobrr → Transmission) into a
-Plex-friendly library layout, renaming them from whatever the tracker called
-them into a standardized `Show Name - SYYYYEnn - Title - ptNN.ext` scheme.
+Quietly files completed bike-race torrent downloads (autobrr → Transmission)
+into a Plex-friendly library layout, renaming them from whatever the tracker
+called them into a standardized `Show Name - SYYYYEnn - Title - ptNN.ext`
+scheme — like a cycling domestique, doing the unglamorous support work in
+the background so the footage gets to be the star.
 
 It does **not** move or delete anything from Transmission's download
 directory — everything is copied, so seeding is unaffected.
@@ -151,10 +153,10 @@ chmod +x torrent-done.sh
 ```
 
 Edit `torrent-done.env` and set `ARCHIVER_URL` — since Transmission and
-`bike-race-archiver` are separate containers not on the same Docker network,
-this needs to be TOWER's LAN IP (not a container name), e.g.
+Domestique are separate containers not on the same Docker network, this
+needs to be TOWER's LAN IP (not a container name), e.g.
 `http://192.168.1.50:8420/webhook/torrent-done`, using the same `PORT` you
-set in the archiver's `.env`.
+set in Domestique's `.env`.
 
 **Path consistency matters**: the `dir` Transmission reports (`TR_TORRENT_DIR`)
 has to resolve to the same file both inside Transmission's container and

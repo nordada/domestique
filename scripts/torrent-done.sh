@@ -19,7 +19,7 @@ if [ -f "$SCRIPT_DIR/torrent-done.env" ]; then
   . "$SCRIPT_DIR/torrent-done.env"
 fi
 
-ARCHIVER_URL="${ARCHIVER_URL:-http://bike-race-archiver:8420/webhook/torrent-done}"
+ARCHIVER_URL="${ARCHIVER_URL:-http://domestique:8420/webhook/torrent-done}"
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
