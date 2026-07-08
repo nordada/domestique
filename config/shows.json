@@ -57,6 +57,7 @@
     { "id": "tour-de-pologne", "folderName": "Tour de Pologne", "matchKeywords": ["tour de pologne", "tour of poland"], "type": "stage-race" },
     { "id": "tour-de-romandie", "folderName": "Tour de Romandie", "matchKeywords": ["tour de romandie", "romandie"], "type": "stage-race" },
     { "id": "tour-de-suisse", "folderName": "Tour de Suisse", "matchKeywords": ["tour de suisse"], "type": "stage-race" },
+    { "id": "tour-de-suisse-highlights", "folderName": "Tour de Suisse HIGHLIGHTS", "filenamePrefix": "Tour de Suisse", "matchKeywords": ["tour de suisse"], "isHighlights": true, "type": "stage-race" },
     { "id": "tour-de-lain", "folderName": "Tour de l'Ain", "matchKeywords": ["tour de lain", "tour de l ain"], "type": "stage-race" },
     { "id": "tour-de-lavenir", "folderName": "Tour de l'Avenir", "matchKeywords": ["tour de lavenir", "tour de l avenir"], "type": "stage-race" },
     { "id": "tour-de-lavenir-femme", "folderName": "Tour de l'Avenir Femme", "matchKeywords": ["tour de lavenir femme", "tour de l avenir femme", "avenir femme"], "type": "stage-race" },
