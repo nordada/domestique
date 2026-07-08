@@ -5,12 +5,14 @@
 #
 # IMPORTANT: the "dir" value Transmission passes to torrent-done.sh (via
 # TR_TORRENT_DIR) has to resolve to the same file inside THIS container as it
-# does inside Transmission's own container. The easiest way to guarantee that
-# is to mount the source path at the *identical* path in both containers,
-# which is what's shown below (host path == container path). If your
-# Transmission container instead maps that share to something like
-# /downloads internally, mount it the same way here, or adjust the path in
-# scripts/torrent-done.sh before sending it.
+# does inside Transmission's own container. Transmission's own Docker
+# template maps its downloads share to /downloads internally (check your
+# Transmission container's path mappings in the Unraid UI to confirm), so
+# this container mounts the SAME host directory at that SAME container path
+# below — DOWNLOADS_DIR in .env is the host path, but it always lands at
+# the fixed container path /downloads here, matching Transmission's side.
+# If your Transmission container uses a different internal path, change the
+# ":/downloads" below to match it instead.
 services:
   bike-race-archiver:
     build: .
@@ -23,8 +25,9 @@ services:
       CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
       PORT: "${PORT}"
     volumes:
-      # Transmission's completed-downloads directory (read-only: we only copy from here).
-      - ${DOWNLOADS_DIR}:${DOWNLOADS_DIR}:ro
+      # Transmission's completed-downloads share (read-only: we only copy from here).
+      # Mounted at /downloads to match Transmission's own internal path.
+      - ${DOWNLOADS_DIR}:/downloads:ro
       # Plex library root (read-write: this is where renamed files land).
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.

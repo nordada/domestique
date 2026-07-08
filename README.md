@@ -84,8 +84,12 @@ cp .env.example .env
 ```
 
 Edit `.env` and set `LIBRARY_ROOT`, `DOWNLOADS_DIR`, and `PORT` to match your
-setup (defaults match this project's original `/mnt/user/fastARCHIVE-seeding/complete`
-and `/mnt/user/towerMEDIAracing/2021_plex_library`). Then:
+setup. `DOWNLOADS_DIR` must be the host path to the **same share**
+Transmission's own container maps to `/downloads` internally — check
+Transmission's Docker template path mappings in the Unraid UI to confirm
+what that is (defaults here match this project's original
+`/mnt/user/fastARCHIVE-seeding` and `/mnt/user/towerMEDIAracing/2021_plex_library`).
+Then:
 
 ```
 docker compose up -d --build
@@ -119,10 +123,14 @@ this needs to be TOWER's LAN IP (not a container name), e.g.
 `http://192.168.1.50:8420/webhook/torrent-done`, using the same `PORT` you
 set in the archiver's `.env`.
 
-**Path consistency matters**: the `dir` Transmission reports has to resolve
-to the same file both inside Transmission's container and inside this one.
-See the comment at the top of `docker-compose.yml` for the recommended
-identity-path-mapping approach.
+**Path consistency matters**: the `dir` Transmission reports (`TR_TORRENT_DIR`)
+has to resolve to the same file both inside Transmission's container and
+inside this one. This project mounts `DOWNLOADS_DIR` at the fixed container
+path `/downloads` specifically to match Transmission's own convention — if
+your Transmission container maps its share to something other than
+`/downloads` internally, change the mount in `docker-compose.yml` to match
+it instead. Get this wrong and the hook will fire successfully but the
+archiver will fail to find the file (a `ENOENT`-style error in its logs).
 
 ### 3. Add a new show
 
