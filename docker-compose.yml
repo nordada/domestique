@@ -24,6 +24,12 @@ services:
       LIBRARY_ROOT: ${LIBRARY_ROOT}
       CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
       PORT: "${PORT}"
+      # Optional Plex partial-scan integration — safe to leave unset in .env,
+      # the app just disables the feature when these aren't all present.
+      PLEX_URL: ${PLEX_URL:-}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+      PLEX_SECTION_ID: ${PLEX_SECTION_ID:-}
+      PLEX_LIBRARY_ROOT: ${PLEX_LIBRARY_ROOT:-}
     volumes:
       # Transmission's completed-downloads share (read-only: we only copy from here).
       # Mounted at /downloads to match Transmission's own internal path.

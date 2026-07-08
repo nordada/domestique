@@ -194,6 +194,44 @@ rebuild needed. Minimal example:
   something different from the folder name (this is how the HIGHLIGHTS
   shows keep the base show's name in the file itself).
 
+### 4. Optional: Plex partial-scan
+
+By default Plex only notices new files on its own scan schedule. Set these
+in `.env` to have the archiver tell Plex to rescan just the one season
+folder that changed, right after each successful copy — not the whole
+racing library, and not any of your other Plex libraries:
+
+```
+PLEX_URL=http://192.168.1.24:32400
+PLEX_TOKEN=<your token>
+PLEX_SECTION_ID=<the racing library's section id>
+```
+
+**Finding your Plex token**: sign into the Plex web app, open any item's
+"..." menu → "Get Info" → "View XML" — the URL that opens contains
+`X-Plex-Token=...` in its query string; copy that value. (Plex's own
+support site documents a couple of other ways to find this too, if that
+one doesn't work for your Plex version.)
+
+**Finding your section id**, once you have the token:
+```
+curl "http://192.168.1.24:32400/library/sections?X-Plex-Token=<your token>"
+```
+This returns XML listing every library; find the racing one and use its
+`key` attribute as `PLEX_SECTION_ID`.
+
+**If Plex runs in its own Docker container**, it may mount the same host
+share at a different internal path than this container does — the exact
+same category of issue as Transmission's `/downloads` mapping earlier in
+this README. If so, also set `PLEX_LIBRARY_ROOT` in `.env` to the library
+root as Plex's own container sees it (check Plex's Docker template path
+mappings in the Unraid UI). Leave it unset if Plex sees the identical path.
+
+Leaving `PLEX_URL`/`PLEX_TOKEN`/`PLEX_SECTION_ID` unset disables this
+entirely — nothing else about the archiver changes, and startup logs will
+say `plex refresh: disabled`. A failed Plex refresh is only ever logged as
+a warning; it never affects whether a file gets archived.
+
 ## Known limitations / assumptions (check these against reality as you go)
 
 - **UCI XCC/XCO World Cup** isn't in `config/shows.json` yet — it wasn't in

@@ -1,13 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { join } from "node:path";
 import { loadConfig, saveConfig, DEFAULT_CONFIG_PATH } from "./config.js";
 import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems } from "./fileops.js";
+import { plexConfigFromEnv, refreshPlexFolder, type PlexConfig } from "./plex.js";
 
 export interface ServerOptions {
   port: number;
   libraryRoot: string;
   configPath: string;
+  plex: PlexConfig | null;
 }
 
 interface TorrentDonePayload {
@@ -36,6 +39,7 @@ async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOption
 
   const config = loadConfig(opts.configPath);
   let configDirty = false;
+  const changedFolders = new Set<string>();
 
   const items = await resolveSourceItems(payload.dir, payload.name);
   console.log(`[torrent-done] "${payload.name}" -> ${items.length} file(s) to process`);
@@ -75,6 +79,10 @@ async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOption
       console.warn(`[quality] ${outcome.warning}`);
     }
 
+    if (outcome.status === "copied") {
+      changedFolders.add(join(opts.libraryRoot, plan.destDir));
+    }
+
     console.log(
       `[${outcome.status}] ${item.sourceFile} -> ${plan.destDir}/${plan.destFilename}`
     );
@@ -89,6 +97,17 @@ async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOption
 
   if (configDirty) {
     saveConfig(config, opts.configPath);
+  }
+
+  if (opts.plex && changedFolders.size > 0) {
+    for (const folder of changedFolders) {
+      try {
+        await refreshPlexFolder(opts.plex, opts.libraryRoot, folder);
+        console.log(`[plex] refreshed "${folder}"`);
+      } catch (err) {
+        console.warn(`[plex] failed to refresh "${folder}": ${err}`);
+      }
+    }
   }
 
   return results;
@@ -136,5 +155,7 @@ export function optionsFromEnv(): ServerOptions {
     throw new Error("LIBRARY_ROOT environment variable is required (Plex library root path)");
   }
 
-  return { port, libraryRoot, configPath };
+  const plex = plexConfigFromEnv(libraryRoot);
+
+  return { port, libraryRoot, configPath, plex };
 }
