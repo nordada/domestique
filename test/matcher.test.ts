@@ -49,7 +49,7 @@ test("matches underscore/dash/bracket Worlds naming variants to World Championsh
   }
 });
 
-test("auto-creates an unrecognized race (UCI World Cup) instead of failing", () => {
+test("auto-creates an unrecognized race with no stage number as one-day", () => {
   const config = freshConfig();
   const before = config.shows.length;
   const p = parseName(REAL_SOURCE_NAMES.uciXccWorldCup);
@@ -57,4 +57,16 @@ test("auto-creates an unrecognized race (UCI World Cup) instead of failing", () 
   assert.equal(m.autoCreated, true);
   assert.equal(m.show.type, "one-day");
   assert.equal(config.shows.length, before + 1);
+});
+
+test("auto-creates an unrecognized race with a stage number as stage-race, not one-day", () => {
+  // Regression test: this exact class of bug happened for real with Tour de
+  // Suisse Women's highlights before that show had a config entry — a
+  // one-day auto-create discarded the stage number, silently collapsing
+  // every stage's highlights onto the same S..E01 filename.
+  const config = freshConfig();
+  const p = parseName("Some-Unknown-Race-2026-Stage-03-Highlights-(576p)");
+  const m = matchShow(p, config);
+  assert.equal(m.autoCreated, true);
+  assert.equal(m.show.type, "stage-race");
 });

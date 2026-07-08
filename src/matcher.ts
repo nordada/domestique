@@ -106,10 +106,17 @@ export function matchShow(parsed: ParsedName, config: ShowsConfigFile): MatchRes
     };
   }
 
-  // Best-effort auto-create: guess a display name from the leftover tokens and
-  // file it as a new one-day show. Logged loudly so the user can clean up the
-  // config/folder afterward (rename, reclassify as stage-race, merge into an
-  // existing show, etc).
+  // Best-effort auto-create: guess a display name from the leftover tokens
+  // and file it under a new show. Logged loudly so the user can clean up the
+  // config/folder afterward (rename, merge into an existing show, etc).
+  //
+  // Type defaults to "stage-race" whenever a stage number was actually
+  // parsed, rather than always "one-day" — a one-day show always files as
+  // E01 with no title, which would otherwise silently collapse every stage
+  // of an unrecognized stage race onto the same filename (this is exactly
+  // what happened with Tour de Suisse Women's highlights before this show
+  // had its own config entry: stage number got discarded and later stages
+  // collided with/overwrote earlier ones).
   const guessedName =
     titleCaseFromTokens(parsed.tokens) || `Unrecognized Race ${++autoCreateCounter}`;
   const id = guessedName
@@ -124,7 +131,7 @@ export function matchShow(parsed: ParsedName, config: ShowsConfigFile): MatchRes
     matchKeywords: [
       parsed.tokens.filter((t) => !NOISE_TOKENS.has(t) && !/^\d+$/.test(t)).join(" "),
     ],
-    type: "one-day",
+    type: parsed.stageNum !== null ? "stage-race" : "one-day",
     isHighlights: parsed.isHighlights || undefined,
     autoCreated: true,
   };

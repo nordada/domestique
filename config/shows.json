@@ -69,6 +69,7 @@
     { "id": "tour-de-suisse", "folderName": "Tour de Suisse", "matchKeywords": ["tour de suisse"], "type": "stage-race" },
     { "id": "tour-de-suisse-highlights", "folderName": "Tour de Suisse HIGHLIGHTS", "filenamePrefix": "Tour de Suisse", "matchKeywords": ["tour de suisse"], "isHighlights": true, "type": "stage-race" },
     { "id": "tour-de-suisse-women", "folderName": "Tour de Suisse Women", "matchKeywords": ["tour de suisse women", "tour de suisse femmes"], "type": "stage-race" },
+    { "id": "tour-de-suisse-women-highlights", "folderName": "Tour de Suisse Women HIGHLIGHTS", "filenamePrefix": "Tour de Suisse Women", "matchKeywords": ["tour de suisse women", "tour de suisse femmes"], "isHighlights": true, "type": "stage-race" },
     { "id": "tour-de-lain", "folderName": "Tour de l'Ain", "matchKeywords": ["tour de lain", "tour de l ain"], "type": "stage-race" },
     { "id": "tour-de-lavenir", "folderName": "Tour de l'Avenir", "matchKeywords": ["tour de lavenir", "tour de l avenir"], "type": "stage-race" },
     { "id": "tour-de-lavenir-femme", "folderName": "Tour de l'Avenir Femme", "matchKeywords": ["tour de lavenir femme", "tour de l avenir femme", "avenir femme"], "type": "stage-race" },
