@@ -10,6 +10,8 @@ export interface ParsedName {
   partNum: number | null;
   /** total part count, when known (present in "(Part-N-of-M)" style, absent in bare "PartN" style) */
   partTotal: number | null;
+  /** vertical resolution in pixels, e.g. 1080 for "1080p"; null if not present in the name */
+  resolution: number | null;
   isHighlights: boolean;
   isTeamPresentation: boolean;
   isRoutePresentation: boolean;
@@ -92,6 +94,14 @@ export function parseName(rawInput: string): ParsedName {
     }
   }
 
+  // Resolution: "720p", "1080p", "2160p" — always its own token in real data
+  // (never glued to a neighboring word like year sometimes is), so \b is safe.
+  const resolutionExtraction = extractAndRemove(working, /(\d{3,4})p\b/i);
+  working = resolutionExtraction.working;
+  const resolution = resolutionExtraction.match
+    ? parseInt(resolutionExtraction.match[1], 10)
+    : null;
+
   // Merge "u 23" / "u-23" / "u_23" -> "u23" before splitting, same for u19, so they survive as one token.
   working = working.replace(/u[\s_-]?23\b/gi, "u23");
   working = working.replace(/u[\s_-]?19\b/gi, "u19");
@@ -111,6 +121,7 @@ export function parseName(rawInput: string): ParsedName {
     stageNum,
     partNum,
     partTotal,
+    resolution,
     isHighlights,
     isTeamPresentation,
     isRoutePresentation,
@@ -135,6 +146,7 @@ export function mergeParsed(folder: ParsedName, file: ParsedName): ParsedName {
     stageNum: file.stageNum ?? folder.stageNum,
     partNum: file.partNum ?? folder.partNum,
     partTotal: file.partTotal ?? folder.partTotal,
+    resolution: file.resolution ?? folder.resolution,
     isHighlights: file.isHighlights || folder.isHighlights,
     isTeamPresentation: file.isTeamPresentation || folder.isTeamPresentation,
     isRoutePresentation: file.isRoutePresentation || folder.isRoutePresentation,

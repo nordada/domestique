@@ -6,6 +6,8 @@ export interface DestinationPlan {
   /** path relative to the Plex library root, e.g. "Tour de France/Season 2026" */
   destDir: string;
   destFilename: string;
+  /** episode number this file was filed under, e.g. 0 for specials, 1 for one-day races */
+  episode: number;
   warning: string | null;
 }
 
@@ -117,6 +119,7 @@ export async function buildDestination(
         return {
           destDir,
           destFilename: buildFilename(prefix, parsed.year, 0, "Team Presentation", parsed.partNum, parsed.partTotal, ext),
+          episode: 0,
           warning,
         };
       }
@@ -124,6 +127,7 @@ export async function buildDestination(
         return {
           destDir,
           destFilename: buildFilename(prefix, parsed.year, 0, "Route Presentation", parsed.partNum, parsed.partTotal, ext),
+          episode: 0,
           warning,
         };
       }
@@ -131,6 +135,7 @@ export async function buildDestination(
         return {
           destDir,
           destFilename: buildFilename(prefix, parsed.year, 1, null, parsed.partNum, parsed.partTotal, ext),
+          episode: 1,
           warning: `No stage number found in "${parsed.raw}" for stage-race show "${show.id}"; defaulted to E01 with no title.`,
         };
       }
@@ -145,6 +150,7 @@ export async function buildDestination(
           parsed.partTotal,
           ext
         ),
+        episode: parsed.stageNum,
         warning,
       };
     }
@@ -153,6 +159,7 @@ export async function buildDestination(
       return {
         destDir,
         destFilename: buildFilename(prefix, parsed.year, 1, null, parsed.partNum, parsed.partTotal, ext),
+        episode: 1,
         warning,
       };
     }
@@ -163,6 +170,7 @@ export async function buildDestination(
         return {
           destDir,
           destFilename: buildFilename(prefix, parsed.year, category.episode, category.title, parsed.partNum, parsed.partTotal, ext),
+          episode: category.episode,
           warning,
         };
       }
@@ -172,6 +180,7 @@ export async function buildDestination(
       return {
         destDir,
         destFilename: buildFilename(prefix, parsed.year, episode, title, parsed.partNum, parsed.partTotal, ext),
+        episode,
         warning: `"${parsed.raw}" didn't match any configured category for show "${show.id}"; assigned dynamically as "${title}" (E${pad2(episode)}). Consider adding this category to config/shows.json.`,
       };
     }
@@ -182,6 +191,7 @@ export async function buildDestination(
       return {
         destDir,
         destFilename: buildFilename(prefix, parsed.year, episode, title, parsed.partNum, parsed.partTotal, ext),
+        episode,
         warning,
       };
     }

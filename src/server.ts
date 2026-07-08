@@ -65,8 +65,14 @@ async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOption
       item.sourceFile,
       opts.libraryRoot,
       plan.destDir,
-      plan.destFilename
+      plan.destFilename,
+      plan.episode,
+      item.parsed.resolution
     );
+
+    if (outcome.status === "copied" && outcome.warning) {
+      console.warn(`[quality] ${outcome.warning}`);
+    }
 
     console.log(
       `[${outcome.status}] ${item.sourceFile} -> ${plan.destDir}/${plan.destFilename}`
@@ -76,7 +82,7 @@ async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOption
       sourceFile: item.sourceFile,
       status: outcome.status,
       destPath: outcome.destPath,
-      warning: plan.warning,
+      warning: plan.warning ?? (outcome.status === "copied" ? outcome.warning : outcome.reason),
     });
   }
 

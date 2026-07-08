@@ -21,6 +21,15 @@ test("falls back to the current year when none is present", () => {
   assert.deepEqual(p.tokens.sort(), ["sbs", "tdf"]);
 });
 
+test("extracts resolution when present, null when absent", () => {
+  const withRes = parseName(REAL_SOURCE_NAMES.tdfStage01Part1);
+  assert.equal(withRes.resolution, 720);
+  assert.ok(!withRes.tokens.includes("720p"));
+
+  const withoutRes = parseName(REAL_SOURCE_NAMES.tdfStage01Sbs);
+  assert.equal(withoutRes.resolution, null);
+});
+
 test("extracts part-with-total from (Part-N-of-M) style names", () => {
   const p = parseName(REAL_SOURCE_NAMES.tdfStage01Part1);
   assert.equal(p.year, 2026);

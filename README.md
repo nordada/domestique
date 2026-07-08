@@ -24,6 +24,35 @@ directory — everything is copied, so seeding is unaffected.
    the file in (`src/fileops.ts`), writing to a `.tmp` sibling and renaming
    into place so Plex never sees a half-copied file.
 
+## Handling re-releases of the same race
+
+Private trackers often ship the same event more than once — a low-quality
+grab that beats the RSS feed, followed by a proper release, or just a
+different group's version. Since destination filenames don't encode
+resolution (they stay clean, matching your existing convention), each
+season folder gets a hidden `.archiver-meta.json` sidecar (invisible to
+Plex) that remembers what resolution was archived per episode, parsed from
+the *source* torrent name (e.g. `720p`, `1080p`) — not measured from the
+actual video.
+
+When a new file arrives for an episode that's already archived:
+- **Same or unknown resolution on either side** → treated as a normal
+  continuation (e.g. the next part of a multi-part release still trickling
+  in) and copied normally.
+- **Lower resolution** than what's already archived → skipped, logged as a
+  warning.
+- **Higher resolution** → filed *alongside* the existing file(s) with a
+  `(REVIEW - possible 1080p upgrade)` suffix on the filename, plus a logged
+  warning. **Nothing is ever auto-deleted** — you decide whether to keep the
+  upgrade and manually remove the old lower-res file(s). The sidecar keeps
+  remembering the *original* resolution (not the reviewed one) until you
+  clean up, so repeated arrivals keep getting flagged rather than silently
+  drifting.
+
+This only works when the source name actually carries a resolution tag —
+if it doesn't, comparison is skipped and the file is copied without any
+quality judgment (see Known limitations below).
+
 ## Filename convention (new downloads only — existing seasons are untouched)
 
 - Stage race: `Show - SYYYYEnn - Stage n.ext` (or `- pt01.ext` per part).
@@ -148,6 +177,17 @@ rebuild needed. Minimal example:
   existing filenames to avoid collisions/reuse the right number — if you
   manually rename files in a Nationals season folder, keep the `- Country
   Gender Discipline.ext` shape intact or the scanner won't recognize them.
+- Resolution-based upgrade detection (see above) only fires when the source
+  torrent name actually contains a resolution tag. A release with no
+  resolution in its name is filed with no quality comparison at all, so a
+  worse re-release could still slip in alongside a better one undetected if
+  neither name states its resolution. It also trusts the tracker's stated
+  resolution rather than probing the actual video file.
+- If you manually delete an old lower-resolution file after reviewing an
+  upgrade, the `.archiver-meta.json` sidecar still remembers the old
+  resolution until you edit or delete that entry — harmless (worst case is
+  an unnecessary future review flag), but worth knowing if the flagging
+  seems to "stick" after cleanup.
 
 ## Testing
 
@@ -160,7 +200,9 @@ npm test
 library while designing the tool; `parser.test.ts`, `matcher.test.ts`, and
 `namer.test.ts` exercise the pipeline against them, including the exact
 Tour de France / World Championships / Nationals destination examples this
-tool was built to reproduce.
+tool was built to reproduce. `fileops.test.ts` covers the resolution-aware
+copy/skip/review-upgrade behavior against real scratch directories (no
+mocking of the filesystem).
 
 For an end-to-end check without touching real data: `docker compose up
 --build`, then `curl` the webhook directly:
