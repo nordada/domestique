@@ -9,9 +9,15 @@
 # This just relays that as JSON to the archiver's webhook; all the real
 # parsing/matching/copying logic lives there.
 #
-# ARCHIVER_URL defaults to the bike-race-archiver container's default port;
-# override it (e.g. via Transmission's own environment) if you changed PORT
-# or are reaching it through a different hostname.
+# ARCHIVER_URL lives in torrent-done.env, next to this script (copy
+# torrent-done.env.example to torrent-done.env and fill it in — see that
+# file for why a plain env var on Transmission's own container usually
+# doesn't work here).
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -f "$SCRIPT_DIR/torrent-done.env" ]; then
+  . "$SCRIPT_DIR/torrent-done.env"
+fi
 
 ARCHIVER_URL="${ARCHIVER_URL:-http://bike-race-archiver:8420/webhook/torrent-done}"
 

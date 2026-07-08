@@ -45,7 +45,28 @@ directory — everything is copied, so seeding is unaffected.
 
 ## Setup
 
-### 1. Configure Transmission
+All host-specific values (paths, IPs, port) live in two `.env` files, never
+committed to git — copy the `.example` versions and fill them in.
+
+### 1. Configure the archiver itself
+
+```
+cp .env.example .env
+```
+
+Edit `.env` and set `LIBRARY_ROOT`, `DOWNLOADS_DIR`, and `PORT` to match your
+setup (defaults match this project's original `/mnt/user/fastARCHIVE-seeding/complete`
+and `/mnt/user/towerMEDIAracing/2021_plex_library`). Then:
+
+```
+docker compose up -d --build
+```
+
+`docker-compose.yml` reads `.env` automatically — nothing else to edit there.
+Verify it's up: `curl http://localhost:8420/health` should return
+`{"status":"ok"}`.
+
+### 2. Configure Transmission's hook script
 
 In Transmission's `settings.json`:
 
@@ -54,26 +75,25 @@ In Transmission's `settings.json`:
 "script-torrent-done-filename": "/path/to/torrent-done.sh"
 ```
 
-Copy `scripts/torrent-done.sh` to wherever Transmission can read it (inside
-its own container if that's where it runs), `chmod +x` it, and set
-`ARCHIVER_URL` (env var, or edit the default in the script) to point at this
-app's `/webhook/torrent-done` endpoint.
+Copy `scripts/torrent-done.sh` **and** `scripts/torrent-done.env.example`
+to wherever Transmission can read them (inside its own container if that's
+where it runs), then:
+
+```
+cp torrent-done.env.example torrent-done.env
+chmod +x torrent-done.sh
+```
+
+Edit `torrent-done.env` and set `ARCHIVER_URL` — since Transmission and
+`bike-race-archiver` are separate containers not on the same Docker network,
+this needs to be TOWER's LAN IP (not a container name), e.g.
+`http://192.168.1.50:8420/webhook/torrent-done`, using the same `PORT` you
+set in the archiver's `.env`.
 
 **Path consistency matters**: the `dir` Transmission reports has to resolve
 to the same file both inside Transmission's container and inside this one.
 See the comment at the top of `docker-compose.yml` for the recommended
 identity-path-mapping approach.
-
-### 2. Run the archiver
-
-```
-docker compose up -d --build
-```
-
-Edit `docker-compose.yml` first to point `LIBRARY_ROOT` and the volume
-mounts at your actual paths if they differ from the defaults (which match
-this setup's `/mnt/user/fastARCHIVE-seeding/complete` and
-`/mnt/user/towerMEDIAracing/2021_plex_library`).
 
 ### 3. Add a new show
 

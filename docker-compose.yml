@@ -1,5 +1,8 @@
 # Example compose file for running bike-race-archiver on Unraid (TOWER).
 #
+# All host-specific values (paths, port) live in .env, not here — copy
+# .env.example to .env and fill it in before running `docker compose up`.
+#
 # IMPORTANT: the "dir" value Transmission passes to torrent-done.sh (via
 # TR_TORRENT_DIR) has to resolve to the same file inside THIS container as it
 # does inside Transmission's own container. The easiest way to guarantee that
@@ -14,15 +17,15 @@ services:
     container_name: bike-race-archiver
     restart: unless-stopped
     ports:
-      - "8420:8420"
+      - "${PORT}:${PORT}"
     environment:
-      LIBRARY_ROOT: /mnt/user/towerMEDIAracing/2021_plex_library
-      CONFIG_PATH: /app/config/shows.json
-      PORT: "8420"
+      LIBRARY_ROOT: ${LIBRARY_ROOT}
+      CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
+      PORT: "${PORT}"
     volumes:
       # Transmission's completed-downloads directory (read-only: we only copy from here).
-      - /mnt/user/fastARCHIVE-seeding/complete:/mnt/user/fastARCHIVE-seeding/complete:ro
+      - ${DOWNLOADS_DIR}:${DOWNLOADS_DIR}:ro
       # Plex library root (read-write: this is where renamed files land).
-      - /mnt/user/towerMEDIAracing/2021_plex_library:/mnt/user/towerMEDIAracing/2021_plex_library
+      - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.
-      - ./config/shows.json:/app/config/shows.json
+      - ./config/shows.json:${CONFIG_CONTAINER_PATH}
