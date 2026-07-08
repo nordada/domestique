@@ -36,4 +36,4 @@ PAYLOAD=$(printf '{"dir":"%s","name":"%s","id":"%s","hash":"%s"}' \
 curl -sS -m 300 -X POST "$ARCHIVER_URL" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" \
-  >> /var/log/bike-race-archiver-hook.log 2>&1 || true
+  >> "$SCRIPT_DIR/torrent-done.log" 2>&1 || true
