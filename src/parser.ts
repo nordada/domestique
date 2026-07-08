@@ -12,6 +12,8 @@ export interface ParsedName {
   partTotal: number | null;
   /** vertical resolution in pixels, e.g. 1080 for "1080p"; null if not present in the name */
   resolution: number | null;
+  /** broadcaster/commentary source (canonical display form, e.g. "Eurosport"), when recognized */
+  broadcaster: string | null;
   isHighlights: boolean;
   isTeamPresentation: boolean;
   isRoutePresentation: boolean;
@@ -30,6 +32,29 @@ const TOKEN_ALIASES: Record<string, string> = {
   female: "women",
   juniors: "junior",
   itt: "tt",
+};
+
+/**
+ * Known broadcaster/commentary sources, mapped to their canonical display
+ * form for use in "alternate version" filenames (see fileops.ts). Extend
+ * this list as new ones show up in your tracker's release names — it's a
+ * small, slowly-changing set, unlike race names, so it lives here rather
+ * than in config/shows.json.
+ */
+const BROADCASTER_TOKENS: Record<string, string> = {
+  eurosport: "Eurosport",
+  sbs: "SBS",
+  tnt: "TNT",
+  rcs: "RCS",
+  gcn: "GCN",
+  nbc: "NBC",
+  itv4: "ITV4",
+  flobikes: "FloBikes",
+  ucichannel: "UCI Channel",
+  nos: "NOS",
+  sporza: "Sporza",
+  rai: "RAI",
+  francetv: "France TV",
 };
 
 const COMBINING_DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
@@ -114,6 +139,14 @@ export function parseName(rawInput: string): ParsedName {
   const tokens = rawTokens.map((t) => TOKEN_ALIASES[t] ?? t);
   const tokenSet = new Set(tokens);
 
+  let broadcaster: string | null = null;
+  for (const [token, label] of Object.entries(BROADCASTER_TOKENS)) {
+    if (tokenSet.has(token)) {
+      broadcaster = label;
+      break;
+    }
+  }
+
   return {
     raw,
     year,
@@ -122,6 +155,7 @@ export function parseName(rawInput: string): ParsedName {
     partNum,
     partTotal,
     resolution,
+    broadcaster,
     isHighlights,
     isTeamPresentation,
     isRoutePresentation,
@@ -147,6 +181,7 @@ export function mergeParsed(folder: ParsedName, file: ParsedName): ParsedName {
     partNum: file.partNum ?? folder.partNum,
     partTotal: file.partTotal ?? folder.partTotal,
     resolution: file.resolution ?? folder.resolution,
+    broadcaster: file.broadcaster ?? folder.broadcaster,
     isHighlights: file.isHighlights || folder.isHighlights,
     isTeamPresentation: file.isTeamPresentation || folder.isTeamPresentation,
     isRoutePresentation: file.isRoutePresentation || folder.isRoutePresentation,

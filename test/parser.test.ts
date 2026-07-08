@@ -13,6 +13,17 @@ test("extracts year glued directly onto a prefix (tdf2026-...)", () => {
   assert.ok(!p.tokens.includes("2026"));
 });
 
+test("detects known broadcaster tokens with their canonical display form", () => {
+  const sbs = parseName(REAL_SOURCE_NAMES.tdfStage01Sbs);
+  assert.equal(sbs.broadcaster, "SBS");
+
+  const eurosport = parseName("tour.de.france.2026.stage04.eurosport.highlights.1080p");
+  assert.equal(eurosport.broadcaster, "Eurosport");
+
+  const unknown = parseName("Tour-de-France-2026-Stage-01");
+  assert.equal(unknown.broadcaster, null);
+});
+
 test("falls back to the current year when none is present", () => {
   const p = parseName(REAL_SOURCE_NAMES.tdfStage01Sbs);
   assert.equal(p.yearWasExplicit, false);

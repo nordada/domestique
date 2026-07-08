@@ -40,7 +40,8 @@ test("quality-aware copy: multi-part same-resolution files land normally, no rev
     destDir,
     "TestShow - S2026E01 - Stage 1 - pt01.mp4",
     1,
-    720
+    720,
+    null
   );
   assertCopied(out1);
 
@@ -51,7 +52,8 @@ test("quality-aware copy: multi-part same-resolution files land normally, no rev
     destDir,
     "TestShow - S2026E01 - Stage 1 - pt02.mp4",
     1,
-    720
+    720,
+    null
   );
   assertCopied(out2);
   assert.equal(out2.warning, undefined);
@@ -67,8 +69,8 @@ test("quality-aware copy: exact duplicate destination is skipped", async () => {
   const destDir = "TestShow/Season 2026";
   const src = await makeSourceFile(sourceDir, "a.mp4");
 
-  await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, 720);
-  const second = await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, 720);
+  await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, 720, null);
+  const second = await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, 720, null);
 
   assertSkipped(second);
   assert.match(second.reason, /already exists/);
@@ -84,7 +86,8 @@ test("quality-aware copy: lower-resolution re-release for an archived episode is
     destDir,
     "TestShow - S2026E01 - Stage 1 - pt01.mp4",
     1,
-    720
+    720,
+    null
   );
 
   // Different release shape (no part suffix) for the same episode, so it
@@ -95,14 +98,15 @@ test("quality-aware copy: lower-resolution re-release for an archived episode is
     destDir,
     "TestShow - S2026E01 - Stage 1.mp4",
     1,
-    480
+    480,
+    null
   );
 
   assertSkipped(lowRes);
   assert.match(lowRes.reason, /lower resolution/);
 });
 
-test("quality-aware copy: higher-resolution re-release is filed alongside with a REVIEW suffix, not deleted/overwritten", async () => {
+test("quality-aware copy: higher-resolution re-release is filed alongside with a REVIEW tag, not deleted/overwritten", async () => {
   const { libraryRoot, sourceDir } = await makeScratch();
   const destDir = "TestShow/Season 2026";
 
@@ -112,7 +116,8 @@ test("quality-aware copy: higher-resolution re-release is filed alongside with a
     destDir,
     "TestShow - S2026E01 - Stage 1 - pt01.mp4",
     1,
-    720
+    720,
+    null
   );
 
   const upgrade = await copyIntoLibrary(
@@ -121,7 +126,8 @@ test("quality-aware copy: higher-resolution re-release is filed alongside with a
     destDir,
     "TestShow - S2026E01 - Stage 1.mp4",
     1,
-    1080
+    1080,
+    null
   );
 
   assertCopied(upgrade);
@@ -152,6 +158,7 @@ test("quality-aware copy: unknown resolution on either side copies normally", as
     destDir,
     "TestShow - S2026E01 - Stage 1.mp4",
     1,
+    null,
     null
   );
 
@@ -161,9 +168,158 @@ test("quality-aware copy: unknown resolution on either side copies normally", as
     destDir,
     "TestShow - S2026E01 - Stage 1 - pt01.mp4",
     1,
-    720
+    720,
+    null
   );
 
   assertCopied(second);
   assert.equal(second.warning, undefined);
+});
+
+test("alternate versions: same broadcaster's next part lands clean, no tag", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+
+  await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "pt01.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt01.mp4",
+    1,
+    720,
+    "Eurosport"
+  );
+
+  const part2 = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "pt02.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt02.mp4",
+    1,
+    720,
+    "Eurosport"
+  );
+
+  assertCopied(part2);
+  assert.equal(part2.destPath, join(libraryRoot, destDir, "TestShow - S2026E01 - Stage 1 - pt02.mp4"));
+  assert.equal(part2.warning, undefined);
+});
+
+test("alternate versions: a different broadcaster at the same resolution is filed as a tagged alternate", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+
+  await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "sbs.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    720,
+    "SBS"
+  );
+
+  // Different release shape so it doesn't collide on the exact destPath and
+  // actually reaches the broadcaster comparison.
+  const alt = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "euro.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt01.mp4",
+    1,
+    720,
+    "Eurosport"
+  );
+
+  assertCopied(alt);
+  assert.equal(
+    alt.destPath,
+    join(libraryRoot, destDir, "TestShow - S2026E01 - Stage 1 - Eurosport - pt01.mp4")
+  );
+  assert.match(alt.warning ?? "", /alternate version \(Eurosport\)/);
+  assert.match(alt.warning ?? "", /existing SBS version/);
+
+  // Original SBS file must still be there.
+  const original = await fs.stat(
+    join(libraryRoot, destDir, "TestShow - S2026E01 - Stage 1.mp4")
+  );
+  assert.ok(original.isFile());
+
+  const meta = JSON.parse(
+    await fs.readFile(join(libraryRoot, destDir, ".archiver-meta.json"), "utf-8")
+  );
+  assert.deepEqual(meta.E01.broadcasters, ["SBS", "Eurosport"]);
+});
+
+test("alternate versions: a second part of an already-recognized alternate keeps its own tag, no extra warning", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+
+  await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "sbs-pt01.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt01.mp4",
+    1,
+    720,
+    "SBS"
+  );
+  await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "euro-pt01.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt01.mp4",
+    1,
+    720,
+    "Eurosport"
+  );
+
+  // Eurosport's second part arrives later.
+  const euroPart2 = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "euro-pt02.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt02.mp4",
+    1,
+    720,
+    "Eurosport"
+  );
+
+  assertCopied(euroPart2);
+  assert.equal(
+    euroPart2.destPath,
+    join(libraryRoot, destDir, "TestShow - S2026E01 - Stage 1 - Eurosport - pt02.mp4")
+  );
+});
+
+test("alternate versions: unknown broadcaster on the new item never creates a tagged alternate", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+
+  await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "sbs.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    720,
+    "SBS"
+  );
+
+  const unknown = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "plain.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt01.mp4",
+    1,
+    720,
+    null
+  );
+
+  assertCopied(unknown);
+  assert.equal(
+    unknown.destPath,
+    join(libraryRoot, destDir, "TestShow - S2026E01 - Stage 1 - pt01.mp4")
+  );
+  assert.equal(unknown.warning, undefined);
 });

@@ -67,7 +67,8 @@ async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOption
       plan.destDir,
       plan.destFilename,
       plan.episode,
-      item.parsed.resolution
+      item.parsed.resolution,
+      item.parsed.broadcaster
     );
 
     if (outcome.status === "copied" && outcome.warning) {

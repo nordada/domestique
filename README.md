@@ -36,22 +36,55 @@ the *source* torrent name (e.g. `720p`, `1080p`) — not measured from the
 actual video.
 
 When a new file arrives for an episode that's already archived:
-- **Same or unknown resolution on either side** → treated as a normal
-  continuation (e.g. the next part of a multi-part release still trickling
-  in) and copied normally.
 - **Lower resolution** than what's already archived → skipped, logged as a
   warning.
 - **Higher resolution** → filed *alongside* the existing file(s) with a
-  `(REVIEW - possible 1080p upgrade)` suffix on the filename, plus a logged
-  warning. **Nothing is ever auto-deleted** — you decide whether to keep the
-  upgrade and manually remove the old lower-res file(s). The sidecar keeps
-  remembering the *original* resolution (not the reviewed one) until you
-  clean up, so repeated arrivals keep getting flagged rather than silently
-  drifting.
+  `- REVIEW - possible 1080p upgrade` tag inserted into the filename (before
+  any part suffix), plus a logged warning. **Nothing is ever auto-deleted**
+  — you decide whether to keep the upgrade and manually remove the old
+  lower-res file(s). The sidecar keeps remembering the *original* resolution
+  (not the reviewed one) until you clean up, so repeated arrivals keep
+  getting flagged rather than silently drifting.
+- **Same (or unknown) resolution on both sides** → see "Alternate versions"
+  below — this is where broadcaster/commentary is used to tell a genuine
+  re-release apart from just the next part of the same release still
+  trickling in.
 
 This only works when the source name actually carries a resolution tag —
 if it doesn't, comparison is skipped and the file is copied without any
 quality judgment (see Known limitations below).
+
+## Alternate versions (different commentary/broadcaster)
+
+Sometimes the same race gets released more than once at the *same*
+resolution, just from a different broadcaster or with different commentary
+(Eurosport vs SBS vs RCS, etc — `src/parser.ts` recognizes a curated list of
+these and extend it there as new ones show up). Rather than treating that
+as either a duplicate (and skipping it) or blindly overwriting, it's filed
+as a selectable alternate version:
+
+- The **first** broadcaster seen for an episode is the "primary" and always
+  gets the clean, untagged filename, same as before this feature existed.
+- A **different** broadcaster arriving for the same episode at the same
+  resolution is filed *alongside* it with the broadcaster's name inserted
+  into the filename before any part suffix, e.g.:
+  `Tour de France - S2026E01 - Stage 1 - Eurosport - pt01.mp4`
+  next to the primary `Tour de France - S2026E01 - Stage 1 - pt01.mp4`.
+  All of that alternate's own parts (`pt02`, `pt03`, ...) keep the same tag
+  consistently, so a multi-part alternate version stays grouped together
+  under its own numbering.
+- Since both filenames still contain the same `S2026E01` episode marker,
+  Plex should recognize them as alternate versions of the same episode and
+  let you pick which to play, the same way it handles multiple versions of
+  a movie.
+- A **matching** broadcaster (or unknown broadcaster on either side) is
+  treated as a normal continuation of the same release — e.g. the next part
+  of a multi-part download still arriving — and copied under the clean
+  filename, exactly as before.
+
+This is tracked in the same `.archiver-meta.json` sidecar as resolution, so
+it only kicks in for releases the source name actually identifies a
+broadcaster for.
 
 ## Filename convention (new downloads only — existing seasons are untouched)
 
@@ -196,6 +229,20 @@ rebuild needed. Minimal example:
   resolution until you edit or delete that entry — harmless (worst case is
   an unnecessary future review flag), but worth knowing if the flagging
   seems to "stick" after cleanup.
+- Broadcaster detection (`src/parser.ts`'s `BROADCASTER_TOKENS`) is a fixed,
+  curated list — an unrecognized broadcaster is treated as "unknown," which
+  means a same-resolution re-release from a broadcaster not in that list
+  won't get tagged as an alternate; it'll just fall through to the normal
+  continuation/duplicate-skip path. Add new ones to that list as they show
+  up in your tracker's releases.
+- Nationals-style (`multi-category-dynamic`) shows have a narrow edge case
+  when combined with alternate versions: the dynamic episode-numbering scan
+  matches titles by exact filename text, so a tagged alternate filename
+  (e.g. "... - Eurosport") won't match the plain title text of the primary
+  version if you later reprocess that same category from scratch. In
+  practice this only matters if the *same* country/category/year gets two
+  different broadcaster releases for a Nationals-type show — narrow enough
+  that it's left as a known gap rather than adding more regex complexity.
 
 ## Testing
 
@@ -209,7 +256,8 @@ library while designing the tool; `parser.test.ts`, `matcher.test.ts`, and
 `namer.test.ts` exercise the pipeline against them, including the exact
 Tour de France / World Championships / Nationals destination examples this
 tool was built to reproduce. `fileops.test.ts` covers the resolution-aware
-copy/skip/review-upgrade behavior against real scratch directories (no
+copy/skip/review-upgrade behavior and the broadcaster-based alternate-version
+logic (including multi-part alternates) against real scratch directories (no
 mocking of the filesystem).
 
 For an end-to-end check without touching real data: `docker compose up
