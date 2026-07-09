@@ -49,6 +49,18 @@ test("matches underscore/dash/bracket Worlds naming variants to World Championsh
   }
 });
 
+test("routes Giro d'Italia Donna highlights to the women's show, not the men's", () => {
+  // Regression test: this exact bug happened for real — the Giro Donne
+  // highlights entry didn't exist yet, and matching is subset-based (extra
+  // unmatched tokens don't disqualify a candidate), so a "Giro d'Italia
+  // Donna" release satisfied the men's "giro ditalia" keywords and silently
+  // filed into the men's HIGHLIGHTS folder.
+  const p = parseName(REAL_SOURCE_NAMES.girodItaliaDonnaHighlightsStage7);
+  const m = matchShow(p, freshConfig());
+  assert.equal(m.show.id, "giro-donne-highlights");
+  assert.equal(m.autoCreated, false);
+});
+
 test("auto-creates an unrecognized race with no stage number as one-day", () => {
   const config = freshConfig();
   const before = config.shows.length;

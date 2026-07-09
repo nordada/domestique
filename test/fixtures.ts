@@ -25,6 +25,9 @@ export const REAL_SOURCE_NAMES = {
   worldsWomenU23Dash: "world-championships-road-2025-women-u23-ucichannel",
   tdfHighlights: "tdf2026-stage04-tnt-highlights-1080p-50fps",
   parisRoubaix2018Part1: "PaisRoubaix_2018_SBS_HD_Part1",
+  bareOfStage1Part1: "Tour ARA 2026 - stage 1 1of2",
+  bareOfStage1Part2: "Tour ARA 2026 - stage 1 2of2",
+  girodItaliaDonnaHighlightsStage7: "Giro-d'Italia-Donna-Stage-07-Highlights-2026-(576p)",
 };
 
 export const REAL_DEST_EXAMPLES = {

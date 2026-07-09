@@ -65,6 +65,29 @@ test("extracts bare PartN with no known total (legacy Paris-Roubaix style)", () 
   assert.equal(p.year, 2018);
 });
 
+test("extracts bare 'NofM' with no 'part' keyword at all", () => {
+  // Regression test: this exact bug happened for real — a tracker split a
+  // stage into "... 1of2" / "... 2of2" with no "part" prefix, so neither
+  // file's part number was recognized and the leftover "1of2"/"2of2" tokens
+  // leaked into auto-create name-guessing, splitting one stage into two
+  // separate shows.
+  const p1 = parseName(REAL_SOURCE_NAMES.bareOfStage1Part1);
+  const p2 = parseName(REAL_SOURCE_NAMES.bareOfStage1Part2);
+  assert.equal(p1.stageNum, 1);
+  assert.equal(p1.partNum, 1);
+  assert.equal(p1.partTotal, 2);
+  assert.ok(!p1.tokens.includes("1of2"));
+  assert.equal(p2.partNum, 2);
+  assert.equal(p2.partTotal, 2);
+  assert.deepEqual(p1.tokens.sort(), p2.tokens.sort());
+});
+
+test("aliases Italian singular 'donna' to the canonical 'donne' config already uses", () => {
+  const p = parseName(REAL_SOURCE_NAMES.girodItaliaDonnaHighlightsStage7);
+  assert.ok(p.tokenSet.has("donne"));
+  assert.ok(!p.tokenSet.has("donna"));
+});
+
 test("detects team and route presentation flags", () => {
   const team = parseName(REAL_SOURCE_NAMES.tdfTeamPresentation);
   assert.equal(team.isTeamPresentation, true);

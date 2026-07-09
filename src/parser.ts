@@ -30,6 +30,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   womens: "women",
   woman: "women",
   female: "women",
+  donna: "donne", // Italian singular "woman" -> the plural form config/shows.json standardizes on for Giro Donne
   juniors: "junior",
   itt: "tt",
 };
@@ -116,6 +117,15 @@ export function parseName(rawInput: string): ParsedName {
     working = partOnlyExtraction.working;
     if (partOnlyExtraction.match) {
       partNum = parseInt(partOnlyExtraction.match[1], 10);
+    } else {
+      // Bare "N of M" with no "part" keyword at all, e.g. "1of2", "2 of 2" —
+      // seen on some trackers for stages split across multiple video files.
+      const bareOfExtraction = extractAndRemove(working, /\b(\d+)[-_. ]?of[-_. ]?(\d+)\b/i);
+      working = bareOfExtraction.working;
+      if (bareOfExtraction.match) {
+        partNum = parseInt(bareOfExtraction.match[1], 10);
+        partTotal = parseInt(bareOfExtraction.match[2], 10);
+      }
     }
   }
 
