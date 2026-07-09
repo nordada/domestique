@@ -14,4 +14,4 @@ rsync -av \
   --exclude '.git' \
   --exclude '.DS_Store' \
   --exclude '.claude' \
-  ~/projects/domestique/ root@192.168.1.24:/mnt/user/appdata/bike-race-archiver/
+  ~/projects/domestique/ root@192.168.1.24:/mnt/user/appdata/domestique/
