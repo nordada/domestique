@@ -147,9 +147,16 @@ export function createApp(opts: ServerOptions) {
 }
 
 export function optionsFromEnv(): ServerOptions {
-  const port = parseInt(process.env.PORT ?? "8420", 10);
+  // "|| " rather than "?? " deliberately: docker-compose's "${VAR}" expands
+  // to an empty string (not an absent var) when VAR isn't set in .env, so
+  // "??" would never fall through and parseInt("", 10) would silently
+  // produce NaN. Same bug class that caused a real incident in
+  // hotfolderConfigFromEnv (see src/hotfolder.ts) — fixed here too even
+  // though PORT/CONFIG_PATH are normally always set, since NaN/empty here
+  // is just as dangerous if .env is ever incomplete.
+  const port = parseInt(process.env.PORT || "8420", 10);
   const libraryRoot = process.env.LIBRARY_ROOT;
-  const configPath = process.env.CONFIG_PATH ?? DEFAULT_CONFIG_PATH;
+  const configPath = process.env.CONFIG_PATH || DEFAULT_CONFIG_PATH;
 
   if (!libraryRoot) {
     throw new Error("LIBRARY_ROOT environment variable is required (Plex library root path)");

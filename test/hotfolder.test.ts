@@ -3,8 +3,106 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { updateStability, pollHotfolder, type HotfolderConfig } from "../src/hotfolder.js";
+import { updateStability, pollHotfolder, hotfolderConfigFromEnv, type HotfolderConfig } from "../src/hotfolder.js";
 import type { ServerOptions } from "../src/server.js";
+
+test("hotfolderConfigFromEnv: empty-string optional vars fall back to defaults, not NaN", () => {
+  // Regression test: this exact bug happened for real in production.
+  // docker-compose's "${HOTFOLDER_POLL_INTERVAL_MS:-}" expands to an empty
+  // string (not an absent var) when unset in .env, so a "??" fallback never
+  // triggered and parseInt("", 10) silently produced NaN. setInterval with
+  // a NaN delay fires at an effective ~1ms instead of the intended 60s,
+  // which hammered the filesystem with a tight polling loop.
+  const saved = {
+    HOTFOLDER_DIR: process.env.HOTFOLDER_DIR,
+    HOTFOLDER_POLL_INTERVAL_MS: process.env.HOTFOLDER_POLL_INTERVAL_MS,
+    HOTFOLDER_STABLE_POLLS: process.env.HOTFOLDER_STABLE_POLLS,
+  };
+  try {
+    process.env.HOTFOLDER_DIR = "/downloads/domestique";
+    process.env.HOTFOLDER_POLL_INTERVAL_MS = ""; // exactly what docker-compose passes when unset
+    process.env.HOTFOLDER_STABLE_POLLS = "";
+
+    const config = hotfolderConfigFromEnv();
+    assert.ok(config);
+    assert.equal(Number.isNaN(config!.pollIntervalMs), false);
+    assert.equal(Number.isNaN(config!.stablePolls), false);
+    assert.equal(config!.pollIntervalMs, 60000);
+    assert.equal(config!.stablePolls, 3);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("hotfolderConfigFromEnv: an invalid (non-numeric or non-positive) value also falls back, not NaN", () => {
+  const saved = {
+    HOTFOLDER_DIR: process.env.HOTFOLDER_DIR,
+    HOTFOLDER_POLL_INTERVAL_MS: process.env.HOTFOLDER_POLL_INTERVAL_MS,
+    HOTFOLDER_STABLE_POLLS: process.env.HOTFOLDER_STABLE_POLLS,
+  };
+  try {
+    process.env.HOTFOLDER_DIR = "/downloads/domestique";
+    process.env.HOTFOLDER_POLL_INTERVAL_MS = "not-a-number";
+    process.env.HOTFOLDER_STABLE_POLLS = "0";
+
+    const config = hotfolderConfigFromEnv();
+    assert.ok(config);
+    assert.equal(config!.pollIntervalMs, 60000);
+    assert.equal(config!.stablePolls, 3);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("hotfolderConfigFromEnv: a valid explicit value is honored", () => {
+  const saved = {
+    HOTFOLDER_DIR: process.env.HOTFOLDER_DIR,
+    HOTFOLDER_POLL_INTERVAL_MS: process.env.HOTFOLDER_POLL_INTERVAL_MS,
+    HOTFOLDER_STABLE_POLLS: process.env.HOTFOLDER_STABLE_POLLS,
+  };
+  try {
+    process.env.HOTFOLDER_DIR = "/downloads/domestique";
+    process.env.HOTFOLDER_POLL_INTERVAL_MS = "5000";
+    process.env.HOTFOLDER_STABLE_POLLS = "2";
+
+    const config = hotfolderConfigFromEnv();
+    assert.equal(config!.pollIntervalMs, 5000);
+    assert.equal(config!.stablePolls, 2);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("pollHotfolder: an entry that fails to stat with ENOENT doesn't throw or block others", async () => {
+  const { libraryRoot, hotfolderDir, configPath } = await makeScratch();
+  await writeMinimalConfig(configPath);
+
+  const config: HotfolderConfig = {
+    dir: hotfolderDir,
+    processedDir: join(hotfolderDir, "processed"),
+    pollIntervalMs: 1,
+    stablePolls: 2,
+  };
+  const opts = makeOpts(libraryRoot, configPath);
+  const state = new Map();
+
+  // fs.stat follows symlinks, so a dangling one throws ENOENT deterministically
+  // — the same error shape as a file that vanishes mid-copy (readdir lists
+  // it, then stat fails a moment later), without needing to race real
+  // concurrent I/O to reproduce it.
+  await fs.symlink(join(hotfolderDir, "does-not-exist"), join(hotfolderDir, "Dangling-Link.mp4"));
+
+  await assert.doesNotReject(pollHotfolder(config, opts, state));
+});
 
 test("updateStability: unchanged size/mtime increments stableCount until threshold", () => {
   const requiredPolls = 3;
