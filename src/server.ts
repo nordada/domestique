@@ -13,7 +13,7 @@ export interface ServerOptions {
   plex: PlexConfig | null;
 }
 
-interface TorrentDonePayload {
+export interface TorrentDonePayload {
   dir: string;
   name: string;
   id?: string;
@@ -29,7 +29,7 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOptions) {
+export async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOptions) {
   const results: Array<{
     sourceFile: string;
     status: string;

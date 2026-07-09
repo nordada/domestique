@@ -36,10 +36,25 @@ services:
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_SECTION_ID: ${PLEX_SECTION_ID:-}
       PLEX_LIBRARY_ROOT: ${PLEX_LIBRARY_ROOT:-}
+      # Optional hot-folder ingestion (bypass Transmission entirely) — safe
+      # to leave unset, the app just disables the feature. See the
+      # read-write bind mount below: this needs its own mount because the
+      # main /downloads mount above is read-only.
+      HOTFOLDER_DIR: ${HOTFOLDER_DIR:-}
+      HOTFOLDER_POLL_INTERVAL_MS: ${HOTFOLDER_POLL_INTERVAL_MS:-}
+      HOTFOLDER_STABLE_POLLS: ${HOTFOLDER_STABLE_POLLS:-}
     volumes:
       # Transmission's completed-downloads share (read-only: we only copy from here).
       # Mounted at /downloads to match Transmission's own internal path.
       - ${DOWNLOADS_DIR}:/downloads:ro
+      # Hot-folder drop zone (read-write, unlike the mount above): a more
+      # specific bind mount layered on top of the read-only one, so ONLY
+      # this subtree is writable — needed to move processed originals into
+      # its own processed/ subfolder. Only takes effect if HOTFOLDER_DIR is
+      # set to this same path in .env; otherwise it's just an unused empty
+      # directory. Do NOT merge this into the read-only mount above — that
+      # would make the whole Transmission share writable.
+      - ${DOWNLOADS_DIR}/domestique:/downloads/domestique
       # Plex library root (read-write: this is where renamed files land).
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.

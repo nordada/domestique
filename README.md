@@ -234,6 +234,52 @@ entirely — nothing else about the archiver changes, and startup logs will
 say `plex refresh: disabled`. A failed Plex refresh is only ever logged as
 a warning; it never affects whether a file gets archived.
 
+### 5. Optional: hot-folder ingestion (bypass Transmission)
+
+For files that didn't come through Transmission at all (a manual download,
+something copied over from elsewhere) — drop the file or folder directly
+into a watched directory and it goes through the exact same
+parse/match/rename/copy/Plex-refresh pipeline as a completed torrent, no
+webhook involved. Once a drop's size and modified-time have stopped
+changing for a few consecutive checks (so a still-copying file is never
+touched mid-transfer), it's processed and the **original is moved** — never
+deleted — into that folder's own `processed/` subfolder.
+
+Set in `.env`:
+```
+HOTFOLDER_DIR=/downloads/domestique
+```
+
+This is a subfolder of `DOWNLOADS_DIR`, sibling to Transmission's own
+`complete` folder on the host (e.g.
+`/mnt/user/fastARCHIVE-seeding/domestique`) — created automatically on
+first use if it doesn't already exist. Leave `HOTFOLDER_DIR` unset to
+disable the feature entirely; startup logs will say `hot folder: disabled`.
+
+Two more optional tuning knobs, shown here at their defaults:
+```
+HOTFOLDER_POLL_INTERVAL_MS=60000
+HOTFOLDER_STABLE_POLLS=3
+```
+A drop is considered done once its size/mtime haven't changed across
+`HOTFOLDER_STABLE_POLLS` consecutive polls, `HOTFOLDER_POLL_INTERVAL_MS`
+apart — the defaults wait roughly three quiet minutes, which is intended to
+be safe for large or slow manual copies. If something goes wrong while
+processing a drop (e.g. an unexpected error, as opposed to a normal
+"skipped: already archived" outcome), it's left in place and logged loudly
+rather than moved — the same idempotency that makes the Transmission
+webhook safe to fire twice means it's safe to just retry it on the next
+poll.
+
+**Why this needs its own volume mount**: `DOWNLOADS_DIR` is bind-mounted
+read-only (`docker-compose.yml`) since the app should only ever *copy* from
+Transmission's share, never touch it. The hot folder needs to *move* files
+(into its `processed/` subfolder), so `docker-compose.yml` layers a second,
+more specific read-write mount for just `${DOWNLOADS_DIR}/domestique` on
+top of the read-only one — the rest of the Transmission share stays
+untouched and read-only. Don't merge these two mounts back into one; that
+would make the whole downloads share writable.
+
 ## Known limitations / assumptions (check these against reality as you go)
 
 - **UCI XCC/XCO World Cup** isn't in `config/shows.json` yet — it wasn't in
