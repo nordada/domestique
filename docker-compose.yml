@@ -13,6 +13,12 @@
 # the fixed container path /downloads here, matching Transmission's side.
 # If your Transmission container uses a different internal path, change the
 # ":/downloads" below to match it instead.
+#
+# "name" is pinned explicitly (rather than left to default to the containing
+# folder's basename) so the Compose project identity — and therefore this
+# container's lifecycle management — stays stable even if the deployment
+# folder on the host gets renamed or moved.
+name: domestique
 services:
   domestique:
     build: .
