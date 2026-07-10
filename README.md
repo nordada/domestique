@@ -145,6 +145,17 @@ broadcaster for.
 
 ## Setup
 
+**On Unraid**, the easiest path is Community Applications rather than the
+manual steps below: add `https://github.com/nordada/domestique` as a
+template repository (Apps tab → gear icon → Template repositories), then
+install "domestique" from Apps like any other CA container. It pulls the
+prebuilt image from GHCR (`ghcr.io/nordada/domestique`, published by this
+repo's GitHub Actions workflow) instead of building from source, and its
+config fields map directly to the steps below - the descriptions in the
+Unraid UI point back to the relevant sections here for anything that needs
+more explanation than fits in a form field. The rest of this section is for
+everyone else (or if you'd rather build from source yourself).
+
 All host-specific values (paths, IPs, port) live in two `.env` files, never
 committed to git - copy the `.example` versions and fill them in.
 
