@@ -112,6 +112,7 @@
     <h2 style="margin:0">Events (<span id="events-count">0</span>)</h2>
     <button class="primary" id="add-event-btn">Add event</button>
   </div>
+  <input type="text" id="events-search" placeholder="Filter by id, folder name, or keyword…" style="margin-bottom:0.75rem;">
   <table>
     <thead>
       <tr><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
@@ -246,8 +247,24 @@ async function loadEvents() {
   const data = await api("/api/events");
   events = data.shows;
   document.getElementById("events-count").textContent = events.length;
+  renderEvents();
+}
+
+function renderEvents() {
+  const query = document.getElementById("events-search").value.trim().toLowerCase();
+  const matches = (event) => {
+    if (!query) return true;
+    const haystack = [event.id, event.folderName, ...event.matchKeywords].join(" ").toLowerCase();
+    return haystack.includes(query);
+  };
+
   const tbody = document.getElementById("events-tbody");
-  tbody.innerHTML = events.map((e, i) => eventsTableRow(e, i)).join("");
+  const rows = events
+    .map((e, i) => ({ event: e, index: i }))
+    .filter(({ event }) => matches(event));
+  tbody.innerHTML = rows.length
+    ? rows.map(({ event, index }) => eventsTableRow(event, index)).join("")
+    : `<tr><td colspan="6" style="opacity:0.6;">No events match "${esc(query)}".</td></tr>`;
   tbody.querySelectorAll("[data-edit]").forEach((btn) => {
     btn.addEventListener("click", () => openForm(parseInt(btn.dataset.edit, 10)));
   });
@@ -427,6 +444,7 @@ async function loadActivity() {
 }
 
 document.getElementById("add-event-btn").addEventListener("click", () => openForm(null));
+document.getElementById("events-search").addEventListener("input", renderEvents);
 document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
 document.getElementById("save-event-btn").addEventListener("click", saveEvent);
 document.getElementById("f-type").addEventListener("change", updateCategoriesVisibility);
