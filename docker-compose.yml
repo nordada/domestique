@@ -31,22 +31,24 @@ services:
     environment:
       LIBRARY_ROOT: ${LIBRARY_ROOT}
       CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
+      SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH}
       PORT: "${PORT}"
-      # Optional Plex partial-scan integration - safe to leave unset in .env,
-      # the app just disables the feature when these aren't all present.
+      # Optional Plex/Discord/hot-folder integrations - safe to leave unset,
+      # the app just disables each feature when its required vars aren't all
+      # present. These are a ONE-TIME SEED ONLY: the first time
+      # config/settings.json doesn't exist yet, it's created from whatever's
+      # set here; after that the file is authoritative and these env vars are
+      # ignored, since the web UI's Settings panel is the live way to change
+      # them from then on (see the README).
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_SECTION_ID: ${PLEX_SECTION_ID:-}
       PLEX_LIBRARY_ROOT: ${PLEX_LIBRARY_ROOT:-}
-      # Optional hot-folder ingestion (bypass Transmission entirely) - safe
-      # to leave unset, the app just disables the feature. See the
-      # read-write bind mount below: this needs its own mount because the
-      # main /downloads mount above is read-only.
+      # See the read-write bind mount below: hot-folder ingestion needs its
+      # own mount because the main /downloads mount above is read-only.
       HOTFOLDER_DIR: ${HOTFOLDER_DIR:-}
       HOTFOLDER_POLL_INTERVAL_MS: ${HOTFOLDER_POLL_INTERVAL_MS:-}
       HOTFOLDER_STABLE_POLLS: ${HOTFOLDER_STABLE_POLLS:-}
-      # Optional Discord notifications - safe to leave unset, the app just
-      # disables the feature when DISCORD_WEBHOOK_URL isn't present.
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MENTION_USER_ID: ${DISCORD_MENTION_USER_ID:-}
       # Optional web UI (config editor, match tester, activity log) at
@@ -72,6 +74,12 @@ services:
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.
       - ./config/events.json:${CONFIG_CONTAINER_PATH}
+      # Plex/Discord/hot-folder settings, editable live via the web UI's
+      # Settings panel - bind-mounted so edits (and the one-time seed from
+      # the PLEX_*/DISCORD_*/HOTFOLDER_* env vars above) persist across
+      # container recreation. Gitignored: unlike events.json this holds live
+      # secrets once set.
+      - ./config/settings.json:${SETTINGS_CONTAINER_PATH}
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.

@@ -253,6 +253,14 @@ rebuild needed. Minimal example:
 
 ### 4. Optional: Plex partial-scan
 
+**Everything in this section and the next two (hot-folder, Discord) is also
+editable live afterward via the web UI's Settings panel** (see step 7) -
+no container restart needed. The env vars below are a **one-time seed
+only**: the first time `config/settings.json` doesn't exist yet, it's
+created from whatever's set in `.env`; after that the file is authoritative
+and these env vars are ignored on every later boot. Delete
+`config/settings.json` if you want `.env` to reseed it fresh.
+
 By default Plex only notices new files on its own scan schedule. Set these
 in `.env` to have the archiver tell Plex to rescan just the one season
 folder that changed, right after each successful copy - not the whole
@@ -434,6 +442,13 @@ What's in it:
 - **Status panel** - at-a-glance whether Plex refresh, hot-folder ingestion,
   and Discord notifications are currently configured, plus the running
   version.
+- **Settings panel** - edit the Plex, Discord, and hot-folder settings from
+  steps 4-6 above live, no restart needed (backed by `config/settings.json`,
+  bind-mounted and gitignored the same way `config/events.json` is, minus the
+  git tracking, since this one holds live secrets once set). Secret fields
+  (Plex token, Discord webhook URL) are never echoed back once saved - the
+  form shows whether one is set, not its value; leave a secret field blank to
+  keep what's already stored, or check its "Clear" box to remove it.
 
 `public/index.html` is bind-mounted the same way `config/events.json` is, so
 tweaking it doesn't require a rebuild.
