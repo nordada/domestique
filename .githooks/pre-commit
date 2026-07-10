@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Bumps package.json's version to 0.1.<total commit count after this commit>,
+# zero-padded to 3 digits (0.1.001, 0.1.002, ...), and stages it as part of
+# the commit currently being made. Runs on every commit from this repo
+# (see core.hooksPath in git config) so the number stays in sync regardless
+# of who commits. This is intentionally baked into package.json rather than
+# computed at runtime from git history, since the deployed copy on TOWER
+# excludes .git entirely (see scripts/deploy-to-tower.sh.example).
+set -euo pipefail
+
+commit_count=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+next_count=$((commit_count + 1))
+version=$(printf "0.1.%03d" "$next_count")
+
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+pkg.version = '$version';
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+"
+
+git add package.json

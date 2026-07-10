@@ -456,6 +456,18 @@ curl -X POST http://localhost:8420/webhook/torrent-done \
   -d '{"dir":"/path/to/scratch/downloads","name":"Tour-de-France-2026-Stage-01"}'
 ```
 
+## Development
+
+`package.json`'s version bumps automatically on every commit (`0.1.001`,
+`0.1.002`, ...) via a pre-commit hook at `.githooks/pre-commit`, shown in the
+web UI's footer. It's baked into `package.json` rather than computed from git
+history at runtime because the deployed copy on TOWER excludes `.git`
+entirely. A fresh clone needs to opt into it once:
+
+```
+git config core.hooksPath .githooks
+```
+
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE).
