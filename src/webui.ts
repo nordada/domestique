@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig, saveConfig, type ShowsConfigFile } from "./config.js";
+import { loadSettings, saveSettings, type Settings } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity } from "./activity.js";
-import { hotfolderConfigFromEnv } from "./hotfolder.js";
 import { handleUploadRequest, type ProcessTorrentDone } from "./upload.js";
 import type { ServerOptions } from "./server.js";
 
@@ -92,6 +92,31 @@ function readBody(req: IncomingMessage): Promise<string> {
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * Shapes Settings for the browser with secrets masked - the Plex token and
+ * Discord webhook URL are never sent back once set (only whether one is
+ * set), so a stolen response or a screen-share can't leak either credential.
+ */
+function maskSettings(settings: Settings) {
+  return {
+    plex: {
+      url: settings.plex?.url ?? "",
+      sectionId: settings.plex?.sectionId ?? "",
+      libraryRoot: settings.plex?.libraryRoot ?? "",
+      tokenSet: Boolean(settings.plex?.token),
+    },
+    discord: {
+      mentionUserId: settings.discord?.mentionUserId ?? "",
+      webhookUrlSet: Boolean(settings.discord?.webhookUrl),
+    },
+    hotfolder: {
+      dir: settings.hotfolder?.dir ?? "",
+      pollIntervalMs: settings.hotfolder?.pollIntervalMs ?? 60000,
+      stablePolls: settings.hotfolder?.stablePolls ?? 3,
+    },
+  };
 }
 
 /**
@@ -201,15 +226,59 @@ export async function handleWebUiRequest(
     }
 
     if (req.method === "GET" && url === "/api/status") {
-      const hotfolder = hotfolderConfigFromEnv();
+      const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
       sendJson(res, 200, {
         version: APP_VERSION,
-        plex: opts.plex ? { enabled: true, sectionId: opts.plex.sectionId, url: opts.plex.url } : { enabled: false },
-        discord: opts.discord
-          ? { enabled: true, hasMention: Boolean(opts.discord.mentionUserId) }
+        plex: settings.plex
+          ? { enabled: true, sectionId: settings.plex.sectionId, url: settings.plex.url }
           : { enabled: false },
-        hotfolder: hotfolder ? { enabled: true, dir: hotfolder.dir } : { enabled: false },
+        discord: settings.discord
+          ? { enabled: true, hasMention: Boolean(settings.discord.mentionUserId) }
+          : { enabled: false },
+        hotfolder: settings.hotfolder ? { enabled: true, dir: settings.hotfolder.dir } : { enabled: false },
       });
+      return true;
+    }
+
+    if (req.method === "GET" && url === "/api/settings") {
+      const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+      sendJson(res, 200, maskSettings(settings));
+      return true;
+    }
+
+    if (req.method === "PUT" && url === "/api/settings") {
+      const body = await readBody(req);
+      const payload = JSON.parse(body) as {
+        plex?: { url?: string; sectionId?: string; libraryRoot?: string };
+        plexToken?: string;
+        discord?: { mentionUserId?: string };
+        discordWebhookUrl?: string;
+        hotfolder?: { dir?: string; pollIntervalMs?: number; stablePolls?: number };
+      };
+
+      // A field only overwrites its stored secret when the caller actually
+      // sent it - omitting plexToken/discordWebhookUrl keeps the existing
+      // one, since GET /api/settings never echoes the current value back for
+      // the frontend to round-trip.
+      const current = loadSettings(opts.settingsPath, opts.libraryRoot);
+      const plexToken = payload.plexToken !== undefined ? payload.plexToken : (current.plex?.token ?? "");
+      const discordWebhookUrl =
+        payload.discordWebhookUrl !== undefined ? payload.discordWebhookUrl : (current.discord?.webhookUrl ?? "");
+
+      try {
+        const saved = saveSettings(
+          {
+            plex: { ...payload.plex, token: plexToken },
+            discord: { ...payload.discord, webhookUrl: discordWebhookUrl },
+            hotfolder: payload.hotfolder,
+          },
+          opts.libraryRoot,
+          opts.settingsPath
+        );
+        sendJson(res, 200, { ok: true, ...maskSettings(saved) });
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: String(err) });
+      }
       return true;
     }
   } catch (err) {

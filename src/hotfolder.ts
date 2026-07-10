@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { handleTorrentDone, type ServerOptions } from "./server.js";
 import { sendDiscordNotification } from "./discord.js";
+import { loadSettings, toHotfolderConfig } from "./settings.js";
 
 export interface HotfolderConfig {
   /** container path to watch for dropped files/folders */
@@ -182,9 +183,10 @@ export async function pollHotfolder(
       // destination, the same idempotency the Transmission webhook already
       // relies on for duplicate/retried fires.
       console.error(`[hotfolder] failed to process "${entry.name}", will retry: ${err}`);
-      if (opts.discord) {
+      const discord = loadSettings(opts.settingsPath, opts.libraryRoot).discord;
+      if (discord) {
         sendDiscordNotification(
-          opts.discord,
+          discord,
           `❌ hot-folder failed to process "${entry.name}", will retry: ${err}`,
           { mention: true }
         ).catch((notifyErr) => console.warn(`[discord] failed to send notification: ${notifyErr}`));
@@ -199,11 +201,34 @@ export async function pollHotfolder(
   }
 }
 
-export function startHotfolderWatcher(config: HotfolderConfig, opts: ServerOptions): NodeJS.Timeout {
+// How often to re-check whether hot-folder ingestion has been enabled, while
+// it's currently disabled - short enough that turning it on via the web UI
+// takes effect promptly, without busy-polling the settings file.
+const DISABLED_RECHECK_MS = 5000;
+
+/**
+ * Re-reads settings on every cycle (rather than a fixed setInterval captured
+ * once at startup) so enabling/disabling hot-folder ingestion, or changing
+ * its poll interval/stable-polls tuning, takes effect live via the web UI
+ * within one cycle - no container restart needed. Uses a self-rescheduling
+ * setTimeout instead of setInterval specifically so a changed interval is
+ * picked up on the very next tick.
+ */
+export function startHotfolderWatcher(opts: ServerOptions): void {
   const state = new Map<string, EntryState>();
-  return setInterval(() => {
-    pollHotfolder(config, opts, state).catch((err) => {
-      console.error(`[hotfolder] poll cycle failed: ${err}`);
-    });
-  }, config.pollIntervalMs);
+
+  const tick = () => {
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    const config = settings.hotfolder ? toHotfolderConfig(settings.hotfolder) : null;
+    const next = config ? config.pollIntervalMs : DISABLED_RECHECK_MS;
+
+    const work = config ? pollHotfolder(config, opts, state) : Promise.resolve();
+    work
+      .catch((err) => console.error(`[hotfolder] poll cycle failed: ${err}`))
+      .finally(() => {
+        setTimeout(tick, next);
+      });
+  };
+
+  setTimeout(tick, 0);
 }

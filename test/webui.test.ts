@@ -30,6 +30,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-webui-config-"));
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-webui-library-"));
   const configPath = join(configDir, "events.json");
+  const settingsPath = join(configDir, "settings.json");
   await fs.writeFile(
     configPath,
     JSON.stringify({
@@ -37,13 +38,15 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     }) + "\n",
     "utf-8"
   );
+  // Pre-written (rather than left to env-var seeding) so tests are
+  // deterministic regardless of what's in the shell's own environment.
+  await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
 
   const opts: ServerOptions = {
     port: 0,
     libraryRoot,
     configPath,
-    plex: null,
-    discord: null,
+    settingsPath,
     webui,
   };
 
@@ -56,6 +59,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
   return {
     baseUrl,
     configPath,
+    settingsPath,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -191,6 +195,83 @@ test("GET /api/activity and /api/status respond with the expected shape", async 
     assert.equal(statusBody.discord.enabled, false);
     assert.equal(typeof statusBody.version, "string");
     assert.ok(statusBody.version.length > 0);
+  } finally {
+    await close();
+  }
+});
+
+test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secrets in its response", async () => {
+  const { baseUrl, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const getRes = await fetch(`${baseUrl}/api/settings`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    assert.equal(getRes.status, 200);
+    const initial = await getRes.json();
+    assert.deepEqual(initial, {
+      plex: { url: "", sectionId: "", libraryRoot: "", tokenSet: false },
+      discord: { mentionUserId: "", webhookUrlSet: false },
+      hotfolder: { dir: "", pollIntervalMs: 60000, stablePolls: 3 },
+    });
+
+    const putRes = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plex: { url: "http://plex.local:32400", sectionId: "35" },
+        plexToken: "secret-token",
+        discord: { mentionUserId: "12345" },
+        discordWebhookUrl: "https://discord.example/webhook",
+        hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 },
+      }),
+    });
+    assert.equal(putRes.status, 200);
+    const putBody = await putRes.json();
+    // The raw secrets are never echoed back, only whether one is set.
+    assert.equal(putBody.plex.tokenSet, true);
+    assert.equal(putBody.discord.webhookUrlSet, true);
+    assert.equal(putBody.plex.url, "http://plex.local:32400");
+    assert.equal(putBody.hotfolder.pollIntervalMs, 5000);
+    assert.ok(!("token" in putBody.plex));
+    assert.ok(!("webhookUrl" in putBody.discord));
+
+    const onDisk = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    assert.equal(onDisk.plex.token, "secret-token");
+    assert.equal(onDisk.discord.webhookUrl, "https://discord.example/webhook");
+  } finally {
+    await close();
+  }
+});
+
+test("PUT /api/settings omitting a secret keeps the existing one; sending an empty string clears it", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plex: { url: "http://plex.local:32400", sectionId: "35" },
+        plexToken: "secret-token",
+      }),
+    });
+
+    // Omitting plexToken entirely should keep the stored one - Plex stays enabled.
+    const keepRes = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ plex: { url: "http://plex.local:32400", sectionId: "35" } }),
+    });
+    const keepBody = await keepRes.json();
+    assert.equal(keepBody.plex.tokenSet, true);
+
+    // Explicitly sending an empty token clears it, collapsing Plex to disabled.
+    const clearRes = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ plex: { url: "http://plex.local:32400", sectionId: "35" }, plexToken: "" }),
+    });
+    const clearBody = await clearRes.json();
+    assert.equal(clearBody.plex.tokenSet, false);
   } finally {
     await close();
   }

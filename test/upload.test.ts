@@ -27,12 +27,14 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     "utf-8"
   );
 
+  const settingsPath = join(configDir, "settings.json");
+  await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
+
   const opts: ServerOptions = {
     port: 0,
     libraryRoot,
     configPath,
-    plex: null,
-    discord: null,
+    settingsPath,
     webui,
   };
 

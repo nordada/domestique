@@ -83,7 +83,7 @@ test("hotfolderConfigFromEnv: a valid explicit value is honored", () => {
 });
 
 test("pollHotfolder: an entry that fails to stat with ENOENT doesn't throw or block others", async () => {
-  const { libraryRoot, hotfolderDir, configPath } = await makeScratch();
+  const { libraryRoot, hotfolderDir, configPath, settingsPath } = await makeScratch();
   await writeMinimalConfig(configPath);
 
   const config: HotfolderConfig = {
@@ -92,7 +92,7 @@ test("pollHotfolder: an entry that fails to stat with ENOENT doesn't throw or bl
     pollIntervalMs: 1,
     stablePolls: 2,
   };
-  const opts = makeOpts(libraryRoot, configPath);
+  const opts = makeOpts(libraryRoot, configPath, settingsPath);
   const state = new Map();
 
   // fs.stat follows symlinks, so a dangling one throws ENOENT deterministically
@@ -141,11 +141,13 @@ async function makeScratch() {
   // the config file can't live inside it.
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-config-"));
   const configPath = join(configDir, "events.json");
-  return { libraryRoot, hotfolderDir, configPath };
+  const settingsPath = join(configDir, "settings.json");
+  await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
+  return { libraryRoot, hotfolderDir, configPath, settingsPath };
 }
 
-function makeOpts(libraryRoot: string, configPath: string): ServerOptions {
-  return { port: 0, libraryRoot, configPath, plex: null, discord: null, webui: null };
+function makeOpts(libraryRoot: string, configPath: string, settingsPath: string): ServerOptions {
+  return { port: 0, libraryRoot, configPath, settingsPath, webui: null };
 }
 
 async function writeMinimalConfig(configPath: string) {
@@ -157,7 +159,7 @@ async function writeMinimalConfig(configPath: string) {
 }
 
 test("pollHotfolder: leaves a not-yet-stable drop untouched", async () => {
-  const { libraryRoot, hotfolderDir, configPath } = await makeScratch();
+  const { libraryRoot, hotfolderDir, configPath, settingsPath } = await makeScratch();
   await writeMinimalConfig(configPath);
 
   await fs.writeFile(join(hotfolderDir, "Some-Race-2026-Stage-01.mp4"), "dummy");
@@ -168,7 +170,7 @@ test("pollHotfolder: leaves a not-yet-stable drop untouched", async () => {
     pollIntervalMs: 1,
     stablePolls: 2,
   };
-  const opts = makeOpts(libraryRoot, configPath);
+  const opts = makeOpts(libraryRoot, configPath, settingsPath);
   const state = new Map();
 
   await pollHotfolder(config, opts, state); // poll 1: first sighting, not stable yet
@@ -179,7 +181,7 @@ test("pollHotfolder: leaves a not-yet-stable drop untouched", async () => {
 });
 
 test("pollHotfolder: processes a drop once stable and moves it to processed/", async () => {
-  const { libraryRoot, hotfolderDir, configPath } = await makeScratch();
+  const { libraryRoot, hotfolderDir, configPath, settingsPath } = await makeScratch();
   await writeMinimalConfig(configPath);
 
   const fileName = "Some-Unknown-Race-2026-Stage-02.mp4";
@@ -191,7 +193,7 @@ test("pollHotfolder: processes a drop once stable and moves it to processed/", a
     pollIntervalMs: 1,
     stablePolls: 2,
   };
-  const opts = makeOpts(libraryRoot, configPath);
+  const opts = makeOpts(libraryRoot, configPath, settingsPath);
   const state = new Map();
 
   await pollHotfolder(config, opts, state); // poll 1: not stable
@@ -211,7 +213,7 @@ test("pollHotfolder: processes a drop once stable and moves it to processed/", a
 });
 
 test("pollHotfolder: a same-named second drop into processed/ gets a suffixed name, not overwritten", async () => {
-  const { libraryRoot, hotfolderDir, configPath } = await makeScratch();
+  const { libraryRoot, hotfolderDir, configPath, settingsPath } = await makeScratch();
   await writeMinimalConfig(configPath);
 
   const fileName = "Repeat-Drop-2026-Stage-03.mp4";
@@ -221,7 +223,7 @@ test("pollHotfolder: a same-named second drop into processed/ gets a suffixed na
     pollIntervalMs: 1,
     stablePolls: 1,
   };
-  const opts = makeOpts(libraryRoot, configPath);
+  const opts = makeOpts(libraryRoot, configPath, settingsPath);
 
   // First drop, processed immediately (stablePolls: 1).
   await fs.writeFile(join(hotfolderDir, fileName), "first");

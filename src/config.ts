@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, statSync, readdirSync, rmdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { ensureSeeded } from "./fileseed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -46,30 +47,11 @@ const DEFAULT_CONFIG_PATH = join(__dirname, "..", "config", "events.json");
  * A bind-mounted appdata path (e.g. a fresh Unraid/CA install with nothing
  * there yet) starts out with nothing at that path - seed it from the image's
  * own bundled starter config rather than crash-looping on every request.
- * Also handles the well-known Docker bind-mount gotcha where mounting a host
- * file that doesn't exist yet onto a container file path silently creates an
- * empty DIRECTORY there instead (not a missing path), which would otherwise
- * surface as a confusing EISDIR crash.
  */
 function ensureConfigSeeded(path: string): void {
   if (path === DEFAULT_CONFIG_PATH || !existsSync(DEFAULT_CONFIG_PATH)) return;
-
-  let needsSeed = !existsSync(path);
-  if (!needsSeed && statSync(path).isDirectory()) {
-    if (readdirSync(path).length > 0) {
-      throw new Error(
-        `Expected a config file at ${path} but found a non-empty directory - check your volume mount.`,
-      );
-    }
-    rmdirSync(path);
-    needsSeed = true;
-  }
-
-  if (needsSeed) {
-    mkdirSync(dirname(path), { recursive: true });
-    copyFileSync(DEFAULT_CONFIG_PATH, path);
-    console.log(`[config] seeded missing config at ${path} from the bundled default`);
-  }
+  const seeded = ensureSeeded(path, () => readFileSync(DEFAULT_CONFIG_PATH, "utf-8"));
+  if (seeded) console.log(`[config] seeded missing config at ${path} from the bundled default`);
 }
 
 export function loadConfig(path: string = DEFAULT_CONFIG_PATH): ShowsConfigFile {

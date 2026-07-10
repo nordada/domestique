@@ -53,7 +53,11 @@
   button.primary { background: var(--accent); color: white; border-color: var(--accent); }
   button.danger { color: var(--err); border-color: var(--err); }
   button:hover { opacity: 0.85; }
-  input[type=text], input[type=number], textarea, select {
+  h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
+  h3:first-child { margin-top: 0; }
+  .clear-toggle { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; opacity: 0.75; font-size: 0.8rem; }
+  .clear-toggle input { width: auto; }
+  input[type=text], input[type=number], input[type=password], textarea, select {
     font: inherit;
     width: 100%;
     padding: 0.4rem 0.5rem;
@@ -199,6 +203,51 @@
   <div class="badges" id="status-badges">Loading…</div>
 </section>
 
+<section id="settings-section">
+  <h2>Settings</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Live - saving here takes effect immediately, no container restart
+    needed. A blank secret field keeps whatever's already stored; check
+    "Clear" to remove one instead.
+  </p>
+
+  <h3>Plex partial-scan</h3>
+  <div class="row">
+    <label><span>Plex URL (blank disables)</span><input type="text" id="s-plex-url" placeholder="http://192.168.1.10:32400"></label>
+    <label><span>Section ID</span><input type="text" id="s-plex-sectionId" placeholder="35"></label>
+  </div>
+  <label><span>Library root override (optional - only if Plex sees a different path than this container)</span>
+    <input type="text" id="s-plex-libraryRoot" placeholder="">
+  </label>
+  <label><span>Plex token</span>
+    <input type="password" id="s-plex-token">
+    <span class="clear-toggle"><input type="checkbox" id="s-plex-token-clear"> Clear stored token</span>
+  </label>
+
+  <h3>Discord notifications</h3>
+  <label><span>Webhook URL (blank disables)</span>
+    <input type="password" id="s-discord-webhook">
+    <span class="clear-toggle"><input type="checkbox" id="s-discord-webhook-clear"> Clear stored webhook URL</span>
+  </label>
+  <label><span>Mention user id (optional)</span>
+    <input type="text" id="s-discord-mention" placeholder="">
+  </label>
+
+  <h3>Hot-folder ingestion</h3>
+  <label><span>Watch directory (blank disables)</span>
+    <input type="text" id="s-hotfolder-dir" placeholder="/downloads/domestique">
+  </label>
+  <div class="row">
+    <label><span>Poll interval (ms)</span><input type="number" id="s-hotfolder-interval" placeholder="60000"></label>
+    <label><span>Stable polls</span><input type="number" id="s-hotfolder-stable" placeholder="3"></label>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="save-settings-btn">Save settings</button>
+  </div>
+  <div class="status-msg" id="settings-status"></div>
+</section>
+
 <section id="activity-section">
   <div class="toolbar">
     <h2 style="margin:0">Recent activity</h2>
@@ -252,6 +301,71 @@ async function loadStatus() {
     }
   } catch (err) {
     el.textContent = `Failed to load status: ${err.message}`;
+  }
+}
+
+async function loadSettingsPanel() {
+  const statusEl = document.getElementById("settings-status");
+  try {
+    const s = await api("/api/settings");
+    document.getElementById("s-plex-url").value = s.plex.url;
+    document.getElementById("s-plex-sectionId").value = s.plex.sectionId;
+    document.getElementById("s-plex-libraryRoot").value = s.plex.libraryRoot;
+    document.getElementById("s-plex-token").placeholder = s.plex.tokenSet ? "already set - leave blank to keep" : "not set";
+    document.getElementById("s-discord-webhook").placeholder = s.discord.webhookUrlSet ? "already set - leave blank to keep" : "not set";
+    document.getElementById("s-discord-mention").value = s.discord.mentionUserId;
+    document.getElementById("s-hotfolder-dir").value = s.hotfolder.dir;
+    document.getElementById("s-hotfolder-interval").value = s.hotfolder.pollIntervalMs;
+    document.getElementById("s-hotfolder-stable").value = s.hotfolder.stablePolls;
+  } catch (err) {
+    statusEl.textContent = `Failed to load settings: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+
+async function saveSettingsPanel() {
+  const statusEl = document.getElementById("settings-status");
+  const payload = {
+    plex: {
+      url: document.getElementById("s-plex-url").value.trim(),
+      sectionId: document.getElementById("s-plex-sectionId").value.trim(),
+      libraryRoot: document.getElementById("s-plex-libraryRoot").value.trim(),
+    },
+    discord: {
+      mentionUserId: document.getElementById("s-discord-mention").value.trim(),
+    },
+    hotfolder: {
+      dir: document.getElementById("s-hotfolder-dir").value.trim(),
+      pollIntervalMs: parseInt(document.getElementById("s-hotfolder-interval").value, 10) || undefined,
+      stablePolls: parseInt(document.getElementById("s-hotfolder-stable").value, 10) || undefined,
+    },
+  };
+
+  const plexToken = document.getElementById("s-plex-token").value;
+  if (plexToken) payload.plexToken = plexToken;
+  else if (document.getElementById("s-plex-token-clear").checked) payload.plexToken = "";
+
+  const discordWebhook = document.getElementById("s-discord-webhook").value;
+  if (discordWebhook) payload.discordWebhookUrl = discordWebhook;
+  else if (document.getElementById("s-discord-webhook-clear").checked) payload.discordWebhookUrl = "";
+
+  try {
+    await api("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    statusEl.textContent = "Saved.";
+    statusEl.className = "status-msg ok";
+    document.getElementById("s-plex-token").value = "";
+    document.getElementById("s-plex-token-clear").checked = false;
+    document.getElementById("s-discord-webhook").value = "";
+    document.getElementById("s-discord-webhook-clear").checked = false;
+    await loadSettingsPanel();
+    await loadStatus();
+  } catch (err) {
+    statusEl.textContent = `Failed to save: ${err.message}`;
+    statusEl.className = "status-msg err";
   }
 }
 
@@ -550,6 +664,7 @@ document.getElementById("add-from-match-btn").addEventListener("click", () => {
   updateCategoriesVisibility();
 });
 document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
+document.getElementById("save-settings-btn").addEventListener("click", saveSettingsPanel);
 document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
 document.getElementById("upload-folder-btn").addEventListener("click", () => document.getElementById("upload-folder-input").click());
 document.getElementById("upload-file-input").addEventListener("change", (e) => {
@@ -562,6 +677,7 @@ document.getElementById("upload-folder-input").addEventListener("change", (e) =>
 });
 
 loadStatus();
+loadSettingsPanel();
 loadEvents();
 loadActivity();
 </script>

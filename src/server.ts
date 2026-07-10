@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfig, DEFAULT_CONFIG_PATH } from "./config.js";
+import { loadSettings, DEFAULT_SETTINGS_PATH } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems } from "./fileops.js";
-import { plexConfigFromEnv, refreshPlexFolder, type PlexConfig } from "./plex.js";
-import { discordConfigFromEnv, sendDiscordNotification, type DiscordConfig } from "./discord.js";
+import { refreshPlexFolder } from "./plex.js";
+import { sendDiscordNotification } from "./discord.js";
 import { recordActivity } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, type WebUiConfig } from "./webui.js";
 
@@ -18,8 +19,7 @@ export interface ServerOptions {
   port: number;
   libraryRoot: string;
   configPath: string;
-  plex: PlexConfig | null;
-  discord: DiscordConfig | null;
+  settingsPath: string;
   webui: WebUiConfig | null;
 }
 
@@ -48,6 +48,7 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
   }> = [];
 
   const config = loadConfig(opts.configPath);
+  const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
   let configDirty = false;
   const changedFolders = new Set<string>();
   const summaryLines: string[] = [];
@@ -120,10 +121,10 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
     saveConfig(config, opts.configPath);
   }
 
-  if (opts.plex && changedFolders.size > 0) {
+  if (settings.plex && changedFolders.size > 0) {
     for (const folder of changedFolders) {
       try {
-        await refreshPlexFolder(opts.plex, opts.libraryRoot, folder);
+        await refreshPlexFolder(settings.plex, opts.libraryRoot, folder);
         console.log(`[plex] refreshed "${folder}"`);
       } catch (err) {
         console.warn(`[plex] failed to refresh "${folder}": ${err}`);
@@ -133,10 +134,10 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
     }
   }
 
-  if (opts.discord) {
+  if (settings.discord) {
     const message = [`**${payload.name}** - ${items.length} file(s)`, ...summaryLines].join("\n");
     try {
-      await sendDiscordNotification(opts.discord, message, { mention: reviewWorthy });
+      await sendDiscordNotification(settings.discord, message, { mention: reviewWorthy });
     } catch (err) {
       console.warn(`[discord] failed to send notification: ${err}`);
     }
@@ -190,8 +191,9 @@ export function createApp(opts: ServerOptions) {
         res.end(JSON.stringify({ ok: true, results }));
       } catch (err) {
         console.error("[webhook] error handling torrent-done:", err);
-        if (opts.discord) {
-          sendDiscordNotification(opts.discord, `❌ webhook error handling torrent-done: ${err}`, {
+        const discord = loadSettings(opts.settingsPath, opts.libraryRoot).discord;
+        if (discord) {
+          sendDiscordNotification(discord, `❌ webhook error handling torrent-done: ${err}`, {
             mention: true,
           }).catch((notifyErr) => console.warn(`[discord] failed to send notification: ${notifyErr}`));
         }
@@ -226,14 +228,13 @@ export function optionsFromEnv(): ServerOptions {
   const port = parseInt(process.env.PORT || "8420", 10);
   const libraryRoot = process.env.LIBRARY_ROOT;
   const configPath = process.env.CONFIG_PATH || DEFAULT_CONFIG_PATH;
+  const settingsPath = process.env.SETTINGS_PATH || DEFAULT_SETTINGS_PATH;
 
   if (!libraryRoot) {
     throw new Error("LIBRARY_ROOT environment variable is required (Plex library root path)");
   }
 
-  const plex = plexConfigFromEnv(libraryRoot);
-  const discord = discordConfigFromEnv();
   const webui = webUiConfigFromEnv();
 
-  return { port, libraryRoot, configPath, plex, discord, webui };
+  return { port, libraryRoot, configPath, settingsPath, webui };
 }
