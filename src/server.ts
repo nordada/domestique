@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfig, DEFAULT_CONFIG_PATH } from "./config.js";
 import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
@@ -8,6 +10,9 @@ import { plexConfigFromEnv, refreshPlexFolder, type PlexConfig } from "./plex.js
 import { discordConfigFromEnv, sendDiscordNotification, type DiscordConfig } from "./discord.js";
 import { recordActivity } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, type WebUiConfig } from "./webui.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FAVICON_PATH = join(__dirname, "..", "public", "favicon.svg");
 
 export interface ServerOptions {
   port: number;
@@ -152,6 +157,18 @@ export function createApp(opts: ServerOptions) {
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/favicon.svg") {
+      try {
+        const svg = readFileSync(FAVICON_PATH, "utf-8");
+        res.writeHead(200, { "Content-Type": "image/svg+xml" });
+        res.end(svg);
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "favicon not found" }));
+      }
       return;
     }
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Domestique mark: "Round Chain" concept. Each shape is a separate,
+       independently editable element. Adjust proportions by editing the
+       numeric attributes directly, no path surgery needed except for the
+       triangle badge (a custom rounded-triangle path). -->
+  <title>Domestique mark — Round Chain</title>
+
+  <circle id="frame" cx="100" cy="100" r="98.000" fill="#7d8798" />
+
+  <path id="badge" d="M 164.412 91.000 Q 180.000 100.000 164.412 109.000 L 75.588 160.282 Q 60.000 169.282 60.000 151.282 L 60.000 48.718 Q 60.000 30.718 75.588 39.718 Z" fill="#12141a" />
+
+  <g id="chain-link" fill="none" stroke="#2ee5f0" stroke-width="8.740" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="-36.100" y="-16.720" width="72.200" height="33.440" rx="16.720" ry="16.720" transform="translate(102.400 91.640) rotate(-19.481)" />
+    <rect x="-36.100" y="-16.720" width="72.200" height="33.440" rx="16.720" ry="16.720" transform="translate(102.400 108.360) rotate(19.481)" />
+  </g>
+</svg>
+
