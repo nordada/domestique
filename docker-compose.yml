@@ -1,22 +1,24 @@
-# Example compose file for running Domestique on Unraid (TOWER).
+# Compose file for running Domestique - works on any Docker host (Unraid,
+# Synology, plain Linux, macOS via Docker Desktop/Colima, etc).
 #
-# All host-specific values (paths, port) live in .env, not here — copy
+# All host-specific values (paths, port) live in .env, not here - copy
 # .env.example to .env and fill it in before running `docker compose up`.
 #
 # IMPORTANT: the "dir" value Transmission passes to torrent-done.sh (via
 # TR_TORRENT_DIR) has to resolve to the same file inside THIS container as it
 # does inside Transmission's own container. Transmission's own Docker
-# template maps its downloads share to /downloads internally (check your
-# Transmission container's path mappings in the Unraid UI to confirm), so
-# this container mounts the SAME host directory at that SAME container path
-# below — DOWNLOADS_DIR in .env is the host path, but it always lands at
-# the fixed container path /downloads here, matching Transmission's side.
-# If your Transmission container uses a different internal path, change the
+# template maps its downloads share to /downloads internally (on Unraid,
+# check your Transmission container's path mappings in the Docker tab;
+# elsewhere, check its own compose file/run command), so this container
+# mounts the SAME host directory at that SAME container path below -
+# DOWNLOADS_DIR in .env is the host path, but it always lands at the fixed
+# container path /downloads here, matching Transmission's side. If your
+# Transmission container uses a different internal path, change the
 # ":/downloads" below to match it instead.
 #
 # "name" is pinned explicitly (rather than left to default to the containing
-# folder's basename) so the Compose project identity — and therefore this
-# container's lifecycle management — stays stable even if the deployment
+# folder's basename) so the Compose project identity - and therefore this
+# container's lifecycle management - stays stable even if the deployment
 # folder on the host gets renamed or moved.
 name: domestique
 services:
@@ -30,26 +32,26 @@ services:
       LIBRARY_ROOT: ${LIBRARY_ROOT}
       CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
       PORT: "${PORT}"
-      # Optional Plex partial-scan integration — safe to leave unset in .env,
+      # Optional Plex partial-scan integration - safe to leave unset in .env,
       # the app just disables the feature when these aren't all present.
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_SECTION_ID: ${PLEX_SECTION_ID:-}
       PLEX_LIBRARY_ROOT: ${PLEX_LIBRARY_ROOT:-}
-      # Optional hot-folder ingestion (bypass Transmission entirely) — safe
+      # Optional hot-folder ingestion (bypass Transmission entirely) - safe
       # to leave unset, the app just disables the feature. See the
       # read-write bind mount below: this needs its own mount because the
       # main /downloads mount above is read-only.
       HOTFOLDER_DIR: ${HOTFOLDER_DIR:-}
       HOTFOLDER_POLL_INTERVAL_MS: ${HOTFOLDER_POLL_INTERVAL_MS:-}
       HOTFOLDER_STABLE_POLLS: ${HOTFOLDER_STABLE_POLLS:-}
-      # Optional Discord notifications — safe to leave unset, the app just
+      # Optional Discord notifications - safe to leave unset, the app just
       # disables the feature when DISCORD_WEBHOOK_URL isn't present.
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MENTION_USER_ID: ${DISCORD_MENTION_USER_ID:-}
       # Optional web UI (config editor, match tester, activity log) at
       # /ui. Unlike the integrations above, leaving this unset does NOT
-      # leave the UI reachable without a password — its routes respond 503
+      # leave the UI reachable without a password - its routes respond 503
       # until WEBUI_PASSWORD is set, since it exposes read/write config
       # access over HTTP.
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
@@ -60,10 +62,10 @@ services:
       - ${DOWNLOADS_DIR}:/downloads:ro
       # Hot-folder drop zone (read-write, unlike the mount above): a more
       # specific bind mount layered on top of the read-only one, so ONLY
-      # this subtree is writable — needed to move processed originals into
+      # this subtree is writable - needed to move processed originals into
       # its own processed/ subfolder. Only takes effect if HOTFOLDER_DIR is
       # set to this same path in .env; otherwise it's just an unused empty
-      # directory. Do NOT merge this into the read-only mount above — that
+      # directory. Do NOT merge this into the read-only mount above - that
       # would make the whole Transmission share writable.
       - ${DOWNLOADS_DIR}/domestique:/downloads/domestique
       # Plex library root (read-write: this is where renamed files land).
@@ -71,6 +73,6 @@ services:
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.
       - ./config/events.json:${CONFIG_CONTAINER_PATH}
       # Web UI static assets, bind-mounted read-only for the same reason as
-      # config/events.json above — HTML/CSS/JS tweaks take effect on the next
+      # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.
       - ./public:/app/public:ro
