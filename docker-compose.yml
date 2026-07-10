@@ -43,6 +43,10 @@ services:
       HOTFOLDER_DIR: ${HOTFOLDER_DIR:-}
       HOTFOLDER_POLL_INTERVAL_MS: ${HOTFOLDER_POLL_INTERVAL_MS:-}
       HOTFOLDER_STABLE_POLLS: ${HOTFOLDER_STABLE_POLLS:-}
+      # Optional Discord notifications — safe to leave unset, the app just
+      # disables the feature when DISCORD_WEBHOOK_URL isn't present.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_MENTION_USER_ID: ${DISCORD_MENTION_USER_ID:-}
     volumes:
       # Transmission's completed-downloads share (read-only: we only copy from here).
       # Mounted at /downloads to match Transmission's own internal path.

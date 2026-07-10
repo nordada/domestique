@@ -145,7 +145,7 @@ async function makeScratch() {
 }
 
 function makeOpts(libraryRoot: string, configPath: string): ServerOptions {
-  return { port: 0, libraryRoot, configPath, plex: null };
+  return { port: 0, libraryRoot, configPath, plex: null, discord: null };
 }
 
 async function writeMinimalConfig(configPath: string) {

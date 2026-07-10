@@ -13,6 +13,11 @@ app.listen(opts.port, () => {
       ? `  plex refresh: enabled (section ${opts.plex.sectionId} at ${opts.plex.url})`
       : `  plex refresh: disabled (set PLEX_URL/PLEX_TOKEN/PLEX_SECTION_ID to enable)`
   );
+  console.log(
+    opts.discord
+      ? `  discord:      enabled${opts.discord.mentionUserId ? ` (mentions <@${opts.discord.mentionUserId}> on review-worthy events)` : " (no mention user set)"}`
+      : `  discord:      disabled (set DISCORD_WEBHOOK_URL to enable)`
+  );
 
   const hotfolder = hotfolderConfigFromEnv();
   if (hotfolder) {

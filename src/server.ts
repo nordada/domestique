@@ -5,12 +5,14 @@ import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems } from "./fileops.js";
 import { plexConfigFromEnv, refreshPlexFolder, type PlexConfig } from "./plex.js";
+import { discordConfigFromEnv, sendDiscordNotification, type DiscordConfig } from "./discord.js";
 
 export interface ServerOptions {
   port: number;
   libraryRoot: string;
   configPath: string;
   plex: PlexConfig | null;
+  discord: DiscordConfig | null;
 }
 
 export interface TorrentDonePayload {
@@ -40,6 +42,8 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
   const config = loadConfig(opts.configPath);
   let configDirty = false;
   const changedFolders = new Set<string>();
+  const summaryLines: string[] = [];
+  let reviewWorthy = false;
 
   const items = await resolveSourceItems(payload.dir, payload.name);
   console.log(`[torrent-done] "${payload.name}" -> ${items.length} file(s) to process`);
@@ -48,9 +52,11 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
     const match = matchShow(item.parsed, config);
     if (match.autoCreated) {
       configDirty = true;
+      reviewWorthy = true;
       console.warn(
         `[auto-create] No config match for "${item.parsed.raw}" -> created show "${match.show.id}" (folder "${match.show.folderName}"). Review config/shows.json.`
       );
+      summaryLines.push(`⚠️ auto-created show "${match.show.id}" for "${item.parsed.raw}" — review config/shows.json`);
     }
 
     const plan = await buildDestination(
@@ -63,6 +69,8 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 
     if (plan.warning) {
       console.warn(`[namer] ${plan.warning}`);
+      reviewWorthy = true;
+      summaryLines.push(`⚠️ ${plan.warning}`);
     }
 
     const outcome = await copyIntoLibrary(
@@ -77,10 +85,15 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 
     if (outcome.status === "copied" && outcome.warning) {
       console.warn(`[quality] ${outcome.warning}`);
+      reviewWorthy = true;
+      summaryLines.push(`⚠️ ${outcome.warning}`);
     }
 
     if (outcome.status === "copied") {
       changedFolders.add(join(opts.libraryRoot, plan.destDir));
+      summaryLines.push(`✅ ${plan.destDir}/${plan.destFilename}`);
+    } else {
+      summaryLines.push(`⏭️ skipped "${item.sourceFile}": ${outcome.reason}`);
     }
 
     console.log(
@@ -106,7 +119,18 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
         console.log(`[plex] refreshed "${folder}"`);
       } catch (err) {
         console.warn(`[plex] failed to refresh "${folder}": ${err}`);
+        reviewWorthy = true;
+        summaryLines.push(`⚠️ Plex refresh failed for "${folder}": ${err}`);
       }
+    }
+  }
+
+  if (opts.discord) {
+    const message = [`**${payload.name}** — ${items.length} file(s)`, ...summaryLines].join("\n");
+    try {
+      await sendDiscordNotification(opts.discord, message, { mention: reviewWorthy });
+    } catch (err) {
+      console.warn(`[discord] failed to send notification: ${err}`);
     }
   }
 
@@ -135,6 +159,11 @@ export function createApp(opts: ServerOptions) {
         res.end(JSON.stringify({ ok: true, results }));
       } catch (err) {
         console.error("[webhook] error handling torrent-done:", err);
+        if (opts.discord) {
+          sendDiscordNotification(opts.discord, `❌ webhook error handling torrent-done: ${err}`, {
+            mention: true,
+          }).catch((notifyErr) => console.warn(`[discord] failed to send notification: ${notifyErr}`));
+        }
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: String(err) }));
       }
@@ -163,6 +192,7 @@ export function optionsFromEnv(): ServerOptions {
   }
 
   const plex = plexConfigFromEnv(libraryRoot);
+  const discord = discordConfigFromEnv();
 
-  return { port, libraryRoot, configPath, plex };
+  return { port, libraryRoot, configPath, plex, discord };
 }

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { handleTorrentDone, type ServerOptions } from "./server.js";
+import { sendDiscordNotification } from "./discord.js";
 
 export interface HotfolderConfig {
   /** container path to watch for dropped files/folders */
@@ -181,6 +182,13 @@ export async function pollHotfolder(
       // destination, the same idempotency the Transmission webhook already
       // relies on for duplicate/retried fires.
       console.error(`[hotfolder] failed to process "${entry.name}", will retry: ${err}`);
+      if (opts.discord) {
+        sendDiscordNotification(
+          opts.discord,
+          `❌ hot-folder failed to process "${entry.name}", will retry: ${err}`,
+          { mention: true }
+        ).catch((notifyErr) => console.warn(`[discord] failed to send notification: ${notifyErr}`));
+      }
     }
   }
 

@@ -280,6 +280,41 @@ top of the read-only one — the rest of the Transmission share stays
 untouched and read-only. Don't merge these two mounts back into one; that
 would make the whole downloads share writable.
 
+### 6. Optional: Discord notifications
+
+Set in `.env` to have the archiver post a message to a Discord channel after
+every torrent-done event (from the Transmission webhook or hot-folder
+ingestion alike):
+
+```
+DISCORD_WEBHOOK_URL=<your webhook URL>
+```
+
+**Creating a webhook**: in Discord, go to the target channel's Settings →
+Integrations → Webhooks → New Webhook, then "Copy Webhook URL". Treat this
+URL like a secret — anyone with it can post to that channel.
+
+Each message summarizes the whole torrent-done event: what got archived,
+what was skipped and why, and any auto-created shows, quality/upgrade
+warnings, alternate-version tags, or errors. Everything is posted — routine
+successful archives as well as warnings — but only the review-worthy items
+(auto-created shows, warnings, Plex refresh failures, processing errors)
+trigger a mention, if you've set one:
+
+```
+DISCORD_MENTION_USER_ID=<your Discord user id>
+```
+
+**Finding your user id**: enable Developer Mode (User Settings → Advanced),
+then right-click your own name anywhere in Discord and choose "Copy User
+ID". Leave `DISCORD_MENTION_USER_ID` unset to have every notification post
+without a mention.
+
+Leaving `DISCORD_WEBHOOK_URL` unset disables this entirely — nothing else
+about the archiver changes, and startup logs will say `discord: disabled`.
+A failed Discord post is only ever logged as a warning; it never affects
+whether a file gets archived.
+
 ## Known limitations / assumptions (check these against reality as you go)
 
 - **UCI XCC/XCO World Cup** isn't in `config/shows.json` yet — it wasn't in
