@@ -4,3 +4,4 @@ dist/
 .DS_Store
 .env
 scripts/torrent-done.env
+scripts/deploy-to-tower.sh

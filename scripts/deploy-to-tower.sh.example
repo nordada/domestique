@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Copy this to deploy-to-tower.sh (gitignored — it embeds your own server's
+# address, and is deliberately not committed) and fill in your own values.
+#
+# Syncs the local repo to your server's Domestique appdata folder. Run from
+# the repo root (or anywhere — use an absolute path below). Excludes
+# node_modules, dist, and .git (the server doesn't need a working git
+# checkout, just the files).
+#
+# After this finishes, on the server: cd into the deployed folder and run
+# `docker compose up -d` (add --build if source files changed, not just
+# config) to pick up the changes.
+set -euo pipefail
+
+rsync -av \
+  --exclude 'node_modules' \
+  --exclude 'dist' \
+  --exclude '.git' \
+  --exclude '.DS_Store' \
+  --exclude '.claude' \
+  ~/projects/domestique/ user@YOUR-SERVER-IP:/path/to/domestique/

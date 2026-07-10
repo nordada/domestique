@@ -122,8 +122,8 @@ Edit `.env` and set `LIBRARY_ROOT`, `DOWNLOADS_DIR`, and `PORT` to match your
 setup. `DOWNLOADS_DIR` must be the host path to the **same share**
 Transmission's own container maps to `/downloads` internally — check
 Transmission's Docker template path mappings in the Unraid UI to confirm
-what that is (defaults here match this project's original
-`/mnt/user/fastARCHIVE-seeding` and `/mnt/user/towerMEDIAracing/2021_plex_library`).
+what that is (`.env.example`'s defaults are just illustrative Unraid
+`/mnt/user/...` paths — swap in your own share names).
 Then:
 
 ```
@@ -155,7 +155,7 @@ chmod +x torrent-done.sh
 Edit `torrent-done.env` and set `ARCHIVER_URL` — since Transmission and
 Domestique are separate containers not on the same Docker network, this
 needs to be TOWER's LAN IP (not a container name), e.g.
-`http://192.168.1.50:8420/webhook/torrent-done`, using the same `PORT` you
+`http://192.168.1.10:8420/webhook/torrent-done`, using the same `PORT` you
 set in Domestique's `.env`.
 
 **Path consistency matters**: the `dir` Transmission reports (`TR_TORRENT_DIR`)
@@ -204,7 +204,7 @@ folder that changed, right after each successful copy — not the whole
 racing library, and not any of your other Plex libraries:
 
 ```
-PLEX_URL=http://192.168.1.24:32400
+PLEX_URL=http://192.168.1.10:32400
 PLEX_TOKEN=<your token>
 PLEX_SECTION_ID=<the racing library's section id>
 ```
@@ -217,7 +217,7 @@ one doesn't work for your Plex version.)
 
 **Finding your section id**, once you have the token:
 ```
-curl "http://192.168.1.24:32400/library/sections?X-Plex-Token=<your token>"
+curl "http://192.168.1.10:32400/library/sections?X-Plex-Token=<your token>"
 ```
 This returns XML listing every library; find the racing one and use its
 `key` attribute as `PLEX_SECTION_ID`.
@@ -252,7 +252,7 @@ HOTFOLDER_DIR=/downloads/domestique
 
 This is a subfolder of `DOWNLOADS_DIR`, sibling to Transmission's own
 `complete` folder on the host (e.g.
-`/mnt/user/fastARCHIVE-seeding/domestique`) — created automatically on
+`/mnt/user/downloads/domestique`) — created automatically on
 first use if it doesn't already exist. Leave `HOTFOLDER_DIR` unset to
 disable the feature entirely; startup logs will say `hot folder: disabled`.
 
@@ -455,3 +455,7 @@ curl -X POST http://localhost:8420/webhook/torrent-done \
   -H "Content-Type: application/json" \
   -d '{"dir":"/path/to/scratch/downloads","name":"Tour-de-France-2026-Stage-01"}'
 ```
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE).
