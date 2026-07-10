@@ -93,6 +93,17 @@ test("loadSettings recovers from Docker's bind-mount gotcha (empty directory in 
   assert.ok(stat.isFile());
 });
 
+test("loadSettings seeds an existing but empty (0-byte) file, e.g. touched on the host as a placeholder", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+  await fs.writeFile(settingsPath, "");
+
+  const settings = withEnv({}, () => loadSettings(settingsPath, "/library"));
+  assert.equal(settings.plex, null);
+  assert.equal(settings.discord, null);
+  assert.equal(settings.hotfolder, null);
+});
+
 test("saveSettings + loadSettings round-trip, and normalizes partial Plex fields to disabled", async () => {
   const scratch = await makeScratchDir();
   const settingsPath = join(scratch, "settings.json");

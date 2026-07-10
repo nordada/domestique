@@ -40,6 +40,15 @@ test("loadConfig throws a clear error for a non-empty directory in place of the 
   assert.throws(() => loadConfig(configPath), /non-empty directory/);
 });
 
+test("loadConfig seeds an existing but empty (0-byte) file, e.g. touched on the host as a placeholder", async () => {
+  const scratch = await makeScratchDir();
+  const configPath = join(scratch, "events.json");
+  await fs.writeFile(configPath, "");
+
+  const config = loadConfig(configPath);
+  assert.ok(config.shows.length > 0);
+});
+
 test("loadConfig loads an existing file as-is, without touching it", async () => {
   const scratch = await makeScratchDir();
   const configPath = join(scratch, "events.json");
