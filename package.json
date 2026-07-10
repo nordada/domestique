@@ -1,6 +1,6 @@
 {
   "name": "domestique",
-  "version": "0.1.034",
+  "version": "0.1.035",
   "description": "Quietly files completed bike-race torrent downloads into a standardized Plex-named library layout.",
   "type": "module",
   "private": true,

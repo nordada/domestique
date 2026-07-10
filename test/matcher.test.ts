@@ -50,7 +50,7 @@ test("matches underscore/dash/bracket Worlds naming variants to World Championsh
 });
 
 test("routes Giro d'Italia Donna highlights to the women's show, not the men's", () => {
-  // Regression test: this exact bug happened for real — the Giro Donne
+  // Regression test: this exact bug happened for real - the Giro Donne
   // highlights entry didn't exist yet, and matching is subset-based (extra
   // unmatched tokens don't disqualify a candidate), so a "Giro d'Italia
   // Donna" release satisfied the men's "giro ditalia" keywords and silently
@@ -73,7 +73,7 @@ test("auto-creates an unrecognized race with no stage number as one-day", () => 
 
 test("auto-creates an unrecognized race with a stage number as stage-race, not one-day", () => {
   // Regression test: this exact class of bug happened for real with Tour de
-  // Suisse Women's highlights before that show had a config entry — a
+  // Suisse Women's highlights before that show had a config entry - a
   // one-day auto-create discarded the stage number, silently collapsing
   // every stage's highlights onto the same S..E01 filename.
   const config = freshConfig();

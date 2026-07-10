@@ -104,8 +104,8 @@
 <section id="match-tester-section">
   <h2>Match tester</h2>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Paste a raw torrent/release name to see which event it would match — or
-    that it would auto-create — without saving anything. If it wouldn't
+    Paste a raw torrent/release name to see which event it would match - or
+    that it would auto-create - without saving anything. If it wouldn't
     match, add it as a new event below.
   </p>
   <div class="row">
@@ -140,10 +140,10 @@
   <label><span>Folder name (Plex library subfolder)</span>
     <input type="text" id="f-folderName" placeholder="My New Race">
   </label>
-  <label><span>Filename prefix (optional — defaults to folder name)</span>
+  <label><span>Filename prefix (optional - defaults to folder name)</span>
     <input type="text" id="f-filenamePrefix" placeholder="">
   </label>
-  <label><span>Match keywords (one phrase per line — every token in a phrase must be present to match)</span>
+  <label><span>Match keywords (one phrase per line - every token in a phrase must be present to match)</span>
     <textarea id="f-matchKeywords" placeholder="my new race&#10;mnr"></textarea>
   </label>
   <div class="row">
@@ -180,7 +180,7 @@
   <h2>Upload</h2>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
     Send a file or folder straight into the library, bypassing Transmission
-    and the hot folder entirely — processed immediately (no polling wait),
+    and the hot folder entirely - processed immediately (no polling wait),
     using the same archiving pipeline as everything else. Uploading a folder
     is how you'd send a multi-part stage release (each part as its own
     file) so the parts group together correctly.
@@ -404,7 +404,7 @@ async function saveEvent() {
 
 async function deleteEvent(index) {
   const event = events[index];
-  if (!confirm(`Delete "${event.id}"? This only removes the config entry — already-archived files are untouched.`)) return;
+  if (!confirm(`Delete "${event.id}"? This only removes the config entry - already-archived files are untouched.`)) return;
   const next = events.filter((_, i) => i !== index);
   try {
     await api("/api/events", {
@@ -436,7 +436,7 @@ async function runMatchTest() {
     const m = data.match;
     const lines = [];
     if (m.autoCreated) {
-      lines.push(`⚠️ No existing event matches — would auto-create "${m.showId}" (folder "${m.folderName}", type ${m.type}).`);
+      lines.push(`⚠️ No existing event matches - would auto-create "${m.showId}" (folder "${m.folderName}", type ${m.type}).`);
       lastMatchGuess = { id: m.showId, folderName: m.folderName, type: m.type };
       addBtn.classList.remove("hidden");
     } else {
@@ -444,7 +444,7 @@ async function runMatchTest() {
       lines.push(`Matched on: ${m.matchedTokens.join(" ")} (specificity ${m.specificity})`);
     }
     const p = data.parsed;
-    lines.push(`Parsed: year=${p.year}${p.yearWasExplicit ? "" : " (defaulted)"}, stage=${p.stageNum ?? "—"}, part=${p.partNum ?? "—"}${p.partTotal ? `/${p.partTotal}` : ""}, resolution=${p.resolution ?? "—"}, broadcaster=${p.broadcaster ?? "—"}, highlights=${p.isHighlights}`);
+    lines.push(`Parsed: year=${p.year}${p.yearWasExplicit ? "" : " (defaulted)"}, stage=${p.stageNum ?? "n/a"}, part=${p.partNum ?? "n/a"}${p.partTotal ? `/${p.partTotal}` : ""}, resolution=${p.resolution ?? "n/a"}, broadcaster=${p.broadcaster ?? "n/a"}, highlights=${p.isHighlights}`);
     resultEl.textContent = lines.join("\n");
     resultEl.className = `status-msg ${m.autoCreated ? "err" : "ok"}`;
   } catch (err) {
@@ -455,7 +455,7 @@ async function runMatchTest() {
 
 function renderUploadResults(statusEl, results) {
   const lines = results.map((r) => {
-    if (r.status === "copied") return `✅ ${r.destPath}${r.warning ? ` — ⚠️ ${r.warning}` : ""}`;
+    if (r.status === "copied") return `✅ ${r.destPath}${r.warning ? ` - ⚠️ ${r.warning}` : ""}`;
     return `⏭️ skipped "${r.sourceFile}": ${r.warning ?? ""}`;
   });
   statusEl.textContent = lines.join("\n");
@@ -519,7 +519,7 @@ async function loadActivity() {
     }
     el.innerHTML = data.events.map((e) => `
       <div class="activity-item">
-        <div class="meta">${esc(new Date(e.timestamp).toLocaleString())} — ${esc(e.torrentName)} ${e.reviewWorthy ? '<span class="review-flag">(needs review)</span>' : ""}</div>
+        <div class="meta">${esc(new Date(e.timestamp).toLocaleString())} - ${esc(e.torrentName)} ${e.reviewWorthy ? '<span class="review-flag">(needs review)</span>' : ""}</div>
         <pre>${esc(e.lines.join("\n"))}</pre>
       </div>
     `).join("");

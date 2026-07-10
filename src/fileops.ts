@@ -126,18 +126,18 @@ async function saveSeasonMeta(
  * - At a *higher* resolution, it's filed alongside the existing file(s)
  *   with a "- REVIEW - possible NNNNp upgrade" tag (inserted before any
  *   part suffix, same as the broadcaster tag below) rather than silently
- *   overwriting anything — nothing is ever auto-deleted.
+ *   overwriting anything - nothing is ever auto-deleted.
  * - At the *same* (or unknown) resolution: if this release's broadcaster
  *   (Eurosport/SBS/RCS/etc, from parser.ts) differs from the one(s) already
  *   archived for this episode, it's treated as a genuine alternate version
- *   — filed under its own broadcaster-tagged filename (e.g.
+ *   - filed under its own broadcaster-tagged filename (e.g.
  *   "... - Eurosport - pt01.mp4") so Plex offers it as a selectable
  *   version rather than it colliding with or silently duplicating the
  *   existing one. Multi-part alternates keep their own consistent part
  *   numbering under that same tag. If the broadcaster matches what's
  *   already there (or is unknown on either side), it's treated as a
- *   normal continuation of the same release — e.g. the next part of a
- *   multi-part download still trickling in — and copied under the clean,
+ *   normal continuation of the same release - e.g. the next part of a
+ *   multi-part download still trickling in - and copied under the clean,
  *   untagged filename as usual.
  */
 export async function copyIntoLibrary(
@@ -173,11 +173,11 @@ export async function copyIntoLibrary(
   if (existing && existing.resolution != null && resolution != null && resolution > existing.resolution) {
     const reviewName = insertVersionTag(destFilename, `REVIEW - possible ${resolution}p upgrade`);
     finalDestPath = join(destDirAbs, reviewName);
-    warning = `Possible upgrade for ${key}: existing archive is ${existing.resolution}p, this is ${resolution}p. Filed alongside as "${reviewName}" — review and delete the old ${existing.resolution}p file(s) by hand if you agree.`;
+    warning = `Possible upgrade for ${key}: existing archive is ${existing.resolution}p, this is ${resolution}p. Filed alongside as "${reviewName}" - review and delete the old ${existing.resolution}p file(s) by hand if you agree.`;
   } else if (broadcaster && primaryBroadcaster && broadcaster !== primaryBroadcaster) {
     // Every file belonging to this alternate gets the tag (not just its
     // first part), compared against the *primary* (first-ever) broadcaster
-    // — not just "have we seen this one before" — so a second part of an
+    // - not just "have we seen this one before" - so a second part of an
     // already-recognized alternate still gets tagged consistently instead
     // of reverting to the clean/primary filename.
     const altName = insertVersionTag(destFilename, broadcaster);

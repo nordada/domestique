@@ -50,7 +50,7 @@ function constantTimeEqual(a: string, b: string): boolean {
 
 /**
  * Constant-time check of the decoded credentials from an HTTP Basic Auth
- * header. Username is only checked when WEBUI_USER is configured — leaving
+ * header. Username is only checked when WEBUI_USER is configured - leaving
  * it unset keeps the original password-only gate (any username accepted).
  */
 function isAuthorized(req: IncomingMessage, webui: WebUiConfig): boolean {
@@ -98,7 +98,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
  * Handles any request under /ui or /api/. Returns false if the request path
  * doesn't belong to the web UI at all, so callers can fall through to their
  * own routing. Fails CLOSED (503) rather than open when WEBUI_PASSWORD isn't
- * configured — unlike the Plex/Discord/hot-folder integrations, this exposes
+ * configured - unlike the Plex/Discord/hot-folder integrations, this exposes
  * read/write access to config over HTTP, so "unconfigured" must not mean
  * "reachable without a password."
  */
@@ -112,7 +112,7 @@ export async function handleWebUiRequest(
   if (url !== "/ui" && !url.startsWith("/api/")) return false;
 
   if (!opts.webui) {
-    sendJson(res, 503, { error: "web UI disabled — set WEBUI_PASSWORD in .env to enable" });
+    sendJson(res, 503, { error: "web UI disabled - set WEBUI_PASSWORD in .env to enable" });
     return true;
   }
 
@@ -167,7 +167,7 @@ export async function handleWebUiRequest(
       const parsed = parseName(name);
       // A fresh config load whose auto-create mutation (matchShow pushes a
       // new show into it when nothing matches) is never persisted via
-      // saveConfig — that's what makes this a safe, non-destructive preview.
+      // saveConfig - that's what makes this a safe, non-destructive preview.
       const config = loadConfig(opts.configPath);
       const match = matchShow(parsed, config);
       sendJson(res, 200, {

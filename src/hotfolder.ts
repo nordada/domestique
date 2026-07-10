@@ -16,7 +16,7 @@ const PROCESSED_SUBDIR = "processed";
 
 /**
  * Reads HOTFOLDER_* env vars. Returns null (feature disabled) unless
- * HOTFOLDER_DIR is set — same opt-in pattern as plexConfigFromEnv, since
+ * HOTFOLDER_DIR is set - same opt-in pattern as plexConfigFromEnv, since
  * this needs a dedicated read-write bind mount (see docker-compose.yml)
  * that isn't present unless the user has deliberately configured it.
  */
@@ -26,7 +26,7 @@ const PROCESSED_SUBDIR = "processed";
  * an empty string the same as unset: docker-compose's `${VAR:-}` expands to
  * "" (not an absent var) when VAR isn't set in .env, so a plain `??`
  * fallback would never trigger and `parseInt("", 10)` would silently
- * produce NaN — which is exactly what happened here and made setInterval
+ * produce NaN - which is exactly what happened here and made setInterval
  * fire at an effective ~1ms instead of the intended default, hammering the
  * filesystem. Also guards against 0/negative values for the same reason.
  */
@@ -65,7 +65,7 @@ export interface EntryState {
 /**
  * Pure stability check: an entry is "done" once its size/mtime have been
  * unchanged across `requiredStablePolls` consecutive polls. No I/O here so
- * it's trivially unit-testable — all the filesystem/timer plumbing lives in
+ * it's trivially unit-testable - all the filesystem/timer plumbing lives in
  * statEntry/pollHotfolder below.
  */
 export function updateStability(
@@ -81,7 +81,7 @@ export function updateStability(
 
 /**
  * Stats a top-level watch-folder entry. For a file, its own size/mtime. For
- * a folder, aggregates its immediate file children only (one level deep —
+ * a folder, aggregates its immediate file children only (one level deep -
  * matches resolveSourceItems's own assumption that a dropped folder is a
  * flat list of files, not nested), summing size and taking the latest mtime
  * so a still-arriving file anywhere in the folder keeps it "unstable".
@@ -156,7 +156,7 @@ export async function pollHotfolder(
     } catch (err) {
       // ENOENT here is expected and benign while a multi-file drop is still
       // mid-copy (readdir can list a child file that's renamed/replaced a
-      // moment before we stat it) — just skip this poll and let the next
+      // moment before we stat it) - just skip this poll and let the next
       // one pick it back up, rather than logging a scary warning for what's
       // normal in-progress-copy behavior. Anything else (e.g. permissions)
       // is worth surfacing.

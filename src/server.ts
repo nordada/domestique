@@ -64,7 +64,7 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
       console.warn(
         `[auto-create] No config match for "${item.parsed.raw}" -> created show "${match.show.id}" (folder "${match.show.folderName}"). Review config/events.json.`
       );
-      summaryLines.push(`⚠️ auto-created show "${match.show.id}" for "${item.parsed.raw}" — review config/events.json`);
+      summaryLines.push(`⚠️ auto-created show "${match.show.id}" for "${item.parsed.raw}" - review config/events.json`);
     }
 
     const plan = await buildDestination(
@@ -134,7 +134,7 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
   }
 
   if (opts.discord) {
-    const message = [`**${payload.name}** — ${items.length} file(s)`, ...summaryLines].join("\n");
+    const message = [`**${payload.name}** - ${items.length} file(s)`, ...summaryLines].join("\n");
     try {
       await sendDiscordNotification(opts.discord, message, { mention: reviewWorthy });
     } catch (err) {
@@ -220,7 +220,7 @@ export function optionsFromEnv(): ServerOptions {
   // to an empty string (not an absent var) when VAR isn't set in .env, so
   // "??" would never fall through and parseInt("", 10) would silently
   // produce NaN. Same bug class that caused a real incident in
-  // hotfolderConfigFromEnv (see src/hotfolder.ts) — fixed here too even
+  // hotfolderConfigFromEnv (see src/hotfolder.ts) - fixed here too even
   // though PORT/CONFIG_PATH are normally always set, since NaN/empty here
   // is just as dangerous if .env is ever incomplete.
   const port = parseInt(process.env.PORT || "8420", 10);

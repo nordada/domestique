@@ -3,7 +3,7 @@ export interface PlexConfig {
   token: string;
   sectionId: string;
   /**
-   * The Plex library root, as Plex's OWN process/container sees it — this
+   * The Plex library root, as Plex's OWN process/container sees it - this
    * can differ from this app's own LIBRARY_ROOT the same way Transmission's
    * downloads path did (see docker-compose.yml). Falls back to LIBRARY_ROOT
    * itself when PLEX_LIBRARY_ROOT isn't set, i.e. assumes identical paths.
@@ -33,7 +33,7 @@ function translatePath(localPath: string, from: string, to: string): string {
 /**
  * Triggers a partial Plex library scan limited to a single folder (e.g. a
  * season folder) via Plex's `/library/sections/{id}/refresh?path=...`
- * endpoint — much faster than a full section scan, and touches only the
+ * endpoint - much faster than a full section scan, and touches only the
  * one Plex library this section id points at, not any other library.
  *
  * localPath is the folder as THIS container sees it (i.e. under

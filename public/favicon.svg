@@ -3,7 +3,7 @@
        independently editable element. Adjust proportions by editing the
        numeric attributes directly, no path surgery needed except for the
        triangle badge (a custom rounded-triangle path). -->
-  <title>Domestique mark — Round Chain</title>
+  <title>Domestique mark - Round Chain</title>
 
   <circle id="frame" cx="100" cy="100" r="98.000" fill="#7d8798" />
 

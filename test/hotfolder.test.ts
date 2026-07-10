@@ -96,7 +96,7 @@ test("pollHotfolder: an entry that fails to stat with ENOENT doesn't throw or bl
   const state = new Map();
 
   // fs.stat follows symlinks, so a dangling one throws ENOENT deterministically
-  // — the same error shape as a file that vanishes mid-copy (readdir lists
+  // - the same error shape as a file that vanishes mid-copy (readdir lists
   // it, then stat fails a moment later), without needing to race real
   // concurrent I/O to reproduce it.
   await fs.symlink(join(hotfolderDir, "does-not-exist"), join(hotfolderDir, "Dangling-Link.mp4"));
@@ -136,7 +136,7 @@ test("updateStability: a size/mtime change resets stableCount to 1", () => {
 async function makeScratch() {
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-library-"));
   const hotfolderDir = await fs.mkdtemp(join(tmpdir(), "domestique-hotfolder-"));
-  // Deliberately a separate directory from hotfolderDir — pollHotfolder
+  // Deliberately a separate directory from hotfolderDir - pollHotfolder
   // treats every non-dotfile top-level entry in the watch dir as a drop, so
   // the config file can't live inside it.
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-config-"));

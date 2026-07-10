@@ -38,7 +38,7 @@ const TOKEN_ALIASES: Record<string, string> = {
 /**
  * Known broadcaster/commentary sources, mapped to their canonical display
  * form for use in "alternate version" filenames (see fileops.ts). Extend
- * this list as new ones show up in your tracker's release names — it's a
+ * this list as new ones show up in your tracker's release names - it's a
  * small, slowly-changing set, unlike race names, so it lives here rather
  * than in config/events.json.
  */
@@ -118,7 +118,7 @@ export function parseName(rawInput: string): ParsedName {
     if (partOnlyExtraction.match) {
       partNum = parseInt(partOnlyExtraction.match[1], 10);
     } else {
-      // Bare "N of M" with no "part" keyword at all, e.g. "1of2", "2 of 2" —
+      // Bare "N of M" with no "part" keyword at all, e.g. "1of2", "2 of 2" -
       // seen on some trackers for stages split across multiple video files.
       const bareOfExtraction = extractAndRemove(working, /\b(\d+)[-_. ]?of[-_. ]?(\d+)\b/i);
       working = bareOfExtraction.working;
@@ -129,7 +129,7 @@ export function parseName(rawInput: string): ParsedName {
     }
   }
 
-  // Resolution: "720p", "1080p", "2160p" — always its own token in real data
+  // Resolution: "720p", "1080p", "2160p" - always its own token in real data
   // (never glued to a neighboring word like year sometimes is), so \b is safe.
   const resolutionExtraction = extractAndRemove(working, /(\d{3,4})p\b/i);
   working = resolutionExtraction.working;

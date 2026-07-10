@@ -7,7 +7,7 @@ import type { ServerOptions, TorrentDonePayload } from "./server.js";
 
 /**
  * The real handleTorrentDone from server.ts, passed in as a parameter rather
- * than imported directly — server.ts already imports handleWebUiRequest from
+ * than imported directly - server.ts already imports handleWebUiRequest from
  * webui.ts, which in turn dispatches upload requests here, so importing
  * handleTorrentDone (a value, not just a type) from server.ts would create a
  * real circular value import. Only `import type` is safe/erased at compile
@@ -32,7 +32,7 @@ function stagingRoot(opts: ServerOptions): string {
 }
 
 /**
- * path.basename() plus rejecting empty/"."/".." results — a path-traversal
+ * path.basename() plus rejecting empty/"."/".." results - a path-traversal
  * guard for the client-supplied name/folder query params before they ever
  * touch the filesystem.
  */
@@ -49,7 +49,7 @@ async function clearIfExists(path: string): Promise<void> {
 }
 
 /**
- * Streams the request body directly to disk — never buffers it in memory
+ * Streams the request body directly to disk - never buffers it in memory
  * (unlike server.ts's readBody, which is fine for small JSON bodies but
  * would be dangerous for multi-gigabyte video uploads).
  */
@@ -173,7 +173,7 @@ async function handleFolderFileUpload(
 
 /**
  * Processes a completed folder batch the same way resolveSourceItems
- * handles any other folder-of-files drop (fileops.ts) — merging the folder
+ * handles any other folder-of-files drop (fileops.ts) - merging the folder
  * name with each file's name via mergeParsed, so a multi-part upload groups
  * into pt01/pt02/etc exactly like a real torrent/hot-folder folder drop.
  */
@@ -208,7 +208,7 @@ async function handleFolderFinalize(
 
 /**
  * Handles any /api/upload/* request. Returns false for anything that isn't
- * one of these four routes, so the caller can fall through to its own 404 —
+ * one of these four routes, so the caller can fall through to its own 404 -
  * same "return true if handled" contract handleWebUiRequest already uses.
  */
 export async function handleUploadRequest(

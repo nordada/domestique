@@ -66,7 +66,7 @@ test("extracts bare PartN with no known total (legacy Paris-Roubaix style)", () 
 });
 
 test("extracts bare 'NofM' with no 'part' keyword at all", () => {
-  // Regression test: this exact bug happened for real — a tracker split a
+  // Regression test: this exact bug happened for real - a tracker split a
   // stage into "... 1of2" / "... 2of2" with no "part" prefix, so neither
   // file's part number was recognized and the leftover "1of2"/"2of2" tokens
   // leaked into auto-create name-guessing, splitting one stage into two

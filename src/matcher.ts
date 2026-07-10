@@ -111,7 +111,7 @@ export function matchShow(parsed: ParsedName, config: ShowsConfigFile): MatchRes
   // config/folder afterward (rename, merge into an existing show, etc).
   //
   // Type defaults to "stage-race" whenever a stage number was actually
-  // parsed, rather than always "one-day" — a one-day show always files as
+  // parsed, rather than always "one-day" - a one-day show always files as
   // E01 with no title, which would otherwise silently collapse every stage
   // of an unrecognized stage race onto the same filename (this is exactly
   // what happened with Tour de Suisse Women's highlights before this show

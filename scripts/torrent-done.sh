@@ -10,7 +10,7 @@
 # parsing/matching/copying logic lives there.
 #
 # ARCHIVER_URL lives in torrent-done.env, next to this script (copy
-# torrent-done.env.example to torrent-done.env and fill it in — see that
+# torrent-done.env.example to torrent-done.env and fill it in - see that
 # file for why a plain env var on Transmission's own container usually
 # doesn't work here).
 

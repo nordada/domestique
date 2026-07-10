@@ -134,7 +134,7 @@ test("quality-aware copy: higher-resolution re-release is filed alongside with a
   assert.match(upgrade.destPath, /REVIEW - possible 1080p upgrade/);
   assert.match(upgrade.warning ?? "", /existing archive is 720p/);
 
-  // Original 720p file must still be there — nothing auto-deleted.
+  // Original 720p file must still be there - nothing auto-deleted.
   const original = await fs.stat(
     join(libraryRoot, destDir, "TestShow - S2026E01 - Stage 1 - pt01.mp4")
   );
