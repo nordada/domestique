@@ -212,6 +212,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       plex: { url: "", sectionId: "", libraryRoot: "", tokenSet: false },
       discord: { mentionUserId: "", webhookUrlSet: false },
       hotfolder: { dir: "", pollIntervalMs: 60000, stablePolls: 3 },
+      paused: false,
     });
 
     const putRes = await fetch(`${baseUrl}/api/settings`, {
@@ -272,6 +273,77 @@ test("PUT /api/settings omitting a secret keeps the existing one; sending an emp
     });
     const clearBody = await clearRes.json();
     assert.equal(clearBody.plex.tokenSet, false);
+  } finally {
+    await close();
+  }
+});
+
+test("PUT /api/paused toggles the global pause flag, reflected in /api/status, and survives a PUT /api/settings save", async () => {
+  const { baseUrl, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const pauseRes = await fetch(`${baseUrl}/api/paused`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: true }),
+    });
+    assert.equal(pauseRes.status, 200);
+    const pauseBody = await pauseRes.json();
+    assert.equal(pauseBody.paused, true);
+
+    const statusRes = await fetch(`${baseUrl}/api/status`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    const statusBody = await statusRes.json();
+    assert.equal(statusBody.paused, true);
+
+    // Saving unrelated settings (e.g. from the Settings page) must not
+    // silently clear the pause flag.
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ hotfolder: { dir: "/downloads/domestique" } }),
+    });
+    const onDisk = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    assert.equal(onDisk.paused, true);
+
+    const resumeRes = await fetch(`${baseUrl}/api/paused`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: false }),
+    });
+    assert.equal((await resumeRes.json()).paused, false);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /webhook/torrent-done is skipped without side effects while paused", async () => {
+  const { baseUrl, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    await fetch(`${baseUrl}/api/paused`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: true }),
+    });
+
+    const res = await fetch(`${baseUrl}/webhook/torrent-done`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir: "/downloads", name: "Tour-de-France-2026-Stage-05.mp4" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.paused, true);
+    assert.deepEqual(body.results, []);
+
+    const activityRes = await fetch(`${baseUrl}/api/activity`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    const activityBody = await activityRes.json();
+    assert.equal(activityBody.events.length, 0);
+
+    const onDisk = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    assert.equal(onDisk.paused, true);
   } finally {
     await close();
   }

@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSettings, saveSettings } from "../src/settings.js";
+import { loadSettings, saveSettings, setPaused } from "../src/settings.js";
 
 async function makeScratchDir() {
   return fs.mkdtemp(join(tmpdir(), "domestique-settings-"));
@@ -137,6 +137,21 @@ test("saveSettings resolves a blank Plex library-root override to the app's own 
   );
 
   assert.equal(saved.plex?.libraryRoot, "/library");
+});
+
+test("loadSettings defaults paused to false when seeding fresh, and setPaused flips it without touching other settings", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  const seeded = withEnv({ HOTFOLDER_DIR: "/downloads/domestique" }, () => loadSettings(settingsPath, "/library"));
+  assert.equal(seeded.paused, false);
+
+  const paused = setPaused(true, "/library", settingsPath);
+  assert.equal(paused.paused, true);
+  assert.deepEqual(paused.hotfolder, { dir: "/downloads/domestique", pollIntervalMs: 60000, stablePolls: 3 });
+
+  const resumed = setPaused(false, "/library", settingsPath);
+  assert.equal(resumed.paused, false);
 });
 
 test("saveSettings falls back invalid hot-folder tuning numbers to defaults instead of NaN", async () => {

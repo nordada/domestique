@@ -14,6 +14,11 @@ import { webUiConfigFromEnv, handleWebUiRequest, type WebUiConfig } from "./webu
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FAVICON_PATH = join(__dirname, "..", "public", "favicon.svg");
+const ICONS_DIR = join(__dirname, "..", "public", "icons");
+// Allow-listed rather than an open static-file route off req.url, so a
+// crafted path can't escape ICONS_DIR - same "unauthenticated but not
+// attacker-controlled" trust level as the favicon route below.
+const ICON_FILES = new Set(["plex.svg", "discord.svg", "hotfolder.svg"]);
 
 export interface ServerOptions {
   port: number;
@@ -173,6 +178,18 @@ export function createApp(opts: ServerOptions) {
       return;
     }
 
+    if (req.method === "GET" && req.url?.startsWith("/icons/") && ICON_FILES.has(req.url.slice("/icons/".length))) {
+      try {
+        const svg = readFileSync(join(ICONS_DIR, req.url.slice("/icons/".length)), "utf-8");
+        res.writeHead(200, { "Content-Type": "image/svg+xml" });
+        res.end(svg);
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "icon not found" }));
+      }
+      return;
+    }
+
     if (await handleWebUiRequest(req, res, opts, handleTorrentDone)) {
       return;
     }
@@ -184,6 +201,12 @@ export function createApp(opts: ServerOptions) {
         if (!payload.dir || !payload.name) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "payload must include dir and name" }));
+          return;
+        }
+        if (loadSettings(opts.settingsPath, opts.libraryRoot).paused) {
+          console.log(`[webhook] paused - skipping "${payload.name}"`);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, paused: true, results: [] }));
           return;
         }
         const results = await handleTorrentDone(payload, opts);

@@ -222,7 +222,9 @@ export function startHotfolderWatcher(opts: ServerOptions): void {
     const config = settings.hotfolder ? toHotfolderConfig(settings.hotfolder) : null;
     const next = config ? config.pollIntervalMs : DISABLED_RECHECK_MS;
 
-    const work = config ? pollHotfolder(config, opts, state) : Promise.resolve();
+    // Paused: keep polling on schedule (so a config change is picked up
+    // promptly) but skip actually processing anything until resumed.
+    const work = config && !settings.paused ? pollHotfolder(config, opts, state) : Promise.resolve();
     work
       .catch((err) => console.error(`[hotfolder] poll cycle failed: ${err}`))
       .finally(() => {

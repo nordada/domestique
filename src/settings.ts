@@ -16,6 +16,8 @@ export interface Settings {
   plex: PlexConfig | null;
   discord: DiscordConfig | null;
   hotfolder: HotfolderSettings | null;
+  /** Global pause of automatic processing (Transmission webhook + hot-folder poller). Manual paths (web UI upload, match tester) are unaffected. */
+  paused: boolean;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +37,7 @@ function seedFromEnv(libraryRoot: string): Settings {
     hotfolder: hotfolder
       ? { dir: hotfolder.dir, pollIntervalMs: hotfolder.pollIntervalMs, stablePolls: hotfolder.stablePolls }
       : null,
+    paused: false,
   };
 }
 
@@ -54,6 +57,7 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     plex: normalizePlex(raw.plex, appLibraryRoot),
     discord: normalizeDiscord(raw.discord),
     hotfolder: normalizeHotfolder(raw.hotfolder),
+    paused: raw.paused === true,
   };
 }
 
@@ -130,6 +134,20 @@ export function saveSettings(input: unknown, appLibraryRoot: string, path: strin
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
   return settings;
+}
+
+/**
+ * Flips just the `paused` flag without touching Plex/Discord/hot-folder
+ * settings - the header switch's dedicated write path, separate from the
+ * full-form save on the Settings page.
+ */
+export function setPaused(
+  paused: boolean,
+  appLibraryRoot: string,
+  path: string = DEFAULT_SETTINGS_PATH
+): Settings {
+  const current = loadSettings(path, appLibraryRoot);
+  return saveSettings({ ...current, paused }, appLibraryRoot, path);
 }
 
 export { DEFAULT_SETTINGS_PATH };

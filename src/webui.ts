@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig, saveConfig, type ShowsConfigFile } from "./config.js";
-import { loadSettings, saveSettings, type Settings } from "./settings.js";
+import { loadSettings, saveSettings, setPaused, type Settings } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity } from "./activity.js";
@@ -116,6 +116,7 @@ function maskSettings(settings: Settings) {
       pollIntervalMs: settings.hotfolder?.pollIntervalMs ?? 60000,
       stablePolls: settings.hotfolder?.stablePolls ?? 3,
     },
+    paused: settings.paused,
   };
 }
 
@@ -236,7 +237,20 @@ export async function handleWebUiRequest(
           ? { enabled: true, hasMention: Boolean(settings.discord.mentionUserId) }
           : { enabled: false },
         hotfolder: settings.hotfolder ? { enabled: true, dir: settings.hotfolder.dir } : { enabled: false },
+        paused: settings.paused,
       });
+      return true;
+    }
+
+    if (req.method === "PUT" && url === "/api/paused") {
+      const body = await readBody(req);
+      const { paused } = JSON.parse(body) as { paused?: boolean };
+      if (typeof paused !== "boolean") {
+        sendJson(res, 400, { error: "body must include a boolean paused" });
+        return true;
+      }
+      const saved = setPaused(paused, opts.libraryRoot, opts.settingsPath);
+      sendJson(res, 200, { ok: true, paused: saved.paused });
       return true;
     }
 
@@ -271,6 +285,7 @@ export async function handleWebUiRequest(
             plex: { ...payload.plex, token: plexToken },
             discord: { ...payload.discord, webhookUrl: discordWebhookUrl },
             hotfolder: payload.hotfolder,
+            paused: current.paused,
           },
           opts.libraryRoot,
           opts.settingsPath

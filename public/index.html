@@ -26,7 +26,6 @@
   .brand { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem; }
   .brand img { width: 2rem; height: 2rem; flex-shrink: 0; }
   h1 { margin: 0; }
-  .subtitle { opacity: 0.65; margin-top: 0; margin-bottom: 1.5rem; font-size: 0.9rem; }
   section {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -71,15 +70,6 @@
   textarea { min-height: 3.5rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem; }
   .row { display: flex; gap: 0.75rem; }
   .row > * { flex: 1; }
-  .badges { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-  .badge {
-    padding: 0.25rem 0.6rem;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    border: 1px solid var(--border);
-  }
-  .badge.on { color: var(--ok); border-color: var(--ok); }
-  .badge.off { opacity: 0.55; }
   .status-msg { font-size: 0.85rem; margin-top: 0.5rem; white-space: pre-wrap; }
   .status-msg.ok { color: var(--ok); }
   .status-msg.err { color: var(--err); }
@@ -95,15 +85,154 @@
   .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
   .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
   footer { text-align: center; opacity: 0.45; font-size: 0.78rem; padding: 1rem 0 2rem; }
+
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem 1.25rem;
+    flex-wrap: wrap;
+    padding: 0.75rem 0;
+    margin-bottom: 0.5rem;
+    background: canvas;
+    border-bottom: 1px solid var(--border);
+  }
+  .app-header .brand { margin-bottom: 0; }
+  .tabs { display: flex; gap: 0.25rem; }
+  .tab-btn {
+    font: inherit;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0.4rem 0.85rem;
+    opacity: 0.6;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .tab-btn:hover { opacity: 0.85; }
+  .tab-btn.active { opacity: 1; border-color: var(--border); background: var(--bg-card); }
+  .header-controls { display: flex; align-items: center; gap: 0.85rem; margin-left: auto; }
+
+  .status-panel {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: inset 0 1px 2px #00000014;
+  }
+  .status-divider { width: 1px; align-self: stretch; margin: 0.15rem 0; background: var(--border); }
+
+  .gauge-cluster { display: flex; gap: 0.6rem; }
+  .gauge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+  .gauge-icon-wrap {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 0 1px var(--border);
+    transition: box-shadow 0.15s;
+  }
+  .gauge.on .gauge-icon-wrap {
+    box-shadow: inset 0 0 0 1px var(--ok), 0 0 5px 1px rgba(21, 128, 61, 0.5);
+  }
+  .gauge-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+    display: block;
+    filter: grayscale(1) opacity(0.4);
+    transition: filter 0.15s;
+  }
+  .gauge.on .gauge-icon { filter: none; }
+
+  .pause-switch { display: flex; align-items: center; gap: 0.5rem; height: 1.75rem; margin-bottom: 0; cursor: pointer; font-size: 0.8rem; user-select: none; }
+  .pause-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch-track {
+    width: 2.3rem;
+    height: 1.3rem;
+    border-radius: 999px;
+    background: var(--err);
+    box-shadow: 0 0 5px 1px rgba(185, 28, 28, 0.55);
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+  .switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    background: white;
+    transition: left 0.15s;
+  }
+  .pause-switch input:checked + .switch-track {
+    background: var(--ok);
+    box-shadow: 0 0 5px 1px rgba(21, 128, 61, 0.65);
+  }
+  .pause-switch input:checked + .switch-track .switch-thumb { left: calc(100% - 1.1rem - 2px); }
+  .pause-switch .switch-label {
+    min-width: 3.4rem;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
 </style>
 </head>
 <body>
 
-<div class="brand">
-  <img src="/favicon.svg" alt="">
-  <h1>Domestique</h1>
-</div>
-<p class="subtitle">Event config editor, matcher tester, and activity log.</p>
+<header class="app-header">
+  <div class="brand">
+    <img src="/favicon.svg" alt="">
+    <h1>Domestique</h1>
+  </div>
+  <nav class="tabs">
+    <button type="button" class="tab-btn" data-tab="home">Home</button>
+    <button type="button" class="tab-btn" data-tab="events">Events</button>
+    <button type="button" class="tab-btn" data-tab="settings">Settings</button>
+  </nav>
+  <div class="header-controls">
+    <div class="status-panel">
+      <div class="gauge-cluster" id="integration-icons"></div>
+      <div class="status-divider"></div>
+      <label class="pause-switch" title="Pause/resume automatic processing (Transmission webhook + hot folder). Manual upload and the match tester are unaffected.">
+        <input type="checkbox" id="pause-toggle">
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+        <span class="switch-label" id="pause-label">Running</span>
+      </label>
+    </div>
+  </div>
+</header>
+
+<div id="tab-home" class="tab-panel">
+
+<section id="activity-section">
+  <div class="toolbar">
+    <h2 style="margin:0">Recent activity</h2>
+    <button id="refresh-activity-btn">Refresh</button>
+  </div>
+  <div id="activity-list">Loading…</div>
+</section>
 
 <section id="match-tester-section">
   <h2>Match tester</h2>
@@ -119,6 +248,28 @@
   <div id="match-result" class="status-msg"></div>
   <button id="add-from-match-btn" class="hidden" style="margin-top:0.5rem;">Add as new event</button>
 </section>
+
+<section id="upload-section">
+  <h2>Upload</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Send a file or folder straight into the library, bypassing Transmission
+    and the hot folder entirely - processed immediately (no polling wait),
+    using the same archiving pipeline as everything else. Uploading a folder
+    is how you'd send a multi-part stage release (each part as its own
+    file) so the parts group together correctly.
+  </p>
+  <div class="row">
+    <button id="upload-file-btn">Upload file…</button>
+    <button id="upload-folder-btn">Upload folder…</button>
+  </div>
+  <input type="file" id="upload-file-input" class="hidden">
+  <input type="file" id="upload-folder-input" class="hidden" webkitdirectory multiple>
+  <div id="upload-status" class="status-msg"></div>
+</section>
+
+</div>
+
+<div id="tab-events" class="tab-panel hidden">
 
 <section id="events-section">
   <div class="toolbar">
@@ -180,28 +331,9 @@
   <div class="status-msg" id="form-status"></div>
 </section>
 
-<section id="upload-section">
-  <h2>Upload</h2>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Send a file or folder straight into the library, bypassing Transmission
-    and the hot folder entirely - processed immediately (no polling wait),
-    using the same archiving pipeline as everything else. Uploading a folder
-    is how you'd send a multi-part stage release (each part as its own
-    file) so the parts group together correctly.
-  </p>
-  <div class="row">
-    <button id="upload-file-btn">Upload file…</button>
-    <button id="upload-folder-btn">Upload folder…</button>
-  </div>
-  <input type="file" id="upload-file-input" class="hidden">
-  <input type="file" id="upload-folder-input" class="hidden" webkitdirectory multiple>
-  <div id="upload-status" class="status-msg"></div>
-</section>
+</div>
 
-<section id="status-section">
-  <h2>Integrations</h2>
-  <div class="badges" id="status-badges">Loading…</div>
-</section>
+<div id="tab-settings" class="tab-panel hidden">
 
 <section id="settings-section">
   <h2>Settings</h2>
@@ -248,13 +380,7 @@
   <div class="status-msg" id="settings-status"></div>
 </section>
 
-<section id="activity-section">
-  <div class="toolbar">
-    <h2 style="margin:0">Recent activity</h2>
-    <button id="refresh-activity-btn">Refresh</button>
-  </div>
-  <div id="activity-list">Loading…</div>
-</section>
+</div>
 
 <footer id="app-footer">Domestique</footer>
 
@@ -279,28 +405,63 @@ function esc(s) {
   })[c]);
 }
 
+function showTab(name) {
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== `tab-${name}`);
+  });
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === name);
+  });
+  try { localStorage.setItem("domestique-tab", name); } catch {}
+}
+
+function setPauseUI(paused) {
+  document.getElementById("pause-toggle").checked = !paused;
+  document.getElementById("pause-label").textContent = paused ? "Paused" : "Running";
+}
+
+async function togglePause() {
+  const toggle = document.getElementById("pause-toggle");
+  const paused = !toggle.checked;
+  toggle.disabled = true;
+  try {
+    const data = await api("/api/paused", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paused }),
+    });
+    setPauseUI(data.paused);
+  } catch (err) {
+    alert(`Failed to update: ${err.message}`);
+    setPauseUI(!paused); // revert the checkbox to its pre-toggle state
+  } finally {
+    toggle.disabled = false;
+  }
+}
+
 async function loadStatus() {
-  const el = document.getElementById("status-badges");
+  const el = document.getElementById("integration-icons");
   try {
     const status = await api("/api/status");
-    const badge = (label, info) => {
-      const on = info.enabled;
-      let extra = "";
-      if (on && info.sectionId) extra = ` (section ${esc(info.sectionId)})`;
-      if (on && info.dir) extra = ` (${esc(info.dir)})`;
-      if (on && info.hasMention) extra += " · mentions on";
-      return `<span class="badge ${on ? "on" : "off"}">${label}: ${on ? "enabled" : "disabled"}${extra}</span>`;
-    };
+    const gauge = (label, iconFile, on) => `
+      <button type="button" class="gauge ${on ? "on" : "off"}" data-goto-tab="settings" title="${label}: ${on ? "enabled" : "disabled"}">
+        <span class="gauge-icon-wrap"><img class="gauge-icon" src="/icons/${iconFile}" alt="${label}"></span>
+      </button>`;
     el.innerHTML = [
-      badge("Plex", status.plex),
-      badge("Discord", status.discord),
-      badge("Hot folder", status.hotfolder),
+      gauge("Plex", "plex.svg", status.plex.enabled),
+      gauge("Discord", "discord.svg", status.discord.enabled),
+      gauge("Hot folder", "hotfolder.svg", status.hotfolder.enabled),
     ].join("");
+    el.querySelectorAll("[data-goto-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => showTab(btn.dataset.gotoTab));
+    });
+    setPauseUI(status.paused);
     if (status.version) {
       document.getElementById("app-footer").textContent = `Domestique v${status.version}`;
     }
   } catch (err) {
-    el.textContent = `Failed to load status: ${err.message}`;
+    el.textContent = "?";
+    console.error(`Failed to load status: ${err.message}`);
   }
 }
 
@@ -656,6 +817,7 @@ document.getElementById("match-btn").addEventListener("click", runMatchTest);
 document.getElementById("match-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runMatchTest(); });
 document.getElementById("add-from-match-btn").addEventListener("click", () => {
   if (!lastMatchGuess) return;
+  showTab("events");
   openForm(null);
   document.getElementById("f-id").value = lastMatchGuess.id;
   document.getElementById("f-folderName").value = lastMatchGuess.folderName;
@@ -664,6 +826,10 @@ document.getElementById("add-from-match-btn").addEventListener("click", () => {
   updateCategoriesVisibility();
 });
 document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => showTab(btn.dataset.tab));
+});
+document.getElementById("pause-toggle").addEventListener("change", togglePause);
 document.getElementById("save-settings-btn").addEventListener("click", saveSettingsPanel);
 document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
 document.getElementById("upload-folder-btn").addEventListener("click", () => document.getElementById("upload-folder-input").click());
@@ -675,6 +841,13 @@ document.getElementById("upload-folder-input").addEventListener("change", (e) =>
   if (e.target.files.length > 0) uploadFolder(e.target.files);
   e.target.value = "";
 });
+
+let initialTab = "home";
+try {
+  const savedTab = localStorage.getItem("domestique-tab");
+  if (savedTab === "home" || savedTab === "events" || savedTab === "settings") initialTab = savedTab;
+} catch {}
+showTab(initialTab);
 
 loadStatus();
 loadSettingsPanel();
