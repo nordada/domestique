@@ -35,6 +35,9 @@
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
   th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { opacity: 0.7; font-weight: 600; }
+  .events-table-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .events-table-scroll table { margin: 0; }
+  .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
   code { font-size: 0.85em; opacity: 0.85; }
   button {
     font: inherit;
@@ -113,12 +116,14 @@
     <button class="primary" id="add-event-btn">Add event</button>
   </div>
   <input type="text" id="events-search" placeholder="Filter by id, folder name, or keyword…" style="margin-bottom:0.75rem;">
-  <table>
-    <thead>
-      <tr><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
-    </thead>
-    <tbody id="events-tbody"></tbody>
-  </table>
+  <div class="events-table-scroll">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
+      </thead>
+      <tbody id="events-tbody"></tbody>
+    </table>
+  </div>
 </section>
 
 <section id="form-section" class="hidden">
