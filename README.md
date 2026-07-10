@@ -261,6 +261,16 @@ created from whatever's set in `.env`; after that the file is authoritative
 and these env vars are ignored on every later boot. Delete
 `config/settings.json` if you want `.env` to reseed it fresh.
 
+**Before your very first `docker compose up` here**, run `touch
+config/settings.json` (unlike `config/events.json`, this file isn't shipped
+in the repo). Skipping this is harmless on most setups, but if nothing
+exists at that path on the host yet, Docker creates an empty *directory*
+there instead of a file - a well-known bind-mount gotcha the app can't clean
+up on its own, since by then it's the container's actual mount point. If
+you hit this (crash-looping with an `EBUSY`-related error mentioning
+`settings.json`), stop the container, `rmdir config/settings.json` on the
+host, `touch` an empty file in its place, then start it again.
+
 By default Plex only notices new files on its own scan schedule. Set these
 in `.env` to have the archiver tell Plex to rescan just the one season
 folder that changed, right after each successful copy - not the whole

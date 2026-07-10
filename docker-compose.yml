@@ -79,6 +79,13 @@ services:
       # the PLEX_*/DISCORD_*/HOTFOLDER_* env vars above) persist across
       # container recreation. Gitignored: unlike events.json this holds live
       # secrets once set.
+      # IMPORTANT (first run only): unlike events.json, this file doesn't
+      # ship in the repo - if ./config/settings.json doesn't exist on the
+      # HOST before the very first `docker compose up`, Docker creates an
+      # empty DIRECTORY there instead of a file (a well-known bind-mount
+      # gotcha), which the app can't clean up from inside the container
+      # (it's the actual mount point). Avoid it entirely with `touch
+      # config/settings.json` before your first `docker compose up` here.
       - ./config/settings.json:${SETTINGS_CONTAINER_PATH}
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
