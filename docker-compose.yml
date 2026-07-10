@@ -53,6 +53,7 @@ services:
       # until WEBUI_PASSWORD is set, since it exposes read/write config
       # access over HTTP.
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
+      WEBUI_USER: ${WEBUI_USER:-}
     volumes:
       # Transmission's completed-downloads share (read-only: we only copy from here).
       # Mounted at /downloads to match Transmission's own internal path.

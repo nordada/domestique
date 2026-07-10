@@ -326,8 +326,14 @@ WEBUI_PASSWORD=<a password you choose>
 ```
 
 Then browse to `http://<TOWER-IP>:8420/ui` — your browser will prompt for
-credentials (any username, only the password is checked; it's a single
-shared-password gate, not a per-user login).
+credentials (HTTP Basic Auth). By default any username is accepted and only
+the password is checked. Optionally also set
+
+```
+WEBUI_USER=<a username you choose>
+```
+
+to require that exact username too, checked alongside the password.
 
 **This one fails closed, not open**: unlike Plex/hot-folder/Discord above,
 where leaving the env var unset just disables the feature, leaving
@@ -337,21 +343,26 @@ overwrite your config, so "unconfigured" must not mean "open to anyone on
 the LAN."
 
 What's in it:
-- **Shows table** — add/edit/delete entries, including the `categories`
-  editor for `multi-category-fixed` shows (Nationals/Worlds-style). Saves
+- **Match tester** — paste a raw release name and see which event it
+  matches (or that it would auto-create, and as what) using the app's real
+  parser/matcher, without touching `config/shows.json` or the library. Handy
+  for checking a `matchKeywords` change before a real download exercises it.
+  If nothing matches, an "Add as new event" button pre-fills the form below
+  with the guessed name/type.
+- **Events table** — add/edit/delete entries, including the `categories`
+  editor for `multi-category-fixed` events (Nationals/Worlds-style). Saves
   write the whole file back through the same `saveConfig` validation
   (duplicate ids, required fields, etc.) the app already uses, so an invalid
   save is rejected with the same error message you'd get from a bad
-  hand-edit — nothing is written to disk unless it's valid.
-- **Match tester** — paste a raw release name and see which show it matches
-  (or that it would auto-create, and as what) using the app's real
-  parser/matcher, without touching `config/shows.json` or the library. Handy
-  for checking a `matchKeywords` change before a real download exercises it.
+  hand-edit — nothing is written to disk unless it's valid. (This maps to
+  `config/shows.json` and the `/api/shows` endpoint under the hood — the UI
+  just calls them "events" since that's what each entry represents.)
 - **Activity log** — the last ~100 torrent-done events (in-memory only,
   resets on container restart), the same summary shown in Discord
   notifications if you have those enabled.
 - **Status panel** — at-a-glance whether Plex refresh, hot-folder ingestion,
-  and Discord notifications are currently configured.
+  and Discord notifications are currently configured, plus the running
+  version.
 
 `public/index.html` is bind-mounted the same way `config/shows.json` is, so
 tweaking it doesn't require a rebuild.

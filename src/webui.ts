@@ -27,18 +27,30 @@ const APP_VERSION = readAppVersion();
 
 export interface WebUiConfig {
   password: string;
+  /** Optional required username. If unset, any username is accepted (password-only gate). */
+  username?: string;
 }
 
 export function webUiConfigFromEnv(): WebUiConfig | null {
   const password = process.env.WEBUI_PASSWORD;
   if (!password) return null;
-  return { password };
+  const username = process.env.WEBUI_USER || undefined;
+  return { password, username };
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  // timingSafeEqual throws on mismatched lengths, so bail out rather than
+  // short-circuit on length (which would otherwise leak length via timing).
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 /**
- * Constant-time password check against the decoded password from an HTTP
- * Basic Auth header (username is accepted but never checked — this is a
- * single shared-password gate, not a multi-user login).
+ * Constant-time check of the decoded credentials from an HTTP Basic Auth
+ * header. Username is only checked when WEBUI_USER is configured — leaving
+ * it unset keeps the original password-only gate (any username accepted).
  */
 function isAuthorized(req: IncomingMessage, webui: WebUiConfig): boolean {
   const header = req.headers.authorization;
@@ -52,14 +64,11 @@ function isAuthorized(req: IncomingMessage, webui: WebUiConfig): boolean {
   }
 
   const colonIndex = decoded.indexOf(":");
+  const username = colonIndex === -1 ? "" : decoded.slice(0, colonIndex);
   const password = colonIndex === -1 ? decoded : decoded.slice(colonIndex + 1);
 
-  const a = Buffer.from(password);
-  const b = Buffer.from(webui.password);
-  // timingSafeEqual throws on mismatched lengths, so pad rather than
-  // short-circuit on length (which would leak length via timing).
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  if (webui.username && !constantTimeEqual(username, webui.username)) return false;
+  return constantTimeEqual(password, webui.password);
 }
 
 function requireAuth(res: ServerResponse): void {

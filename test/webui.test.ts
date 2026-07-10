@@ -6,21 +6,27 @@ import { join } from "node:path";
 import { createApp, type ServerOptions } from "../src/server.js";
 import { webUiConfigFromEnv } from "../src/webui.js";
 
-test("webUiConfigFromEnv returns null unless WEBUI_PASSWORD is set", () => {
-  const saved = process.env.WEBUI_PASSWORD;
+test("webUiConfigFromEnv returns null unless WEBUI_PASSWORD is set, and picks up WEBUI_USER when present", () => {
+  const saved = { WEBUI_PASSWORD: process.env.WEBUI_PASSWORD, WEBUI_USER: process.env.WEBUI_USER };
   try {
     delete process.env.WEBUI_PASSWORD;
+    delete process.env.WEBUI_USER;
     assert.equal(webUiConfigFromEnv(), null);
 
     process.env.WEBUI_PASSWORD = "hunter2";
-    assert.deepEqual(webUiConfigFromEnv(), { password: "hunter2" });
+    assert.deepEqual(webUiConfigFromEnv(), { password: "hunter2", username: undefined });
+
+    process.env.WEBUI_USER = "admin";
+    assert.deepEqual(webUiConfigFromEnv(), { password: "hunter2", username: "admin" });
   } finally {
-    if (saved === undefined) delete process.env.WEBUI_PASSWORD;
-    else process.env.WEBUI_PASSWORD = saved;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
-async function makeScratchServer(webuiPassword: string | null) {
+async function makeScratchServer(webui: { password: string; username?: string } | null) {
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-webui-config-"));
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-webui-library-"));
   const configPath = join(configDir, "shows.json");
@@ -38,7 +44,7 @@ async function makeScratchServer(webuiPassword: string | null) {
     configPath,
     plex: null,
     discord: null,
-    webui: webuiPassword ? { password: webuiPassword } : null,
+    webui,
   };
 
   const server = createApp(opts);
@@ -69,7 +75,7 @@ test("web UI routes 503 when WEBUI_PASSWORD isn't configured", async () => {
 });
 
 test("web UI routes 401 with no or wrong credentials, and set WWW-Authenticate", async () => {
-  const { baseUrl, close } = await makeScratchServer("correct-password");
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const noAuth = await fetch(`${baseUrl}/api/shows`);
     assert.equal(noAuth.status, 401);
@@ -85,7 +91,7 @@ test("web UI routes 401 with no or wrong credentials, and set WWW-Authenticate",
 });
 
 test("GET /api/shows returns the config when authorized (any username, correct password)", async () => {
-  const { baseUrl, close } = await makeScratchServer("correct-password");
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const res = await fetch(`${baseUrl}/api/shows`, {
       headers: { Authorization: authHeader("correct-password", "someuser") },
@@ -100,7 +106,7 @@ test("GET /api/shows returns the config when authorized (any username, correct p
 });
 
 test("PUT /api/shows persists a valid config and rejects an invalid one without writing", async () => {
-  const { baseUrl, configPath, close } = await makeScratchServer("correct-password");
+  const { baseUrl, configPath, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const valid = {
       shows: [
@@ -132,7 +138,7 @@ test("PUT /api/shows persists a valid config and rejects an invalid one without 
 });
 
 test("POST /api/match-test never persists, even when it would auto-create", async () => {
-  const { baseUrl, configPath, close } = await makeScratchServer("correct-password");
+  const { baseUrl, configPath, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const before = await fs.readFile(configPath, "utf-8");
 
@@ -163,7 +169,7 @@ test("POST /api/match-test never persists, even when it would auto-create", asyn
 });
 
 test("GET /api/activity and /api/status respond with the expected shape", async () => {
-  const { baseUrl, close } = await makeScratchServer("correct-password");
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const activityRes = await fetch(`${baseUrl}/api/activity`, {
       headers: { Authorization: authHeader("correct-password") },
@@ -191,7 +197,7 @@ test("GET /api/activity and /api/status respond with the expected shape", async 
 });
 
 test("GET /ui serves the HTML page when authorized", async () => {
-  const { baseUrl, close } = await makeScratchServer("correct-password");
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const res = await fetch(`${baseUrl}/ui`, {
       headers: { Authorization: authHeader("correct-password") },
@@ -200,6 +206,28 @@ test("GET /ui serves the HTML page when authorized", async () => {
     assert.match(res.headers.get("content-type") ?? "", /text\/html/);
     const html = await res.text();
     assert.match(html, /<title>Domestique<\/title>/);
+  } finally {
+    await close();
+  }
+});
+
+test("when WEBUI_USER is configured, both username and password must match", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password", username: "admin" });
+  try {
+    const rightUserRightPass = await fetch(`${baseUrl}/api/shows`, {
+      headers: { Authorization: authHeader("correct-password", "admin") },
+    });
+    assert.equal(rightUserRightPass.status, 200);
+
+    const wrongUserRightPass = await fetch(`${baseUrl}/api/shows`, {
+      headers: { Authorization: authHeader("correct-password", "someoneelse") },
+    });
+    assert.equal(wrongUserRightPass.status, 401);
+
+    const rightUserWrongPass = await fetch(`${baseUrl}/api/shows`, {
+      headers: { Authorization: authHeader("wrong-password", "admin") },
+    });
+    assert.equal(rightUserWrongPass.status, 401);
   } finally {
     await close();
   }
