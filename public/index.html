@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Domestique</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --border: #8888881f;
+    --bg-card: #80808014;
+    --accent: #3b82f6;
+    --warn: #b45309;
+    --ok: #15803d;
+    --err: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 4rem;
+    line-height: 1.4;
+  }
+  h1 { margin-bottom: 0.25rem; }
+  .subtitle { opacity: 0.65; margin-top: 0; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  section {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    background: var(--bg-card);
+  }
+  h2 { margin-top: 0; font-size: 1.05rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { opacity: 0.7; font-weight: 600; }
+  code { font-size: 0.85em; opacity: 0.85; }
+  button {
+    font: inherit;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.danger { color: var(--err); border-color: var(--err); }
+  button:hover { opacity: 0.85; }
+  input[type=text], input[type=number], textarea, select {
+    font: inherit;
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: inherit;
+  }
+  label { display: block; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  label > span { display: block; margin-bottom: 0.25rem; opacity: 0.75; font-size: 0.82rem; }
+  textarea { min-height: 3.5rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem; }
+  .row { display: flex; gap: 0.75rem; }
+  .row > * { flex: 1; }
+  .badges { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .badge {
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border);
+  }
+  .badge.on { color: var(--ok); border-color: var(--ok); }
+  .badge.off { opacity: 0.55; }
+  .status-msg { font-size: 0.85rem; margin-top: 0.5rem; white-space: pre-wrap; }
+  .status-msg.ok { color: var(--ok); }
+  .status-msg.err { color: var(--err); }
+  .categories-editor .cat-row { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; align-items: center; }
+  .categories-editor .cat-row input { flex: 1; }
+  .categories-editor .cat-row input[name=episode] { flex: 0 0 4rem; }
+  .hidden { display: none !important; }
+  .activity-item { border-bottom: 1px solid var(--border); padding: 0.5rem 0; font-size: 0.85rem; }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-item .meta { opacity: 0.6; font-size: 0.78rem; }
+  .activity-item pre { margin: 0.25rem 0 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; }
+  .review-flag { color: var(--warn); font-weight: 600; }
+  .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+</style>
+</head>
+<body>
+
+<h1>Domestique</h1>
+<p class="subtitle">Show config editor, matcher tester, and activity log.</p>
+
+<section id="status-section">
+  <h2>Integrations</h2>
+  <div class="badges" id="status-badges">Loading…</div>
+</section>
+
+<section id="shows-section">
+  <div class="toolbar">
+    <h2 style="margin:0">Shows (<span id="shows-count">0</span>)</h2>
+    <button class="primary" id="add-show-btn">Add show</button>
+  </div>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
+    </thead>
+    <tbody id="shows-tbody"></tbody>
+  </table>
+</section>
+
+<section id="form-section" class="hidden">
+  <h2 id="form-title">Add show</h2>
+  <label><span>ID (lowercase, hyphenated, must be unique)</span>
+    <input type="text" id="f-id" placeholder="my-new-race">
+  </label>
+  <label><span>Folder name (Plex library subfolder)</span>
+    <input type="text" id="f-folderName" placeholder="My New Race">
+  </label>
+  <label><span>Filename prefix (optional — defaults to folder name)</span>
+    <input type="text" id="f-filenamePrefix" placeholder="">
+  </label>
+  <label><span>Match keywords (one phrase per line — every token in a phrase must be present to match)</span>
+    <textarea id="f-matchKeywords" placeholder="my new race&#10;mnr"></textarea>
+  </label>
+  <div class="row">
+    <label><span>Type</span>
+      <select id="f-type">
+        <option value="one-day">one-day</option>
+        <option value="stage-race">stage-race</option>
+        <option value="multi-category-fixed">multi-category-fixed</option>
+        <option value="multi-category-dynamic">multi-category-dynamic</option>
+      </select>
+    </label>
+    <label><span>Highlights variant of another show?</span>
+      <select id="f-isHighlights">
+        <option value="false">No</option>
+        <option value="true">Yes</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="categories-section" class="hidden">
+    <span>Categories (fixed episode order)</span>
+    <div class="categories-editor" id="categories-editor"></div>
+    <button id="add-category-btn" type="button">Add category</button>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="save-show-btn">Save</button>
+    <button id="cancel-show-btn">Cancel</button>
+  </div>
+  <div class="status-msg" id="form-status"></div>
+</section>
+
+<section id="match-tester-section">
+  <h2>Match tester</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Paste a raw torrent/release name to see which show it would match — or
+    that it would auto-create — without saving anything.
+  </p>
+  <div class="row">
+    <input type="text" id="match-input" placeholder="Tour-de-France-2026-Stage-05-1080p-Eurosport">
+    <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
+  </div>
+  <div id="match-result" class="status-msg"></div>
+</section>
+
+<section id="activity-section">
+  <div class="toolbar">
+    <h2 style="margin:0">Recent activity</h2>
+    <button id="refresh-activity-btn">Refresh</button>
+  </div>
+  <div id="activity-list">Loading…</div>
+</section>
+
+<script>
+let shows = [];
+let editingIndex = null; // null = adding new
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  let body = null;
+  try { body = await res.json(); } catch {}
+  if (!res.ok) {
+    const message = (body && body.error) ? body.error : `HTTP ${res.status}`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
+}
+
+async function loadStatus() {
+  const el = document.getElementById("status-badges");
+  try {
+    const status = await api("/api/status");
+    const badge = (label, info) => {
+      const on = info.enabled;
+      let extra = "";
+      if (on && info.sectionId) extra = ` (section ${esc(info.sectionId)})`;
+      if (on && info.dir) extra = ` (${esc(info.dir)})`;
+      if (on && info.hasMention) extra += " · mentions on";
+      return `<span class="badge ${on ? "on" : "off"}">${label}: ${on ? "enabled" : "disabled"}${extra}</span>`;
+    };
+    el.innerHTML = [
+      badge("Plex", status.plex),
+      badge("Discord", status.discord),
+      badge("Hot folder", status.hotfolder),
+    ].join("");
+  } catch (err) {
+    el.textContent = `Failed to load status: ${err.message}`;
+  }
+}
+
+function showsTableRow(show, index) {
+  const flags = [];
+  if (show.isHighlights) flags.push("highlights");
+  if (show.autoCreated) flags.push("auto-created");
+  return `<tr>
+    <td><code>${esc(show.id)}</code></td>
+    <td>${esc(show.folderName)}</td>
+    <td>${esc(show.type)}</td>
+    <td>${show.matchKeywords.length}</td>
+    <td>${flags.join(", ")}</td>
+    <td>
+      <button data-edit="${index}">Edit</button>
+      <button class="danger" data-delete="${index}">Delete</button>
+    </td>
+  </tr>`;
+}
+
+async function loadShows() {
+  const data = await api("/api/shows");
+  shows = data.shows;
+  document.getElementById("shows-count").textContent = shows.length;
+  const tbody = document.getElementById("shows-tbody");
+  tbody.innerHTML = shows.map((s, i) => showsTableRow(s, i)).join("");
+  tbody.querySelectorAll("[data-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => openForm(parseInt(btn.dataset.edit, 10)));
+  });
+  tbody.querySelectorAll("[data-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteShow(parseInt(btn.dataset.delete, 10)));
+  });
+}
+
+function categoryRowHtml(cat) {
+  return `<div class="cat-row">
+    <input name="episode" type="number" value="${cat.episode}" placeholder="ep">
+    <input name="title" type="text" value="${esc(cat.title)}" placeholder="title">
+    <input name="include" type="text" value="${esc(cat.include.join(", "))}" placeholder="include tokens">
+    <input name="exclude" type="text" value="${esc((cat.exclude || []).join(", "))}" placeholder="exclude tokens">
+    <button type="button" data-remove-cat>✕</button>
+  </div>`;
+}
+
+function renderCategories(categories) {
+  const editor = document.getElementById("categories-editor");
+  editor.innerHTML = categories.map(categoryRowHtml).join("");
+  editor.querySelectorAll("[data-remove-cat]").forEach((btn) => {
+    btn.addEventListener("click", (e) => e.target.closest(".cat-row").remove());
+  });
+}
+
+function readCategoriesFromForm() {
+  const rows = document.querySelectorAll("#categories-editor .cat-row");
+  const splitTokens = (s) => s.split(/[,\s]+/).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  return Array.from(rows).map((row) => ({
+    episode: parseInt(row.querySelector('[name=episode]').value, 10),
+    title: row.querySelector('[name=title]').value.trim(),
+    include: splitTokens(row.querySelector('[name=include]').value),
+    exclude: splitTokens(row.querySelector('[name=exclude]').value),
+  }));
+}
+
+function updateCategoriesVisibility() {
+  const isFixed = document.getElementById("f-type").value === "multi-category-fixed";
+  document.getElementById("categories-section").classList.toggle("hidden", !isFixed);
+}
+
+function openForm(index) {
+  editingIndex = index;
+  const show = index === null ? null : shows[index];
+  document.getElementById("form-title").textContent = show ? `Edit "${show.id}"` : "Add show";
+  document.getElementById("f-id").value = show ? show.id : "";
+  document.getElementById("f-folderName").value = show ? show.folderName : "";
+  document.getElementById("f-filenamePrefix").value = show && show.filenamePrefix ? show.filenamePrefix : "";
+  document.getElementById("f-matchKeywords").value = show ? show.matchKeywords.join("\n") : "";
+  document.getElementById("f-type").value = show ? show.type : "one-day";
+  document.getElementById("f-isHighlights").value = show && show.isHighlights ? "true" : "false";
+  renderCategories(show && show.categories ? show.categories : []);
+  updateCategoriesVisibility();
+  document.getElementById("form-status").textContent = "";
+  document.getElementById("form-section").classList.remove("hidden");
+  document.getElementById("form-section").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeForm() {
+  editingIndex = null;
+  document.getElementById("form-section").classList.add("hidden");
+}
+
+async function saveShow() {
+  const statusEl = document.getElementById("form-status");
+  const id = document.getElementById("f-id").value.trim();
+  const folderName = document.getElementById("f-folderName").value.trim();
+  const filenamePrefix = document.getElementById("f-filenamePrefix").value.trim();
+  const matchKeywords = document.getElementById("f-matchKeywords").value
+    .split("\n").map((s) => s.trim()).filter(Boolean);
+  const type = document.getElementById("f-type").value;
+  const isHighlights = document.getElementById("f-isHighlights").value === "true";
+
+  if (!id || !folderName || matchKeywords.length === 0) {
+    statusEl.textContent = "ID, folder name, and at least one match keyword phrase are required.";
+    statusEl.className = "status-msg err";
+    return;
+  }
+
+  const show = { id, folderName, matchKeywords, type };
+  if (filenamePrefix) show.filenamePrefix = filenamePrefix;
+  if (isHighlights) show.isHighlights = true;
+  if (type === "multi-category-fixed") show.categories = readCategoriesFromForm();
+
+  const next = [...shows];
+  if (editingIndex === null) {
+    next.push(show);
+  } else {
+    next[editingIndex] = show;
+  }
+
+  try {
+    await api("/api/shows", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shows: next }),
+    });
+    statusEl.textContent = "Saved.";
+    statusEl.className = "status-msg ok";
+    await loadShows();
+    closeForm();
+  } catch (err) {
+    statusEl.textContent = `Failed to save: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+
+async function deleteShow(index) {
+  const show = shows[index];
+  if (!confirm(`Delete "${show.id}"? This only removes the config entry — already-archived files are untouched.`)) return;
+  const next = shows.filter((_, i) => i !== index);
+  try {
+    await api("/api/shows", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shows: next }),
+    });
+    await loadShows();
+  } catch (err) {
+    alert(`Failed to delete: ${err.message}`);
+  }
+}
+
+async function runMatchTest() {
+  const input = document.getElementById("match-input").value.trim();
+  const resultEl = document.getElementById("match-result");
+  if (!input) return;
+  try {
+    const data = await api("/api/match-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: input }),
+    });
+    const m = data.match;
+    const lines = [];
+    if (m.autoCreated) {
+      lines.push(`⚠️ No existing show matches — would auto-create "${m.showId}" (folder "${m.folderName}", type ${m.type}).`);
+    } else {
+      lines.push(`✅ Matches "${m.showId}" (folder "${m.folderName}", type ${m.type}${m.isHighlights ? ", highlights" : ""}).`);
+      lines.push(`Matched on: ${m.matchedTokens.join(" ")} (specificity ${m.specificity})`);
+    }
+    const p = data.parsed;
+    lines.push(`Parsed: year=${p.year}${p.yearWasExplicit ? "" : " (defaulted)"}, stage=${p.stageNum ?? "—"}, part=${p.partNum ?? "—"}${p.partTotal ? `/${p.partTotal}` : ""}, resolution=${p.resolution ?? "—"}, broadcaster=${p.broadcaster ?? "—"}, highlights=${p.isHighlights}`);
+    resultEl.textContent = lines.join("\n");
+    resultEl.className = `status-msg ${m.autoCreated ? "err" : "ok"}`;
+  } catch (err) {
+    resultEl.textContent = `Failed: ${err.message}`;
+    resultEl.className = "status-msg err";
+  }
+}
+
+async function loadActivity() {
+  const el = document.getElementById("activity-list");
+  try {
+    const data = await api("/api/activity");
+    if (data.events.length === 0) {
+      el.textContent = "No activity recorded yet.";
+      return;
+    }
+    el.innerHTML = data.events.map((e) => `
+      <div class="activity-item">
+        <div class="meta">${esc(new Date(e.timestamp).toLocaleString())} — ${esc(e.torrentName)} ${e.reviewWorthy ? '<span class="review-flag">(needs review)</span>' : ""}</div>
+        <pre>${esc(e.lines.join("\n"))}</pre>
+      </div>
+    `).join("");
+  } catch (err) {
+    el.textContent = `Failed to load activity: ${err.message}`;
+  }
+}
+
+document.getElementById("add-show-btn").addEventListener("click", () => openForm(null));
+document.getElementById("cancel-show-btn").addEventListener("click", closeForm);
+document.getElementById("save-show-btn").addEventListener("click", saveShow);
+document.getElementById("f-type").addEventListener("change", updateCategoriesVisibility);
+document.getElementById("add-category-btn").addEventListener("click", () => {
+  const editor = document.getElementById("categories-editor");
+  editor.insertAdjacentHTML("beforeend", categoryRowHtml({ episode: editor.children.length + 1, title: "", include: [], exclude: [] }));
+  editor.lastElementChild.querySelector("[data-remove-cat]").addEventListener("click", (e) => e.target.closest(".cat-row").remove());
+});
+document.getElementById("match-btn").addEventListener("click", runMatchTest);
+document.getElementById("match-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runMatchTest(); });
+document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
+
+loadStatus();
+loadShows();
+loadActivity();
+</script>
+</body>
+</html>

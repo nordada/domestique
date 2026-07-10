@@ -6,6 +6,8 @@ import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems } from "./fileops.js";
 import { plexConfigFromEnv, refreshPlexFolder, type PlexConfig } from "./plex.js";
 import { discordConfigFromEnv, sendDiscordNotification, type DiscordConfig } from "./discord.js";
+import { recordActivity } from "./activity.js";
+import { webUiConfigFromEnv, handleWebUiRequest, type WebUiConfig } from "./webui.js";
 
 export interface ServerOptions {
   port: number;
@@ -13,6 +15,7 @@ export interface ServerOptions {
   configPath: string;
   plex: PlexConfig | null;
   discord: DiscordConfig | null;
+  webui: WebUiConfig | null;
 }
 
 export interface TorrentDonePayload {
@@ -134,6 +137,13 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
     }
   }
 
+  recordActivity({
+    timestamp: new Date().toISOString(),
+    torrentName: payload.name,
+    lines: summaryLines,
+    reviewWorthy,
+  });
+
   return results;
 }
 
@@ -142,6 +152,10 @@ export function createApp(opts: ServerOptions) {
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    if (await handleWebUiRequest(req, res, opts)) {
       return;
     }
 
@@ -193,6 +207,7 @@ export function optionsFromEnv(): ServerOptions {
 
   const plex = plexConfigFromEnv(libraryRoot);
   const discord = discordConfigFromEnv();
+  const webui = webUiConfigFromEnv();
 
-  return { port, libraryRoot, configPath, plex, discord };
+  return { port, libraryRoot, configPath, plex, discord, webui };
 }

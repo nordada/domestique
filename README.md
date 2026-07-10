@@ -315,6 +315,47 @@ about the archiver changes, and startup logs will say `discord: disabled`.
 A failed Discord post is only ever logged as a warning; it never affects
 whether a file gets archived.
 
+### 7. Optional: web UI
+
+A small web UI at `/ui` for editing `config/shows.json` without hand-editing
+JSON, testing the matcher against a sample release name, and viewing recent
+activity and integration status. Set in `.env`:
+
+```
+WEBUI_PASSWORD=<a password you choose>
+```
+
+Then browse to `http://<TOWER-IP>:8420/ui` — your browser will prompt for
+credentials (any username, only the password is checked; it's a single
+shared-password gate, not a per-user login).
+
+**This one fails closed, not open**: unlike Plex/hot-folder/Discord above,
+where leaving the env var unset just disables the feature, leaving
+`WEBUI_PASSWORD` unset makes `/ui` and its `/api/*` routes respond `503`
+rather than being reachable without a password — this surface can read and
+overwrite your config, so "unconfigured" must not mean "open to anyone on
+the LAN."
+
+What's in it:
+- **Shows table** — add/edit/delete entries, including the `categories`
+  editor for `multi-category-fixed` shows (Nationals/Worlds-style). Saves
+  write the whole file back through the same `saveConfig` validation
+  (duplicate ids, required fields, etc.) the app already uses, so an invalid
+  save is rejected with the same error message you'd get from a bad
+  hand-edit — nothing is written to disk unless it's valid.
+- **Match tester** — paste a raw release name and see which show it matches
+  (or that it would auto-create, and as what) using the app's real
+  parser/matcher, without touching `config/shows.json` or the library. Handy
+  for checking a `matchKeywords` change before a real download exercises it.
+- **Activity log** — the last ~100 torrent-done events (in-memory only,
+  resets on container restart), the same summary shown in Discord
+  notifications if you have those enabled.
+- **Status panel** — at-a-glance whether Plex refresh, hot-folder ingestion,
+  and Discord notifications are currently configured.
+
+`public/index.html` is bind-mounted the same way `config/shows.json` is, so
+tweaking it doesn't require a rebuild.
+
 ## Known limitations / assumptions (check these against reality as you go)
 
 - **UCI XCC/XCO World Cup** isn't in `config/shows.json` yet — it wasn't in

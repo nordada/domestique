@@ -13,6 +13,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
 COPY config ./config
+COPY public ./public
 
 EXPOSE 8420
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8420/health || exit 1

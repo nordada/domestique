@@ -18,6 +18,11 @@ app.listen(opts.port, () => {
       ? `  discord:      enabled${opts.discord.mentionUserId ? ` (mentions <@${opts.discord.mentionUserId}> on review-worthy events)` : " (no mention user set)"}`
       : `  discord:      disabled (set DISCORD_WEBHOOK_URL to enable)`
   );
+  console.log(
+    opts.webui
+      ? `  web ui:       enabled (http://localhost:${opts.port}/ui)`
+      : `  web ui:       disabled (set WEBUI_PASSWORD to enable)`
+  );
 
   const hotfolder = hotfolderConfigFromEnv();
   if (hotfolder) {

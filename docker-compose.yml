@@ -47,6 +47,12 @@ services:
       # disables the feature when DISCORD_WEBHOOK_URL isn't present.
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MENTION_USER_ID: ${DISCORD_MENTION_USER_ID:-}
+      # Optional web UI (config editor, match tester, activity log) at
+      # /ui. Unlike the integrations above, leaving this unset does NOT
+      # leave the UI reachable without a password — its routes respond 503
+      # until WEBUI_PASSWORD is set, since it exposes read/write config
+      # access over HTTP.
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
     volumes:
       # Transmission's completed-downloads share (read-only: we only copy from here).
       # Mounted at /downloads to match Transmission's own internal path.
@@ -63,3 +69,7 @@ services:
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.
       - ./config/shows.json:${CONFIG_CONTAINER_PATH}
+      # Web UI static assets, bind-mounted read-only for the same reason as
+      # config/shows.json above — HTML/CSS/JS tweaks take effect on the next
+      # request without an image rebuild.
+      - ./public:/app/public:ro
