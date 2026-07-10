@@ -19,7 +19,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     max-width: 960px;
     margin: 0 auto;
-    padding: 1.5rem 1rem 4rem;
+    padding: 1.5rem 1rem 2rem;
     line-height: 1.4;
   }
   h1 { margin-bottom: 0.25rem; }
@@ -84,33 +84,44 @@
   .review-flag { color: var(--warn); font-weight: 600; }
   .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
   .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+  footer { text-align: center; opacity: 0.45; font-size: 0.78rem; padding: 1rem 0 2rem; }
 </style>
 </head>
 <body>
 
 <h1>Domestique</h1>
-<p class="subtitle">Show config editor, matcher tester, and activity log.</p>
+<p class="subtitle">Event config editor, matcher tester, and activity log.</p>
 
-<section id="status-section">
-  <h2>Integrations</h2>
-  <div class="badges" id="status-badges">Loading…</div>
+<section id="match-tester-section">
+  <h2>Match tester</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Paste a raw torrent/release name to see which event it would match — or
+    that it would auto-create — without saving anything. If it wouldn't
+    match, add it as a new event below.
+  </p>
+  <div class="row">
+    <input type="text" id="match-input" placeholder="Tour-de-France-2026-Stage-05-1080p-Eurosport">
+    <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
+  </div>
+  <div id="match-result" class="status-msg"></div>
+  <button id="add-from-match-btn" class="hidden" style="margin-top:0.5rem;">Add as new event</button>
 </section>
 
-<section id="shows-section">
+<section id="events-section">
   <div class="toolbar">
-    <h2 style="margin:0">Shows (<span id="shows-count">0</span>)</h2>
-    <button class="primary" id="add-show-btn">Add show</button>
+    <h2 style="margin:0">Events (<span id="events-count">0</span>)</h2>
+    <button class="primary" id="add-event-btn">Add event</button>
   </div>
   <table>
     <thead>
       <tr><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
     </thead>
-    <tbody id="shows-tbody"></tbody>
+    <tbody id="events-tbody"></tbody>
   </table>
 </section>
 
 <section id="form-section" class="hidden">
-  <h2 id="form-title">Add show</h2>
+  <h2 id="form-title">Add event</h2>
   <label><span>ID (lowercase, hyphenated, must be unique)</span>
     <input type="text" id="f-id" placeholder="my-new-race">
   </label>
@@ -132,7 +143,7 @@
         <option value="multi-category-dynamic">multi-category-dynamic</option>
       </select>
     </label>
-    <label><span>Highlights variant of another show?</span>
+    <label><span>Highlights variant of another event?</span>
       <select id="f-isHighlights">
         <option value="false">No</option>
         <option value="true">Yes</option>
@@ -147,23 +158,15 @@
   </div>
 
   <div class="actions">
-    <button class="primary" id="save-show-btn">Save</button>
-    <button id="cancel-show-btn">Cancel</button>
+    <button class="primary" id="save-event-btn">Save</button>
+    <button id="cancel-event-btn">Cancel</button>
   </div>
   <div class="status-msg" id="form-status"></div>
 </section>
 
-<section id="match-tester-section">
-  <h2>Match tester</h2>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Paste a raw torrent/release name to see which show it would match — or
-    that it would auto-create — without saving anything.
-  </p>
-  <div class="row">
-    <input type="text" id="match-input" placeholder="Tour-de-France-2026-Stage-05-1080p-Eurosport">
-    <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
-  </div>
-  <div id="match-result" class="status-msg"></div>
+<section id="status-section">
+  <h2>Integrations</h2>
+  <div class="badges" id="status-badges">Loading…</div>
 </section>
 
 <section id="activity-section">
@@ -174,8 +177,10 @@
   <div id="activity-list">Loading…</div>
 </section>
 
+<footer id="app-footer">Domestique</footer>
+
 <script>
-let shows = [];
+let events = [];
 let editingIndex = null; // null = adding new
 
 async function api(path, options) {
@@ -212,20 +217,23 @@ async function loadStatus() {
       badge("Discord", status.discord),
       badge("Hot folder", status.hotfolder),
     ].join("");
+    if (status.version) {
+      document.getElementById("app-footer").textContent = `Domestique v${status.version}`;
+    }
   } catch (err) {
     el.textContent = `Failed to load status: ${err.message}`;
   }
 }
 
-function showsTableRow(show, index) {
+function eventsTableRow(event, index) {
   const flags = [];
-  if (show.isHighlights) flags.push("highlights");
-  if (show.autoCreated) flags.push("auto-created");
+  if (event.isHighlights) flags.push("highlights");
+  if (event.autoCreated) flags.push("auto-created");
   return `<tr>
-    <td><code>${esc(show.id)}</code></td>
-    <td>${esc(show.folderName)}</td>
-    <td>${esc(show.type)}</td>
-    <td>${show.matchKeywords.length}</td>
+    <td><code>${esc(event.id)}</code></td>
+    <td>${esc(event.folderName)}</td>
+    <td>${esc(event.type)}</td>
+    <td>${event.matchKeywords.length}</td>
     <td>${flags.join(", ")}</td>
     <td>
       <button data-edit="${index}">Edit</button>
@@ -234,17 +242,17 @@ function showsTableRow(show, index) {
   </tr>`;
 }
 
-async function loadShows() {
+async function loadEvents() {
   const data = await api("/api/shows");
-  shows = data.shows;
-  document.getElementById("shows-count").textContent = shows.length;
-  const tbody = document.getElementById("shows-tbody");
-  tbody.innerHTML = shows.map((s, i) => showsTableRow(s, i)).join("");
+  events = data.shows;
+  document.getElementById("events-count").textContent = events.length;
+  const tbody = document.getElementById("events-tbody");
+  tbody.innerHTML = events.map((e, i) => eventsTableRow(e, i)).join("");
   tbody.querySelectorAll("[data-edit]").forEach((btn) => {
     btn.addEventListener("click", () => openForm(parseInt(btn.dataset.edit, 10)));
   });
   tbody.querySelectorAll("[data-delete]").forEach((btn) => {
-    btn.addEventListener("click", () => deleteShow(parseInt(btn.dataset.delete, 10)));
+    btn.addEventListener("click", () => deleteEvent(parseInt(btn.dataset.delete, 10)));
   });
 }
 
@@ -284,15 +292,15 @@ function updateCategoriesVisibility() {
 
 function openForm(index) {
   editingIndex = index;
-  const show = index === null ? null : shows[index];
-  document.getElementById("form-title").textContent = show ? `Edit "${show.id}"` : "Add show";
-  document.getElementById("f-id").value = show ? show.id : "";
-  document.getElementById("f-folderName").value = show ? show.folderName : "";
-  document.getElementById("f-filenamePrefix").value = show && show.filenamePrefix ? show.filenamePrefix : "";
-  document.getElementById("f-matchKeywords").value = show ? show.matchKeywords.join("\n") : "";
-  document.getElementById("f-type").value = show ? show.type : "one-day";
-  document.getElementById("f-isHighlights").value = show && show.isHighlights ? "true" : "false";
-  renderCategories(show && show.categories ? show.categories : []);
+  const event = index === null ? null : events[index];
+  document.getElementById("form-title").textContent = event ? `Edit "${event.id}"` : "Add event";
+  document.getElementById("f-id").value = event ? event.id : "";
+  document.getElementById("f-folderName").value = event ? event.folderName : "";
+  document.getElementById("f-filenamePrefix").value = event && event.filenamePrefix ? event.filenamePrefix : "";
+  document.getElementById("f-matchKeywords").value = event ? event.matchKeywords.join("\n") : "";
+  document.getElementById("f-type").value = event ? event.type : "one-day";
+  document.getElementById("f-isHighlights").value = event && event.isHighlights ? "true" : "false";
+  renderCategories(event && event.categories ? event.categories : []);
   updateCategoriesVisibility();
   document.getElementById("form-status").textContent = "";
   document.getElementById("form-section").classList.remove("hidden");
@@ -304,7 +312,7 @@ function closeForm() {
   document.getElementById("form-section").classList.add("hidden");
 }
 
-async function saveShow() {
+async function saveEvent() {
   const statusEl = document.getElementById("form-status");
   const id = document.getElementById("f-id").value.trim();
   const folderName = document.getElementById("f-folderName").value.trim();
@@ -320,16 +328,16 @@ async function saveShow() {
     return;
   }
 
-  const show = { id, folderName, matchKeywords, type };
-  if (filenamePrefix) show.filenamePrefix = filenamePrefix;
-  if (isHighlights) show.isHighlights = true;
-  if (type === "multi-category-fixed") show.categories = readCategoriesFromForm();
+  const event = { id, folderName, matchKeywords, type };
+  if (filenamePrefix) event.filenamePrefix = filenamePrefix;
+  if (isHighlights) event.isHighlights = true;
+  if (type === "multi-category-fixed") event.categories = readCategoriesFromForm();
 
-  const next = [...shows];
+  const next = [...events];
   if (editingIndex === null) {
-    next.push(show);
+    next.push(event);
   } else {
-    next[editingIndex] = show;
+    next[editingIndex] = event;
   }
 
   try {
@@ -340,7 +348,7 @@ async function saveShow() {
     });
     statusEl.textContent = "Saved.";
     statusEl.className = "status-msg ok";
-    await loadShows();
+    await loadEvents();
     closeForm();
   } catch (err) {
     statusEl.textContent = `Failed to save: ${err.message}`;
@@ -348,26 +356,31 @@ async function saveShow() {
   }
 }
 
-async function deleteShow(index) {
-  const show = shows[index];
-  if (!confirm(`Delete "${show.id}"? This only removes the config entry — already-archived files are untouched.`)) return;
-  const next = shows.filter((_, i) => i !== index);
+async function deleteEvent(index) {
+  const event = events[index];
+  if (!confirm(`Delete "${event.id}"? This only removes the config entry — already-archived files are untouched.`)) return;
+  const next = events.filter((_, i) => i !== index);
   try {
     await api("/api/shows", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shows: next }),
     });
-    await loadShows();
+    await loadEvents();
   } catch (err) {
     alert(`Failed to delete: ${err.message}`);
   }
 }
 
+let lastMatchGuess = null;
+
 async function runMatchTest() {
   const input = document.getElementById("match-input").value.trim();
   const resultEl = document.getElementById("match-result");
+  const addBtn = document.getElementById("add-from-match-btn");
   if (!input) return;
+  lastMatchGuess = null;
+  addBtn.classList.add("hidden");
   try {
     const data = await api("/api/match-test", {
       method: "POST",
@@ -377,7 +390,9 @@ async function runMatchTest() {
     const m = data.match;
     const lines = [];
     if (m.autoCreated) {
-      lines.push(`⚠️ No existing show matches — would auto-create "${m.showId}" (folder "${m.folderName}", type ${m.type}).`);
+      lines.push(`⚠️ No existing event matches — would auto-create "${m.showId}" (folder "${m.folderName}", type ${m.type}).`);
+      lastMatchGuess = { id: m.showId, folderName: m.folderName, type: m.type };
+      addBtn.classList.remove("hidden");
     } else {
       lines.push(`✅ Matches "${m.showId}" (folder "${m.folderName}", type ${m.type}${m.isHighlights ? ", highlights" : ""}).`);
       lines.push(`Matched on: ${m.matchedTokens.join(" ")} (specificity ${m.specificity})`);
@@ -411,9 +426,9 @@ async function loadActivity() {
   }
 }
 
-document.getElementById("add-show-btn").addEventListener("click", () => openForm(null));
-document.getElementById("cancel-show-btn").addEventListener("click", closeForm);
-document.getElementById("save-show-btn").addEventListener("click", saveShow);
+document.getElementById("add-event-btn").addEventListener("click", () => openForm(null));
+document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
+document.getElementById("save-event-btn").addEventListener("click", saveEvent);
 document.getElementById("f-type").addEventListener("change", updateCategoriesVisibility);
 document.getElementById("add-category-btn").addEventListener("click", () => {
   const editor = document.getElementById("categories-editor");
@@ -422,10 +437,19 @@ document.getElementById("add-category-btn").addEventListener("click", () => {
 });
 document.getElementById("match-btn").addEventListener("click", runMatchTest);
 document.getElementById("match-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runMatchTest(); });
+document.getElementById("add-from-match-btn").addEventListener("click", () => {
+  if (!lastMatchGuess) return;
+  openForm(null);
+  document.getElementById("f-id").value = lastMatchGuess.id;
+  document.getElementById("f-folderName").value = lastMatchGuess.folderName;
+  document.getElementById("f-matchKeywords").value = lastMatchGuess.folderName.toLowerCase();
+  document.getElementById("f-type").value = lastMatchGuess.type;
+  updateCategoriesVisibility();
+});
 document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
 
 loadStatus();
-loadShows();
+loadEvents();
 loadActivity();
 </script>
 </body>

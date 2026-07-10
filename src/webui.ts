@@ -12,6 +12,18 @@ import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML_PATH = join(__dirname, "..", "public", "index.html");
+const PACKAGE_JSON_PATH = join(__dirname, "..", "package.json");
+
+function readAppVersion(): string {
+  try {
+    const raw = readFileSync(PACKAGE_JSON_PATH, "utf-8");
+    return (JSON.parse(raw) as { version?: string }).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+const APP_VERSION = readAppVersion();
 
 export interface WebUiConfig {
   password: string;
@@ -174,6 +186,7 @@ export async function handleWebUiRequest(
     if (req.method === "GET" && url === "/api/status") {
       const hotfolder = hotfolderConfigFromEnv();
       sendJson(res, 200, {
+        version: APP_VERSION,
         plex: opts.plex ? { enabled: true, sectionId: opts.plex.sectionId, url: opts.plex.url } : { enabled: false },
         discord: opts.discord
           ? { enabled: true, hasMention: Boolean(opts.discord.mentionUserId) }

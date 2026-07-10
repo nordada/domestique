@@ -176,9 +176,15 @@ test("GET /api/activity and /api/status respond with the expected shape", async 
       headers: { Authorization: authHeader("correct-password") },
     });
     assert.equal(statusRes.status, 200);
-    const statusBody = (await statusRes.json()) as { plex: { enabled: boolean }; discord: { enabled: boolean } };
+    const statusBody = (await statusRes.json()) as {
+      version: string;
+      plex: { enabled: boolean };
+      discord: { enabled: boolean };
+    };
     assert.equal(statusBody.plex.enabled, false);
     assert.equal(statusBody.discord.enabled, false);
+    assert.equal(typeof statusBody.version, "string");
+    assert.ok(statusBody.version.length > 0);
   } finally {
     await close();
   }
