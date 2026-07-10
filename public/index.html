@@ -165,6 +165,24 @@
   <div class="status-msg" id="form-status"></div>
 </section>
 
+<section id="upload-section">
+  <h2>Upload</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Send a file or folder straight into the library, bypassing Transmission
+    and the hot folder entirely — processed immediately (no polling wait),
+    using the same archiving pipeline as everything else. Uploading a folder
+    is how you'd send a multi-part stage release (each part as its own
+    file) so the parts group together correctly.
+  </p>
+  <div class="row">
+    <button id="upload-file-btn">Upload file…</button>
+    <button id="upload-folder-btn">Upload folder…</button>
+  </div>
+  <input type="file" id="upload-file-input" class="hidden">
+  <input type="file" id="upload-folder-input" class="hidden" webkitdirectory multiple>
+  <div id="upload-status" class="status-msg"></div>
+</section>
+
 <section id="status-section">
   <h2>Integrations</h2>
   <div class="badges" id="status-badges">Loading…</div>
@@ -424,6 +442,62 @@ async function runMatchTest() {
   }
 }
 
+function renderUploadResults(statusEl, results) {
+  const lines = results.map((r) => {
+    if (r.status === "copied") return `✅ ${r.destPath}${r.warning ? ` — ⚠️ ${r.warning}` : ""}`;
+    return `⏭️ skipped "${r.sourceFile}": ${r.warning ?? ""}`;
+  });
+  statusEl.textContent = lines.join("\n");
+  statusEl.className = `status-msg ${results.some((r) => r.status !== "copied") ? "err" : "ok"}`;
+}
+
+async function uploadSingleFile(file) {
+  const statusEl = document.getElementById("upload-status");
+  statusEl.textContent = `Uploading "${file.name}"…`;
+  statusEl.className = "status-msg";
+  try {
+    const data = await api(`/api/upload/file?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      body: file,
+    });
+    renderUploadResults(statusEl, data.results);
+    await loadActivity();
+  } catch (err) {
+    statusEl.textContent = `Upload failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+
+async function uploadFolder(fileList) {
+  const statusEl = document.getElementById("upload-status");
+  const files = Array.from(fileList);
+  if (files.length === 0) return;
+  const folder = (files[0].webkitRelativePath || files[0].name).split("/")[0];
+
+  try {
+    statusEl.textContent = `Starting upload of "${folder}"…`;
+    statusEl.className = "status-msg";
+    await api(`/api/upload/folder-start?folder=${encodeURIComponent(folder)}`, { method: "POST" });
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      statusEl.textContent = `Uploading "${folder}": ${i + 1}/${files.length} (${file.name})…`;
+      await api(
+        `/api/upload/folder-file?folder=${encodeURIComponent(folder)}&name=${encodeURIComponent(file.name)}`,
+        { method: "POST", body: file }
+      );
+    }
+
+    statusEl.textContent = `Processing "${folder}"…`;
+    const data = await api(`/api/upload/folder-finalize?folder=${encodeURIComponent(folder)}`, { method: "POST" });
+    renderUploadResults(statusEl, data.results);
+    await loadActivity();
+  } catch (err) {
+    statusEl.textContent = `Upload failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+
 async function loadActivity() {
   const el = document.getElementById("activity-list");
   try {
@@ -465,6 +539,16 @@ document.getElementById("add-from-match-btn").addEventListener("click", () => {
   updateCategoriesVisibility();
 });
 document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
+document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
+document.getElementById("upload-folder-btn").addEventListener("click", () => document.getElementById("upload-folder-input").click());
+document.getElementById("upload-file-input").addEventListener("change", (e) => {
+  if (e.target.files.length > 0) uploadSingleFile(e.target.files[0]);
+  e.target.value = "";
+});
+document.getElementById("upload-folder-input").addEventListener("change", (e) => {
+  if (e.target.files.length > 0) uploadFolder(e.target.files);
+  e.target.value = "";
+});
 
 loadStatus();
 loadEvents();

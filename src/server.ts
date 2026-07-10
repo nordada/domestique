@@ -148,14 +148,14 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 }
 
 export function createApp(opts: ServerOptions) {
-  return createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
 
-    if (await handleWebUiRequest(req, res, opts)) {
+    if (await handleWebUiRequest(req, res, opts, handleTorrentDone)) {
       return;
     }
 
@@ -187,6 +187,15 @@ export function createApp(opts: ServerOptions) {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
   });
+
+  // Node's default requestTimeout (5 minutes) would kill a large web-UI
+  // upload (src/upload.ts) partway through on anything less than a very
+  // fast connection. Disabling it is reasonable here since this is a
+  // password-gated LAN tool, not a public endpoint where slowloris-style
+  // abuse is a real concern.
+  server.requestTimeout = 0;
+
+  return server;
 }
 
 export function optionsFromEnv(): ServerOptions {

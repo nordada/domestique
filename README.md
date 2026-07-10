@@ -357,6 +357,20 @@ What's in it:
   hand-edit — nothing is written to disk unless it's valid. (Internally this
   is still the `ShowConfig`/`ShowsConfigFile` shape in `src/config.ts` — only
   the file name, API route, and UI wording say "events".)
+- **Upload** — send a file or folder straight into the library from the
+  browser, bypassing Transmission and the hot folder entirely. Unlike a real
+  hot-folder drop, an HTTP upload has a known length and is unambiguously
+  "done" the moment it finishes, so this never waits out the hot-folder's
+  stability-poll interval — it's staged and processed immediately through
+  the exact same pipeline the webhook uses. The staged copy is deleted right
+  after successful processing (the real original still lives on your own
+  machine); a failed upload is left in place so you can investigate or retry
+  without re-uploading. Uploading a folder (multiple files at once) is how
+  you'd hand it a multi-part stage release — the parts group together
+  (`pt01`/`pt02`/etc) exactly like a real folder-based drop. Staged uploads
+  live in a hidden `.uploads-tmp` folder under `LIBRARY_ROOT` (not the
+  container's own `/tmp`) since it's already read-write and already sized
+  for large video files — no new volume mount needed.
 - **Activity log** — the last ~100 torrent-done events (in-memory only,
   resets on container restart), the same summary shown in Discord
   notifications if you have those enabled.

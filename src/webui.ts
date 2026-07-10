@@ -8,6 +8,7 @@ import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity } from "./activity.js";
 import { hotfolderConfigFromEnv } from "./hotfolder.js";
+import { handleUploadRequest, type ProcessTorrentDone } from "./upload.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -104,7 +105,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 export async function handleWebUiRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  opts: ServerOptions
+  opts: ServerOptions,
+  processTorrentDone: ProcessTorrentDone
 ): Promise<boolean> {
   const url = req.url ?? "";
   if (url !== "/ui" && !url.startsWith("/api/")) return false;
@@ -117,6 +119,12 @@ export async function handleWebUiRequest(
   if (!isAuthorized(req, opts.webui)) {
     requireAuth(res);
     return true;
+  }
+
+  if (url.startsWith("/api/upload/")) {
+    if (await handleUploadRequest(req, res, opts, processTorrentDone)) {
+      return true;
+    }
   }
 
   try {
