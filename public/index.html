@@ -243,7 +243,7 @@ function eventsTableRow(event, index) {
 }
 
 async function loadEvents() {
-  const data = await api("/api/shows");
+  const data = await api("/api/events");
   events = data.shows;
   document.getElementById("events-count").textContent = events.length;
   const tbody = document.getElementById("events-tbody");
@@ -341,7 +341,7 @@ async function saveEvent() {
   }
 
   try {
-    await api("/api/shows", {
+    await api("/api/events", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shows: next }),
@@ -361,7 +361,7 @@ async function deleteEvent(index) {
   if (!confirm(`Delete "${event.id}"? This only removes the config entry — already-archived files are untouched.`)) return;
   const next = events.filter((_, i) => i !== index);
   try {
-    await api("/api/shows", {
+    await api("/api/events", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shows: next }),

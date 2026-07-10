@@ -30,7 +30,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   womens: "women",
   woman: "women",
   female: "women",
-  donna: "donne", // Italian singular "woman" -> the plural form config/shows.json standardizes on for Giro Donne
+  donna: "donne", // Italian singular "woman" -> the plural form config/events.json standardizes on for Giro Donne
   juniors: "junior",
   itt: "tt",
 };
@@ -40,7 +40,7 @@ const TOKEN_ALIASES: Record<string, string> = {
  * form for use in "alternate version" filenames (see fileops.ts). Extend
  * this list as new ones show up in your tracker's release names — it's a
  * small, slowly-changing set, unlike race names, so it lives here rather
- * than in config/shows.json.
+ * than in config/events.json.
  */
 const BROADCASTER_TOKENS: Record<string, string> = {
   eurosport: "Eurosport",

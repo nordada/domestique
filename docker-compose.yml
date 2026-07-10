@@ -69,8 +69,8 @@ services:
       # Plex library root (read-write: this is where renamed files land).
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.
-      - ./config/shows.json:${CONFIG_CONTAINER_PATH}
+      - ./config/events.json:${CONFIG_CONTAINER_PATH}
       # Web UI static assets, bind-mounted read-only for the same reason as
-      # config/shows.json above — HTML/CSS/JS tweaks take effect on the next
+      # config/events.json above — HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.
       - ./public:/app/public:ro

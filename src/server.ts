@@ -57,9 +57,9 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
       configDirty = true;
       reviewWorthy = true;
       console.warn(
-        `[auto-create] No config match for "${item.parsed.raw}" -> created show "${match.show.id}" (folder "${match.show.folderName}"). Review config/shows.json.`
+        `[auto-create] No config match for "${item.parsed.raw}" -> created show "${match.show.id}" (folder "${match.show.folderName}"). Review config/events.json.`
       );
-      summaryLines.push(`⚠️ auto-created show "${match.show.id}" for "${item.parsed.raw}" — review config/shows.json`);
+      summaryLines.push(`⚠️ auto-created show "${match.show.id}" for "${item.parsed.raw}" — review config/events.json`);
     }
 
     const plan = await buildDestination(

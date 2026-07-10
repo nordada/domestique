@@ -29,7 +29,7 @@ test("webUiConfigFromEnv returns null unless WEBUI_PASSWORD is set, and picks up
 async function makeScratchServer(webui: { password: string; username?: string } | null) {
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-webui-config-"));
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-webui-library-"));
-  const configPath = join(configDir, "shows.json");
+  const configPath = join(configDir, "events.json");
   await fs.writeFile(
     configPath,
     JSON.stringify({
@@ -67,7 +67,7 @@ function authHeader(password: string, username = "anything"): string {
 test("web UI routes 503 when WEBUI_PASSWORD isn't configured", async () => {
   const { baseUrl, close } = await makeScratchServer(null);
   try {
-    const res = await fetch(`${baseUrl}/api/shows`);
+    const res = await fetch(`${baseUrl}/api/events`);
     assert.equal(res.status, 503);
   } finally {
     await close();
@@ -77,11 +77,11 @@ test("web UI routes 503 when WEBUI_PASSWORD isn't configured", async () => {
 test("web UI routes 401 with no or wrong credentials, and set WWW-Authenticate", async () => {
   const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {
-    const noAuth = await fetch(`${baseUrl}/api/shows`);
+    const noAuth = await fetch(`${baseUrl}/api/events`);
     assert.equal(noAuth.status, 401);
     assert.match(noAuth.headers.get("www-authenticate") ?? "", /Basic/);
 
-    const wrongAuth = await fetch(`${baseUrl}/api/shows`, {
+    const wrongAuth = await fetch(`${baseUrl}/api/events`, {
       headers: { Authorization: authHeader("wrong-password") },
     });
     assert.equal(wrongAuth.status, 401);
@@ -90,10 +90,10 @@ test("web UI routes 401 with no or wrong credentials, and set WWW-Authenticate",
   }
 });
 
-test("GET /api/shows returns the config when authorized (any username, correct password)", async () => {
+test("GET /api/events returns the config when authorized (any username, correct password)", async () => {
   const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {
-    const res = await fetch(`${baseUrl}/api/shows`, {
+    const res = await fetch(`${baseUrl}/api/events`, {
       headers: { Authorization: authHeader("correct-password", "someuser") },
     });
     assert.equal(res.status, 200);
@@ -105,7 +105,7 @@ test("GET /api/shows returns the config when authorized (any username, correct p
   }
 });
 
-test("PUT /api/shows persists a valid config and rejects an invalid one without writing", async () => {
+test("PUT /api/events persists a valid config and rejects an invalid one without writing", async () => {
   const { baseUrl, configPath, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const valid = {
@@ -114,7 +114,7 @@ test("PUT /api/shows persists a valid config and rejects an invalid one without 
         { id: "giro", folderName: "Giro", matchKeywords: ["giro"], type: "stage-race" },
       ],
     };
-    const putRes = await fetch(`${baseUrl}/api/shows`, {
+    const putRes = await fetch(`${baseUrl}/api/events`, {
       method: "PUT",
       headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
       body: JSON.stringify(valid),
@@ -124,7 +124,7 @@ test("PUT /api/shows persists a valid config and rejects an invalid one without 
     assert.equal(onDisk.shows.length, 2);
 
     const invalid = { shows: [{ id: "dup" }, { id: "dup" }] };
-    const badRes = await fetch(`${baseUrl}/api/shows`, {
+    const badRes = await fetch(`${baseUrl}/api/events`, {
       method: "PUT",
       headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
       body: JSON.stringify(invalid),
@@ -214,17 +214,17 @@ test("GET /ui serves the HTML page when authorized", async () => {
 test("when WEBUI_USER is configured, both username and password must match", async () => {
   const { baseUrl, close } = await makeScratchServer({ password: "correct-password", username: "admin" });
   try {
-    const rightUserRightPass = await fetch(`${baseUrl}/api/shows`, {
+    const rightUserRightPass = await fetch(`${baseUrl}/api/events`, {
       headers: { Authorization: authHeader("correct-password", "admin") },
     });
     assert.equal(rightUserRightPass.status, 200);
 
-    const wrongUserRightPass = await fetch(`${baseUrl}/api/shows`, {
+    const wrongUserRightPass = await fetch(`${baseUrl}/api/events`, {
       headers: { Authorization: authHeader("correct-password", "someoneelse") },
     });
     assert.equal(wrongUserRightPass.status, 401);
 
-    const rightUserWrongPass = await fetch(`${baseUrl}/api/shows`, {
+    const rightUserWrongPass = await fetch(`${baseUrl}/api/events`, {
       headers: { Authorization: authHeader("wrong-password", "admin") },
     });
     assert.equal(rightUserWrongPass.status, 401);

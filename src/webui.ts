@@ -131,13 +131,13 @@ export async function handleWebUiRequest(
       return true;
     }
 
-    if (req.method === "GET" && url === "/api/shows") {
+    if (req.method === "GET" && url === "/api/events") {
       const config = loadConfig(opts.configPath);
       sendJson(res, 200, config);
       return true;
     }
 
-    if (req.method === "PUT" && url === "/api/shows") {
+    if (req.method === "PUT" && url === "/api/events") {
       const body = await readBody(req);
       const payload = JSON.parse(body) as ShowsConfigFile;
       try {

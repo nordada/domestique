@@ -40,7 +40,7 @@ export interface ShowsConfigFile {
   shows: ShowConfig[];
 }
 
-const DEFAULT_CONFIG_PATH = join(__dirname, "..", "config", "shows.json");
+const DEFAULT_CONFIG_PATH = join(__dirname, "..", "config", "events.json");
 
 export function loadConfig(path: string = DEFAULT_CONFIG_PATH): ShowsConfigFile {
   if (!existsSync(path)) {

@@ -181,7 +181,7 @@ export async function buildDestination(
         destDir,
         destFilename: buildFilename(prefix, parsed.year, episode, title, parsed.partNum, parsed.partTotal, ext),
         episode,
-        warning: `"${parsed.raw}" didn't match any configured category for show "${show.id}"; assigned dynamically as "${title}" (E${pad2(episode)}). Consider adding this category to config/shows.json.`,
+        warning: `"${parsed.raw}" didn't match any configured category for show "${show.id}"; assigned dynamically as "${title}" (E${pad2(episode)}). Consider adding this category to config/events.json.`,
       };
     }
 

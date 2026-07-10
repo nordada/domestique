@@ -140,7 +140,7 @@ async function makeScratch() {
   // treats every non-dotfile top-level entry in the watch dir as a drop, so
   // the config file can't live inside it.
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-config-"));
-  const configPath = join(configDir, "shows.json");
+  const configPath = join(configDir, "events.json");
   return { libraryRoot, hotfolderDir, configPath };
 }
 

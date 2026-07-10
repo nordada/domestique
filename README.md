@@ -17,10 +17,10 @@ directory — everything is copied, so seeding is unaffected.
 2. The app parses the raw name (`src/parser.ts`) to pull out year, stage
    number, part number, gender/age/discipline category hints, and
    highlights/presentation flags.
-3. It matches those tokens against `config/shows.json` (`src/matcher.ts`) to
+3. It matches those tokens against `config/events.json` (`src/matcher.ts`) to
    find the right show. If nothing matches, it **auto-creates** a best-effort
    entry (title-cased from the leftover tokens, filed as a one-day race) and
-   persists it back to `config/shows.json` so it's reused next time — but
+   persists it back to `config/events.json` so it's reused next time — but
    this is a guess; check the log and clean up the entry by hand.
 4. It computes the destination folder/filename (`src/namer.ts`) and copies
    the file in (`src/fileops.ts`), writing to a `.tmp` sibling and renaming
@@ -96,7 +96,7 @@ broadcaster for.
   already say what it is).
 - Multi-category, fixed order (Worlds, Olympics): `Show - SYYYYEnn - Category
   Title.ext`, where the episode number for each category is defined in
-  `config/shows.json` so it's stable across years.
+  `config/events.json` so it's stable across years.
 - Multi-category, dynamic order (Nationals — the category set is open-ended
   across countries): `Show - SYYYYEnn - Country Gender Discipline.ext`,
   episode number assigned by scanning what's already in that season's folder
@@ -169,7 +169,7 @@ archiver will fail to find the file (a `ENOENT`-style error in its logs).
 
 ### 3. Add a new show
 
-Every show your tracker feed covers needs an entry in `config/shows.json`.
+Every show your tracker feed covers needs an entry in `config/events.json`.
 The file is bind-mounted, so edits take effect on the next webhook call — no
 rebuild needed. Minimal example:
 
@@ -190,7 +190,7 @@ rebuild needed. Minimal example:
   abbreviations. More specific phrases (more tokens) win over vaguer ones
   when several shows could match.
 - For `multi-category-fixed`, add a `categories` array — see `Nationals` vs
-  `World Championships` in `config/shows.json` for a worked dynamic vs.
+  `World Championships` in `config/events.json` for a worked dynamic vs.
   fixed example.
 - `filenamePrefix` is optional and only needed when the filename should say
   something different from the folder name (this is how the HIGHLIGHTS
@@ -317,7 +317,7 @@ whether a file gets archived.
 
 ### 7. Optional: web UI
 
-A small web UI at `/ui` for editing `config/shows.json` without hand-editing
+A small web UI at `/ui` for editing `config/events.json` without hand-editing
 JSON, testing the matcher against a sample release name, and viewing recent
 activity and integration status. Set in `.env`:
 
@@ -345,7 +345,7 @@ the LAN."
 What's in it:
 - **Match tester** — paste a raw release name and see which event it
   matches (or that it would auto-create, and as what) using the app's real
-  parser/matcher, without touching `config/shows.json` or the library. Handy
+  parser/matcher, without touching `config/events.json` or the library. Handy
   for checking a `matchKeywords` change before a real download exercises it.
   If nothing matches, an "Add as new event" button pre-fills the form below
   with the guessed name/type.
@@ -354,9 +354,9 @@ What's in it:
   write the whole file back through the same `saveConfig` validation
   (duplicate ids, required fields, etc.) the app already uses, so an invalid
   save is rejected with the same error message you'd get from a bad
-  hand-edit — nothing is written to disk unless it's valid. (This maps to
-  `config/shows.json` and the `/api/shows` endpoint under the hood — the UI
-  just calls them "events" since that's what each entry represents.)
+  hand-edit — nothing is written to disk unless it's valid. (Internally this
+  is still the `ShowConfig`/`ShowsConfigFile` shape in `src/config.ts` — only
+  the file name, API route, and UI wording say "events".)
 - **Activity log** — the last ~100 torrent-done events (in-memory only,
   resets on container restart), the same summary shown in Discord
   notifications if you have those enabled.
@@ -364,12 +364,12 @@ What's in it:
   and Discord notifications are currently configured, plus the running
   version.
 
-`public/index.html` is bind-mounted the same way `config/shows.json` is, so
+`public/index.html` is bind-mounted the same way `config/events.json` is, so
 tweaking it doesn't require a rebuild.
 
 ## Known limitations / assumptions (check these against reality as you go)
 
-- **UCI XCC/XCO World Cup** isn't in `config/shows.json` yet — it wasn't in
+- **UCI XCC/XCO World Cup** isn't in `config/events.json` yet — it wasn't in
   the Plex library at design time, and it has a per-round venue (e.g. "La
   Thuile") baked into the name that a fixed-category show can't cleanly
   express. First download will auto-create a folder per venue; you'll
@@ -386,7 +386,7 @@ tweaking it doesn't require a rebuild.
   that "Eurosport"-branded highlight releases go to the former and
   everything else to the latter. Verify this matches how your tracker
   actually labels releases; adjust `tdf-euro-highlights`'s `matchKeywords`
-  in `config/shows.json` if not.
+  in `config/events.json` if not.
 - Nationals dynamic episode numbering scans the destination folder's
   existing filenames to avoid collisions/reuse the right number — if you
   manually rename files in a Nationals season folder, keep the `- Country
