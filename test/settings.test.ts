@@ -113,6 +113,7 @@ test("saveSettings + loadSettings round-trip, and normalizes partial Plex fields
       plex: { url: "http://plex.local:32400", sectionId: "35" }, // no token - collapses to null
       discord: { webhookUrl: "https://discord.example/webhook", mentionUserId: "999" },
       hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 },
+      transmission: { url: "http://tower:9091/transmission/rpc/", username: "admin", password: "hunter2" },
     },
     "/library",
     settingsPath
@@ -121,9 +122,33 @@ test("saveSettings + loadSettings round-trip, and normalizes partial Plex fields
   assert.equal(saved.plex, null);
   assert.deepEqual(saved.discord, { webhookUrl: "https://discord.example/webhook", mentionUserId: "999" });
   assert.deepEqual(saved.hotfolder, { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 });
+  assert.deepEqual(saved.transmission, {
+    url: "http://tower:9091/transmission/rpc", // trailing slash stripped
+    username: "admin",
+    password: "hunter2",
+  });
 
   const reloaded = loadSettings(settingsPath, "/library");
   assert.deepEqual(reloaded, saved);
+});
+
+test("normalizeTransmission collapses to null without a url, and drops blank username/password", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  const noUrl = saveSettings({ transmission: { username: "admin", password: "hunter2" } }, "/library", settingsPath);
+  assert.equal(noUrl.transmission, null);
+
+  const blankExtras = saveSettings(
+    { transmission: { url: "http://tower:9091/transmission/rpc", username: "  ", password: "" } },
+    "/library",
+    settingsPath
+  );
+  assert.deepEqual(blankExtras.transmission, {
+    url: "http://tower:9091/transmission/rpc",
+    username: undefined,
+    password: undefined,
+  });
 });
 
 test("saveSettings resolves a blank Plex library-root override to the app's own library root", async () => {

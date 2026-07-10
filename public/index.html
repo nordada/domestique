@@ -1,3 +1,20 @@
+<!--
+  Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+  Copyright (C) 2026  @nordada AKA Chris Reynolds
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
 <!doctype html>
 <html lang="en">
 <head>
@@ -11,6 +28,7 @@
     --border: #8888881f;
     --bg-card: #80808014;
     --accent: #3b82f6;
+    --brand: #2ee5f0;
     --warn: #b45309;
     --ok: #15803d;
     --err: #b91c1c;
@@ -85,6 +103,7 @@
   .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
   .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
   footer { text-align: center; opacity: 0.45; font-size: 0.78rem; padding: 1rem 0 2rem; }
+  footer a { color: inherit; }
 
   .app-header {
     position: sticky;
@@ -150,8 +169,11 @@
     box-shadow: inset 0 0 0 1px var(--border);
     transition: box-shadow 0.15s;
   }
-  .gauge.on .gauge-icon-wrap {
+  .gauge.live .gauge-icon-wrap {
     box-shadow: inset 0 0 0 1px var(--ok), 0 0 5px 1px rgba(21, 128, 61, 0.5);
+  }
+  .gauge.live-theme .gauge-icon-wrap {
+    box-shadow: inset 0 0 0 1px var(--brand), 0 0 5px 1px rgba(46, 229, 240, 0.5);
   }
   .gauge-icon {
     width: 1.1rem;
@@ -374,6 +396,23 @@
     <label><span>Stable polls</span><input type="number" id="s-hotfolder-stable" placeholder="3"></label>
   </div>
 
+  <h3>Transmission status check</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Only used to light up the header icon with a live reachability check -
+    unrelated to the webhook Transmission already sends this app on torrent
+    completion.
+  </p>
+  <label><span>RPC URL (blank disables)</span>
+    <input type="text" id="s-transmission-url" placeholder="http://192.168.1.10:9091/transmission/rpc">
+  </label>
+  <div class="row">
+    <label><span>Username (optional)</span><input type="text" id="s-transmission-username" placeholder=""></label>
+    <label><span>Password</span>
+      <input type="password" id="s-transmission-password">
+      <span class="clear-toggle"><input type="checkbox" id="s-transmission-password-clear"> Clear stored password</span>
+    </label>
+  </div>
+
   <div class="actions">
     <button class="primary" id="save-settings-btn">Save settings</button>
   </div>
@@ -382,7 +421,11 @@
 
 </div>
 
-<footer id="app-footer">Domestique</footer>
+<footer id="app-footer">
+  <a id="app-footer-version" href="https://github.com/nordada/domestique" target="_blank" rel="noopener">Domestique</a>
+  · <a href="https://github.com/nordada/domestique/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a>
+  · © 2026 <a href="https://github.com/nordada" target="_blank" rel="noopener">@nordada</a>
+</footer>
 
 <script>
 let events = [];
@@ -443,21 +486,42 @@ async function loadStatus() {
   const el = document.getElementById("integration-icons");
   try {
     const status = await api("/api/status");
-    const gauge = (label, iconFile, on) => `
-      <button type="button" class="gauge ${on ? "on" : "off"}" data-goto-tab="settings" title="${label}: ${on ? "enabled" : "disabled"}">
+    // `on` (configured) reveals the icon's color; `tier` adds a ring on top
+    // of that - "live" (green) for a verified-reachable connection, or
+    // "live-theme" (Domestique blue) for Discord's mention-configured case,
+    // which has no live connection to probe.
+    const gauge = (label, iconFile, on, tier, statusText) => `
+      <button type="button" class="gauge ${on ? "on" : "off"}${tier ? ` ${tier}` : ""}" data-goto-tab="settings" title="${label}: ${statusText}">
         <span class="gauge-icon-wrap"><img class="gauge-icon" src="/icons/${iconFile}" alt="${label}"></span>
       </button>`;
     el.innerHTML = [
-      gauge("Plex", "plex.svg", status.plex.enabled),
-      gauge("Discord", "discord.svg", status.discord.enabled),
-      gauge("Hot folder", "hotfolder.svg", status.hotfolder.enabled),
+      gauge(
+        "Plex", "plex.svg", status.plex.enabled,
+        status.plex.enabled && status.plex.live ? "live" : null,
+        status.plex.enabled ? (status.plex.live ? "enabled, reachable" : "enabled, unreachable") : "disabled"
+      ),
+      gauge(
+        "Discord", "discord.svg", status.discord.enabled,
+        status.discord.enabled && status.discord.hasMention ? "live-theme" : null,
+        status.discord.enabled ? (status.discord.hasMention ? "enabled, mentions on" : "enabled") : "disabled"
+      ),
+      gauge(
+        "Hot folder", "hotfolder.svg", status.hotfolder.enabled,
+        status.hotfolder.enabled ? "live" : null,
+        status.hotfolder.enabled ? `enabled (${esc(status.hotfolder.dir)})` : "disabled"
+      ),
+      gauge(
+        "Transmission", "transmission.svg", status.transmission.enabled,
+        status.transmission.enabled && status.transmission.live ? "live" : null,
+        status.transmission.enabled ? (status.transmission.live ? "enabled, reachable" : "enabled, unreachable") : "disabled"
+      ),
     ].join("");
     el.querySelectorAll("[data-goto-tab]").forEach((btn) => {
       btn.addEventListener("click", () => showTab(btn.dataset.gotoTab));
     });
     setPauseUI(status.paused);
     if (status.version) {
-      document.getElementById("app-footer").textContent = `Domestique v${status.version}`;
+      document.getElementById("app-footer-version").textContent = `Domestique v${status.version}`;
     }
   } catch (err) {
     el.textContent = "?";
@@ -478,6 +542,9 @@ async function loadSettingsPanel() {
     document.getElementById("s-hotfolder-dir").value = s.hotfolder.dir;
     document.getElementById("s-hotfolder-interval").value = s.hotfolder.pollIntervalMs;
     document.getElementById("s-hotfolder-stable").value = s.hotfolder.stablePolls;
+    document.getElementById("s-transmission-url").value = s.transmission.url;
+    document.getElementById("s-transmission-username").value = s.transmission.username;
+    document.getElementById("s-transmission-password").placeholder = s.transmission.passwordSet ? "already set - leave blank to keep" : "not set";
   } catch (err) {
     statusEl.textContent = `Failed to load settings: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -500,6 +567,10 @@ async function saveSettingsPanel() {
       pollIntervalMs: parseInt(document.getElementById("s-hotfolder-interval").value, 10) || undefined,
       stablePolls: parseInt(document.getElementById("s-hotfolder-stable").value, 10) || undefined,
     },
+    transmission: {
+      url: document.getElementById("s-transmission-url").value.trim(),
+      username: document.getElementById("s-transmission-username").value.trim(),
+    },
   };
 
   const plexToken = document.getElementById("s-plex-token").value;
@@ -509,6 +580,10 @@ async function saveSettingsPanel() {
   const discordWebhook = document.getElementById("s-discord-webhook").value;
   if (discordWebhook) payload.discordWebhookUrl = discordWebhook;
   else if (document.getElementById("s-discord-webhook-clear").checked) payload.discordWebhookUrl = "";
+
+  const transmissionPassword = document.getElementById("s-transmission-password").value;
+  if (transmissionPassword) payload.transmissionPassword = transmissionPassword;
+  else if (document.getElementById("s-transmission-password-clear").checked) payload.transmissionPassword = "";
 
   try {
     await api("/api/settings", {
@@ -522,6 +597,8 @@ async function saveSettingsPanel() {
     document.getElementById("s-plex-token-clear").checked = false;
     document.getElementById("s-discord-webhook").value = "";
     document.getElementById("s-discord-webhook-clear").checked = false;
+    document.getElementById("s-transmission-password").value = "";
+    document.getElementById("s-transmission-password-clear").checked = false;
     await loadSettingsPanel();
     await loadStatus();
   } catch (err) {

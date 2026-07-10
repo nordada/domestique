@@ -1,3 +1,21 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -18,7 +36,7 @@ const ICONS_DIR = join(__dirname, "..", "public", "icons");
 // Allow-listed rather than an open static-file route off req.url, so a
 // crafted path can't escape ICONS_DIR - same "unauthenticated but not
 // attacker-controlled" trust level as the favicon route below.
-const ICON_FILES = new Set(["plex.svg", "discord.svg", "hotfolder.svg"]);
+const ICON_FILES = new Set(["plex.svg", "discord.svg", "hotfolder.svg", "transmission.svg"]);
 
 export interface ServerOptions {
   port: number;

@@ -1,3 +1,21 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -5,6 +23,7 @@ import { ensureSeeded } from "./fileseed.js";
 import { plexConfigFromEnv, type PlexConfig } from "./plex.js";
 import { discordConfigFromEnv, type DiscordConfig } from "./discord.js";
 import { hotfolderConfigFromEnv, type HotfolderConfig } from "./hotfolder.js";
+import type { TransmissionConfig } from "./transmission.js";
 
 export interface HotfolderSettings {
   dir: string;
@@ -16,6 +35,8 @@ export interface Settings {
   plex: PlexConfig | null;
   discord: DiscordConfig | null;
   hotfolder: HotfolderSettings | null;
+  /** Optional RPC connection Domestique polls for the header status gauge - unrelated to the webhook Transmission sends this app on torrent completion. */
+  transmission: TransmissionConfig | null;
   /** Global pause of automatic processing (Transmission webhook + hot-folder poller). Manual paths (web UI upload, match tester) are unaffected. */
   paused: boolean;
 }
@@ -37,6 +58,10 @@ function seedFromEnv(libraryRoot: string): Settings {
     hotfolder: hotfolder
       ? { dir: hotfolder.dir, pollIntervalMs: hotfolder.pollIntervalMs, stablePolls: hotfolder.stablePolls }
       : null,
+    // No env-var seeding for this one - it's a new, purely optional status
+    // check with no prior deployment relying on env vars for it, unlike
+    // Plex/Discord/hot-folder which predate settings.json entirely.
+    transmission: null,
     paused: false,
   };
 }
@@ -57,6 +82,7 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     plex: normalizePlex(raw.plex, appLibraryRoot),
     discord: normalizeDiscord(raw.discord),
     hotfolder: normalizeHotfolder(raw.hotfolder),
+    transmission: normalizeTransmission(raw.transmission),
     paused: raw.paused === true,
   };
 }
@@ -83,6 +109,18 @@ function normalizeDiscord(input: unknown): DiscordConfig | null {
   return {
     webhookUrl,
     mentionUserId: typeof mentionUserId === "string" && mentionUserId.trim() ? mentionUserId : undefined,
+  };
+}
+
+function normalizeTransmission(input: unknown): TransmissionConfig | null {
+  if (!input || typeof input !== "object") return null;
+  const { url, username, password } = input as Record<string, unknown>;
+  if (typeof url !== "string" || !url.trim()) return null;
+
+  return {
+    url: url.replace(/\/$/, ""),
+    username: typeof username === "string" && username.trim() ? username : undefined,
+    password: typeof password === "string" && password ? password : undefined,
   };
 }
 

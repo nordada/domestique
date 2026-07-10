@@ -1,3 +1,21 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 export interface PlexConfig {
   url: string;
   token: string;
@@ -23,6 +41,18 @@ export function plexConfigFromEnv(libraryRoot: string): PlexConfig | null {
     sectionId,
     libraryRoot: process.env.PLEX_LIBRARY_ROOT || libraryRoot,
   };
+}
+
+/** Cheap liveness probe - hits Plex's own identity endpoint rather than the section refresh route, so it doesn't touch the library. */
+export async function checkPlexLive(plex: PlexConfig, timeoutMs = 3000): Promise<boolean> {
+  try {
+    const url = new URL(`${plex.url}/identity`);
+    url.searchParams.set("X-Plex-Token", plex.token);
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 function translatePath(localPath: string, from: string, to: string): string {

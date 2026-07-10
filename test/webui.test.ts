@@ -190,9 +190,12 @@ test("GET /api/activity and /api/status respond with the expected shape", async 
       version: string;
       plex: { enabled: boolean };
       discord: { enabled: boolean };
+      transmission: { enabled: boolean; live: boolean };
     };
     assert.equal(statusBody.plex.enabled, false);
     assert.equal(statusBody.discord.enabled, false);
+    assert.equal(statusBody.transmission.enabled, false);
+    assert.equal(statusBody.transmission.live, false);
     assert.equal(typeof statusBody.version, "string");
     assert.ok(statusBody.version.length > 0);
   } finally {
@@ -212,6 +215,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       plex: { url: "", sectionId: "", libraryRoot: "", tokenSet: false },
       discord: { mentionUserId: "", webhookUrlSet: false },
       hotfolder: { dir: "", pollIntervalMs: 60000, stablePolls: 3 },
+      transmission: { url: "", username: "", passwordSet: false },
       paused: false,
     });
 
@@ -224,6 +228,8 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
         discord: { mentionUserId: "12345" },
         discordWebhookUrl: "https://discord.example/webhook",
         hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 },
+        transmission: { url: "http://tower:9091/transmission/rpc", username: "admin" },
+        transmissionPassword: "secret-password",
       }),
     });
     assert.equal(putRes.status, 200);
@@ -233,12 +239,16 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(putBody.discord.webhookUrlSet, true);
     assert.equal(putBody.plex.url, "http://plex.local:32400");
     assert.equal(putBody.hotfolder.pollIntervalMs, 5000);
+    assert.equal(putBody.transmission.passwordSet, true);
+    assert.equal(putBody.transmission.url, "http://tower:9091/transmission/rpc");
     assert.ok(!("token" in putBody.plex));
     assert.ok(!("webhookUrl" in putBody.discord));
+    assert.ok(!("password" in putBody.transmission));
 
     const onDisk = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
     assert.equal(onDisk.plex.token, "secret-token");
     assert.equal(onDisk.discord.webhookUrl, "https://discord.example/webhook");
+    assert.equal(onDisk.transmission.password, "secret-password");
   } finally {
     await close();
   }

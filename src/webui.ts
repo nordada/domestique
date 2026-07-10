@@ -1,3 +1,21 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 import { timingSafeEqual } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -9,6 +27,8 @@ import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity } from "./activity.js";
 import { handleUploadRequest, type ProcessTorrentDone } from "./upload.js";
+import { checkPlexLive } from "./plex.js";
+import { checkTransmissionLive } from "./transmission.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -115,6 +135,11 @@ function maskSettings(settings: Settings) {
       dir: settings.hotfolder?.dir ?? "",
       pollIntervalMs: settings.hotfolder?.pollIntervalMs ?? 60000,
       stablePolls: settings.hotfolder?.stablePolls ?? 3,
+    },
+    transmission: {
+      url: settings.transmission?.url ?? "",
+      username: settings.transmission?.username ?? "",
+      passwordSet: Boolean(settings.transmission?.password),
     },
     paused: settings.paused,
   };
@@ -228,15 +253,24 @@ export async function handleWebUiRequest(
 
     if (req.method === "GET" && url === "/api/status") {
       const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+      // Live-probed in parallel so one slow/unreachable service doesn't
+      // multiply the page's load time by the number of integrations.
+      const [plexLive, transmissionLive] = await Promise.all([
+        settings.plex ? checkPlexLive(settings.plex) : Promise.resolve(false),
+        settings.transmission ? checkTransmissionLive(settings.transmission) : Promise.resolve(false),
+      ]);
       sendJson(res, 200, {
         version: APP_VERSION,
         plex: settings.plex
-          ? { enabled: true, sectionId: settings.plex.sectionId, url: settings.plex.url }
-          : { enabled: false },
+          ? { enabled: true, sectionId: settings.plex.sectionId, url: settings.plex.url, live: plexLive }
+          : { enabled: false, live: false },
         discord: settings.discord
           ? { enabled: true, hasMention: Boolean(settings.discord.mentionUserId) }
-          : { enabled: false },
+          : { enabled: false, hasMention: false },
         hotfolder: settings.hotfolder ? { enabled: true, dir: settings.hotfolder.dir } : { enabled: false },
+        transmission: settings.transmission
+          ? { enabled: true, url: settings.transmission.url, live: transmissionLive }
+          : { enabled: false, live: false },
         paused: settings.paused,
       });
       return true;
@@ -268,16 +302,22 @@ export async function handleWebUiRequest(
         discord?: { mentionUserId?: string };
         discordWebhookUrl?: string;
         hotfolder?: { dir?: string; pollIntervalMs?: number; stablePolls?: number };
+        transmission?: { url?: string; username?: string };
+        transmissionPassword?: string;
       };
 
       // A field only overwrites its stored secret when the caller actually
-      // sent it - omitting plexToken/discordWebhookUrl keeps the existing
-      // one, since GET /api/settings never echoes the current value back for
-      // the frontend to round-trip.
+      // sent it - omitting plexToken/discordWebhookUrl/transmissionPassword
+      // keeps the existing one, since GET /api/settings never echoes the
+      // current value back for the frontend to round-trip.
       const current = loadSettings(opts.settingsPath, opts.libraryRoot);
       const plexToken = payload.plexToken !== undefined ? payload.plexToken : (current.plex?.token ?? "");
       const discordWebhookUrl =
         payload.discordWebhookUrl !== undefined ? payload.discordWebhookUrl : (current.discord?.webhookUrl ?? "");
+      const transmissionPassword =
+        payload.transmissionPassword !== undefined
+          ? payload.transmissionPassword
+          : (current.transmission?.password ?? "");
 
       try {
         const saved = saveSettings(
@@ -285,6 +325,7 @@ export async function handleWebUiRequest(
             plex: { ...payload.plex, token: plexToken },
             discord: { ...payload.discord, webhookUrl: discordWebhookUrl },
             hotfolder: payload.hotfolder,
+            transmission: { ...payload.transmission, password: transmissionPassword },
             paused: current.paused,
           },
           opts.libraryRoot,
