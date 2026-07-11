@@ -214,7 +214,17 @@
     cursor: pointer;
   }
   .tab-btn:hover { opacity: 0.85; }
-  .tab-btn.active { opacity: 1; border-color: var(--border); background: var(--bg-card); }
+  /* Active page: a crisp accent-colored border, with the background/text
+     tone-adjusted (blended toward the page's own canvas/canvastext via
+     color-mix) rather than using the raw accent at full strength - keeps
+     it readable in both light and dark mode without a separate JS-computed
+     contrast color like the primary-button text uses. */
+  .tab-btn.active {
+    opacity: 1;
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 20%, canvas);
+    color: color-mix(in srgb, var(--accent) 70%, canvastext);
+  }
 
   .gauge-cluster { display: flex; gap: 0.6rem; }
   .gauge {
@@ -374,7 +384,7 @@
 <section id="activity-section">
   <div class="toolbar">
     <h2 style="margin:0">Recent activity</h2>
-    <button id="refresh-activity-btn">Refresh</button>
+    <button class="primary" id="refresh-activity-btn">Refresh</button>
   </div>
   <div id="activity-list">Loading…</div>
 </section>
@@ -391,7 +401,7 @@
     <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
   </div>
   <div id="match-result" class="status-msg"></div>
-  <button id="add-from-match-btn" class="hidden" style="margin-top:0.5rem;">Add as new event</button>
+  <button class="primary hidden" id="add-from-match-btn" style="margin-top:0.5rem;">Add as new event</button>
 </section>
 
 <section id="add-torrent-section">
