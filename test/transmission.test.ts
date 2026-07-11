@@ -6,7 +6,20 @@ import {
   getTransmissionTorrentSummary,
   addTorrentToTransmission,
   pollTorrentAdded,
+  transmissionWebUrl,
 } from "../src/transmission.js";
+
+test("transmissionWebUrl derives the web UI path from the RPC URL's own host/port, ignoring its path", () => {
+  assert.equal(
+    transmissionWebUrl({ url: "http://192.168.1.24:9091/transmission/rpc" }),
+    "http://192.168.1.24:9091/transmission/web/"
+  );
+  // A reverse-proxied or otherwise nonstandard RPC path shouldn't change the result - only the origin matters.
+  assert.equal(
+    transmissionWebUrl({ url: "http://192.168.1.24:9091/some/other/rpc/path" }),
+    "http://192.168.1.24:9091/transmission/web/"
+  );
+});
 
 /**
  * Stubs Transmission's real CSRF handshake: the first request (no session

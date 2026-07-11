@@ -43,18 +43,41 @@ export function plexConfigFromEnv(libraryRoot: string): PlexConfig | null {
   };
 }
 
-/** Cheap liveness probe - hits Plex's own identity endpoint rather than the section refresh route, so it doesn't touch the library. */
-export async function checkPlexLive(plex: PlexConfig, timeoutMs = 3000): Promise<boolean> {
+export interface PlexIdentity {
+  live: boolean;
+  /** This server's own Plex machineIdentifier, needed to build a direct link to a library section (see plexLibraryUrl) - only available while Plex is actually reachable, since there's nowhere else to read it from. */
+  machineIdentifier: string | null;
+}
+
+/**
+ * Cheap liveness probe - hits Plex's own identity endpoint rather than the
+ * section refresh route, so it doesn't touch the library. Also doubles as
+ * how the header gauge's "open this library in Plex Web" link gets its
+ * machineIdentifier, since /identity is the only place that's exposed.
+ */
+export async function checkPlexLive(plex: PlexConfig, timeoutMs = 3000): Promise<PlexIdentity> {
   try {
     const url = new URL(`${plex.url}/identity`);
     url.searchParams.set("X-Plex-Token", plex.token);
-    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) console.warn(`[plex] ${plex.url}/identity responded ${res.status} ${res.statusText}`);
-    return res.ok;
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      console.warn(`[plex] ${plex.url}/identity responded ${res.status} ${res.statusText}`);
+      return { live: false, machineIdentifier: null };
+    }
+    const data = (await res.json()) as { MediaContainer?: { machineIdentifier?: string } };
+    return { live: true, machineIdentifier: data.MediaContainer?.machineIdentifier ?? null };
   } catch (err) {
     console.warn(`[plex] failed to reach ${plex.url}/identity: ${err}`);
-    return false;
+    return { live: false, machineIdentifier: null };
   }
+}
+
+/** The local-network Plex Web URL that jumps straight to one library section, rather than just Plex's home screen. */
+export function plexLibraryUrl(plex: PlexConfig, machineIdentifier: string): string {
+  return `${plex.url}/web/index.html#!/media/${machineIdentifier}/com.plexapp.plugins.library?source=${plex.sectionId}`;
 }
 
 function translatePath(localPath: string, from: string, to: string): string {

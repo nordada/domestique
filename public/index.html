@@ -866,10 +866,18 @@ async function loadStatus() {
     // "danger") adds a glow ring on top of that - see the CSS for what each
     // tier means. The icon itself is a CSS mask (not an <img>) so its color
     // always comes from these states, not the source SVG's own fill.
-    const gauge = (label, iconFile, on, tier, statusText) => `
-      <button type="button" class="gauge ${on ? "on" : "off"}${tier ? ` ${tier}` : ""}" data-goto-tab="settings" title="${label}: ${statusText}">
-        <span class="gauge-icon-wrap"><span class="gauge-icon" style="-webkit-mask-image:url(/icons/${iconFile});mask-image:url(/icons/${iconFile});" role="img" aria-label="${label}"></span></span>
-      </button>`;
+    // `linkUrl`, when given, makes the gauge a real link that opens that
+    // service's own web UI in a new tab instead of jumping to Settings -
+    // Transmission and Plex use this once they're actually configured;
+    // Hot folder never passes one, since it has no web UI of its own to
+    // send anyone to.
+    const gauge = (label, iconFile, on, tier, statusText, linkUrl) => {
+      const icon = `<span class="gauge-icon-wrap"><span class="gauge-icon" style="-webkit-mask-image:url(/icons/${iconFile});mask-image:url(/icons/${iconFile});" role="img" aria-label="${label}"></span></span>`;
+      const classes = `gauge ${on ? "on" : "off"}${tier ? ` ${tier}` : ""}`;
+      return linkUrl
+        ? `<a class="${classes}" href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" title="${label}: ${statusText}">${icon}</a>`
+        : `<button type="button" class="${classes}" data-goto-tab="settings" title="${label}: ${statusText}">${icon}</button>`;
+    };
     const gaugeHtml = [
       // Unlike the other two gauges, "on" here tracks the downloads/seeding
       // share's own reachability (not the hot-folder feature) - that's the
@@ -895,12 +903,14 @@ async function loadStatus() {
       gauge(
         "Transmission", "transmission.svg", status.transmission.enabled,
         transmissionTier(status.transmission),
-        transmissionStatusText(status.transmission)
+        transmissionStatusText(status.transmission),
+        status.transmission.webUrl
       ),
       gauge(
         "Plex", "plex.svg", status.plex.enabled,
         status.plex.enabled && status.plex.live ? "healthy" : null,
-        status.plex.enabled ? (status.plex.live ? "enabled, reachable" : "enabled, unreachable") : "disabled"
+        status.plex.enabled ? (status.plex.live ? "enabled, reachable" : "enabled, unreachable") : "disabled",
+        status.plex.webUrl
       ),
       indexerGauge(status.indexer),
     ].join("");

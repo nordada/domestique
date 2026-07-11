@@ -22,6 +22,11 @@ export interface TransmissionConfig {
   password?: string;
 }
 
+/** Transmission serves its web UI at /transmission/web/ on the same host/port as RPC, regardless of the RPC URL's own path (which can vary, e.g. a reverse-proxy prefix) - lets the header gauge link straight to it from just the configured RPC URL. */
+export function transmissionWebUrl(config: TransmissionConfig): string {
+  return `${new URL(config.url).origin}/transmission/web/`;
+}
+
 function authHeader(config: TransmissionConfig): Record<string, string> {
   if (!config.username) return {};
   const token = Buffer.from(`${config.username}:${config.password ?? ""}`).toString("base64");

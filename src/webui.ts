@@ -34,8 +34,13 @@ import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity, recordActivity } from "./activity.js";
 import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
-import { checkPlexLive } from "./plex.js";
-import { getTransmissionTorrentSummary, addTorrentToTransmission, pollTorrentAdded } from "./transmission.js";
+import { checkPlexLive, plexLibraryUrl } from "./plex.js";
+import {
+  getTransmissionTorrentSummary,
+  addTorrentToTransmission,
+  pollTorrentAdded,
+  transmissionWebUrl,
+} from "./transmission.js";
 import { checkIndexerLive } from "./indexer.js";
 import type { ServerOptions } from "./server.js";
 
@@ -383,16 +388,29 @@ export async function handleWebUiRequest(
       // probe here - see its comment for why (a third-party site polled as
       // often as this endpoint itself, which can be every few seconds,
       // flickers its glow between green/red on ordinary network noise).
-      const [plexLive, transmissionSummary, indexerLive] = await Promise.all([
-        settings.plex ? checkPlexLive(settings.plex) : Promise.resolve(false),
+      const [plexIdentity, transmissionSummary, indexerLive] = await Promise.all([
+        settings.plex ? checkPlexLive(settings.plex) : Promise.resolve({ live: false, machineIdentifier: null }),
         settings.transmission ? getTransmissionTorrentSummary(settings.transmission) : Promise.resolve(null),
         settings.indexer ? getIndexerLive(opts.settingsPath, settings.indexer) : Promise.resolve(false),
       ]);
       sendJson(res, 200, {
         version: APP_VERSION,
         plex: settings.plex
-          ? { enabled: true, sectionId: settings.plex.sectionId, url: settings.plex.url, live: plexLive }
-          : { enabled: false, live: false },
+          ? {
+              enabled: true,
+              sectionId: settings.plex.sectionId,
+              url: settings.plex.url,
+              live: plexIdentity.live,
+              // Only buildable once we've actually reached Plex this poll and
+              // it handed back a machineIdentifier - there's no other source
+              // for it, so a currently-unreachable Plex just has no link
+              // (the gauge falls back to opening Settings instead, same as
+              // when Plex isn't configured at all).
+              webUrl: plexIdentity.machineIdentifier
+                ? plexLibraryUrl(settings.plex, plexIdentity.machineIdentifier)
+                : null,
+            }
+          : { enabled: false, live: false, webUrl: null },
         discord: settings.discord
           ? { enabled: true, hasMention: Boolean(settings.discord.mentionUserId) }
           : { enabled: false, hasMention: false },
@@ -405,8 +423,9 @@ export async function handleWebUiRequest(
               url: settings.transmission.url,
               live: transmissionSummary !== null,
               torrents: transmissionSummary,
+              webUrl: transmissionWebUrl(settings.transmission),
             }
-          : { enabled: false, live: false, torrents: null },
+          : { enabled: false, live: false, torrents: null, webUrl: null },
         indexer: settings.indexer
           ? { enabled: true, url: settings.indexer.url, live: indexerLive }
           : { enabled: false, live: false },

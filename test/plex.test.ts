@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { plexConfigFromEnv } from "../src/plex.js";
+import { plexConfigFromEnv, plexLibraryUrl } from "../src/plex.js";
 
 test("plexConfigFromEnv returns null unless URL, token, and section id are all set", () => {
   const saved = {
@@ -37,4 +37,12 @@ test("plexConfigFromEnv returns null unless URL, token, and section id are all s
       else process.env[key] = value;
     }
   }
+});
+
+test("plexLibraryUrl builds a direct link to the configured section using the server's machineIdentifier", () => {
+  const plex = { url: "http://192.168.1.24:32400", token: "abc123", sectionId: "35", libraryRoot: "/library" };
+  assert.equal(
+    plexLibraryUrl(plex, "deadbeef1234"),
+    "http://192.168.1.24:32400/web/index.html#!/media/deadbeef1234/com.plexapp.plugins.library?source=35"
+  );
 });
