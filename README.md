@@ -1,18 +1,49 @@
 # Domestique
 
-Quietly files completed bike-race torrent downloads (autobrr → Transmission)
-into a Plex-friendly library layout, renaming them from whatever the tracker
-called them into a standardized `Show Name - SYYYYEnn - Title - ptNN.ext`
-scheme - like a cycling domestique, doing the unglamorous support work in
-the background so the footage gets to be the star.
+Domestique watches a downloads folder for finished bike-race torrents and
+automatically files them into a clean, Plex-ready library - renamed out of
+whatever cryptic name the tracker gave them and into a consistent
+`Show Name - SYYYYEnn - Title - ptNN.ext` scheme, sorted into the right
+show and season folder.
 
-It does **not** move or delete anything from Transmission's download
-directory - everything is copied, so seeding is unaffected.
+**What it does:**
+
+- Picks up completed downloads via a Transmission webhook, a watched hot
+  folder, or a direct upload through its own web UI
+- Parses the release name for year, stage/part number, category, and
+  broadcaster
+- Matches it against a configurable list of races/shows - auto-creating a
+  best-guess entry if nothing matches, so nothing silently falls on the
+  floor
+- Copies (never moves or deletes) the file into place, so Transmission's
+  seeding is never affected
+- Recognizes duplicate, upgraded-resolution, and alternate-broadcaster
+  releases of the same race, filing them alongside the original instead of
+  overwriting or guessing wrong
+- Optionally tells Plex to rescan just the folder that changed, and posts a
+  summary of what happened to Discord
 
 Runs anywhere Docker does - Unraid, Synology, a bare Linux box, or macOS
 (via Docker Desktop or [Colima](https://github.com/abiosoft/colima)) - the
 setup below is written generically, with Unraid called out only where its
 UI gives you a shortcut a plain Docker host doesn't.
+
+## Screenshots
+
+The web UI (see [step 7](#7-optional-web-ui)) - a home tab with recent
+activity, a match tester, and manual upload:
+
+![Home tab: recent activity, match tester, and upload](docs/screenshots/home.png)
+
+An events tab for adding/editing which races and shows it recognizes,
+without hand-editing JSON:
+
+![Events tab: searchable table of configured races/shows](docs/screenshots/events.png)
+
+And a settings tab for Plex, Discord, hot-folder, and Transmission
+status-check configuration - editable live, no restart needed:
+
+![Settings tab: Plex, Discord, hot-folder, and Transmission config](docs/screenshots/settings.png)
 
 ## Requirements
 
@@ -28,6 +59,7 @@ UI gives you a shortcut a plain Docker host doesn't.
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [How it works](#how-it-works)
 - [Handling re-releases of the same race](#handling-re-releases-of-the-same-race)
 - [Alternate versions (different commentary/broadcaster)](#alternate-versions-different-commentarybroadcaster)
@@ -44,6 +76,7 @@ UI gives you a shortcut a plain Docker host doesn't.
 - [Testing](#testing)
 - [Development](#development)
 - [License](#license)
+- [Why "Domestique"?](#why-domestique)
 
 ## How it works
 
@@ -553,3 +586,11 @@ git config core.hooksPath .githooks
 ## License
 
 GPL-3.0 - see [LICENSE](LICENSE).
+
+## Why "Domestique"?
+
+In cycling, a domestique is the rider whose entire job is unglamorous
+support work for the team - fetching bottles, setting pace, spending
+themselves so a teammate can win in the spotlight. That's the idea behind
+the name: this tool doesn't do anything glamorous either, it just quietly
+files things away correctly so the footage gets to be the star.
