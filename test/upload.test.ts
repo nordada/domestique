@@ -35,6 +35,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     libraryRoot,
     configPath,
     settingsPath,
+    downloadsPath: "/nonexistent",
     webui,
   };
 

@@ -43,6 +43,8 @@ export interface ServerOptions {
   libraryRoot: string;
   configPath: string;
   settingsPath: string;
+  /** In-container path the downloads/seeding share is mounted at (see docker-compose.yml) - used only to check reachability for the header status gauge, not read from otherwise. */
+  downloadsPath: string;
   webui: WebUiConfig | null;
 }
 
@@ -270,6 +272,11 @@ export function optionsFromEnv(): ServerOptions {
   const libraryRoot = process.env.LIBRARY_ROOT;
   const configPath = process.env.CONFIG_PATH || DEFAULT_CONFIG_PATH;
   const settingsPath = process.env.SETTINGS_PATH || DEFAULT_SETTINGS_PATH;
+  // Fixed by convention (see docker-compose.yml's DOWNLOADS_DIR mount and
+  // the README) rather than DOWNLOADS_DIR itself, which is only ever a host
+  // path - DOWNLOADS_PATH lets this be overridden if that mount target
+  // ever changes, mirroring CONFIG_PATH/SETTINGS_PATH above.
+  const downloadsPath = process.env.DOWNLOADS_PATH || "/downloads";
 
   if (!libraryRoot) {
     throw new Error("LIBRARY_ROOT environment variable is required (Plex library root path)");
@@ -277,5 +284,5 @@ export function optionsFromEnv(): ServerOptions {
 
   const webui = webUiConfigFromEnv();
 
-  return { port, libraryRoot, configPath, settingsPath, webui };
+  return { port, libraryRoot, configPath, settingsPath, downloadsPath, webui };
 }

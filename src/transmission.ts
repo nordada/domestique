@@ -31,45 +31,94 @@ function authHeader(config: TransmissionConfig): Record<string, string> {
 /**
  * Transmission's RPC endpoint requires a CSRF session id: a request sent
  * without one always comes back 409 with an X-Transmission-Session-Id header
- * to retry with, even when credentials are otherwise valid. A successful
- * "session-get" round-trip on the retry is treated as "live".
+ * to retry with, even when credentials are otherwise valid. Shared by every
+ * RPC call this module makes - throws on any failure (bad auth, non-2xx,
+ * a non-"success" result, or a network/timeout error) so callers can decide
+ * for themselves how to fall back.
  */
-export async function checkTransmissionLive(config: TransmissionConfig, timeoutMs = 3000): Promise<boolean> {
+async function rpcCall(
+  config: TransmissionConfig,
+  method: string,
+  args: Record<string, unknown> | undefined,
+  timeoutMs: number
+): Promise<{ result?: string; arguments?: Record<string, unknown> }> {
   const headers = { "Content-Type": "application/json", ...authHeader(config) };
-  const body = JSON.stringify({ method: "session-get" });
+  const body = JSON.stringify(args ? { method, arguments: args } : { method });
+  const first = await fetch(config.url, { method: "POST", headers, body, signal: AbortSignal.timeout(timeoutMs) });
+  let res = first;
+  if (first.status === 409) {
+    const sessionId = first.headers.get("x-transmission-session-id");
+    if (!sessionId) {
+      throw new Error(`${config.url} returned 409 without an X-Transmission-Session-Id header`);
+    }
+    res = await fetch(config.url, {
+      method: "POST",
+      headers: { ...headers, "X-Transmission-Session-Id": sessionId },
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  }
+  if (!res.ok) {
+    // The two most common causes here: rpc-whitelist/rpc-host-whitelist in
+    // Transmission's own settings.json rejecting this container's IP/Host
+    // header (403), or the RPC URL missing its /transmission/rpc suffix
+    // (404) - both look identical from here, so surface the status to
+    // point whoever's debugging at Transmission's own config/logs.
+    throw new Error(`${config.url} responded ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { result?: string; arguments?: Record<string, unknown> };
+  if (data.result !== "success") {
+    throw new Error(`${config.url} responded with result "${data.result}"`);
+  }
+  return data;
+}
+
+/** Cheap reachability probe - a successful "session-get" round-trip is treated as "live". */
+export async function checkTransmissionLive(config: TransmissionConfig, timeoutMs = 3000): Promise<boolean> {
   try {
-    const first = await fetch(config.url, { method: "POST", headers, body, signal: AbortSignal.timeout(timeoutMs) });
-    let res = first;
-    if (first.status === 409) {
-      const sessionId = first.headers.get("x-transmission-session-id");
-      if (!sessionId) {
-        console.warn(`[transmission] ${config.url} returned 409 without an X-Transmission-Session-Id header`);
-        return false;
-      }
-      res = await fetch(config.url, {
-        method: "POST",
-        headers: { ...headers, "X-Transmission-Session-Id": sessionId },
-        body,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    }
-    if (!res.ok) {
-      // The two most common causes here: rpc-whitelist/rpc-host-whitelist in
-      // Transmission's own settings.json rejecting this container's IP/Host
-      // header (403), or the RPC URL missing its /transmission/rpc suffix
-      // (404) - both look identical from here, so surface the status to
-      // point whoever's debugging at Transmission's own config/logs.
-      console.warn(`[transmission] ${config.url} responded ${res.status} ${res.statusText}`);
-      return false;
-    }
-    const data = (await res.json()) as { result?: string };
-    if (data.result !== "success") {
-      console.warn(`[transmission] ${config.url} responded with result "${data.result}"`);
-      return false;
-    }
+    await rpcCall(config, "session-get", undefined, timeoutMs);
     return true;
   } catch (err) {
     console.warn(`[transmission] failed to reach ${config.url}: ${err}`);
     return false;
+  }
+}
+
+export interface TransmissionTorrentSummary {
+  total: number;
+  /** At least one torrent has a tracker or local error (RPC `error` field != 0). */
+  hasError: boolean;
+  /** At least one torrent is actively downloading or queued to (RPC `status` 3 or 4) - as opposed to idle/verifying/seeding. */
+  downloading: boolean;
+}
+
+// From Transmission's RPC spec (tr_torrent_activity): 3 = queued to
+// download, 4 = downloading.
+const STATUS_DOWNLOAD_WAIT = 3;
+const STATUS_DOWNLOADING = 4;
+
+/**
+ * Fetches a lightweight status/error summary across all torrents, used to
+ * color the header gauge's glow ring by what Transmission is actually doing
+ * rather than just whether it's reachable. Returns null if the call fails
+ * for any reason (RPC disabled, permissions, network) - this is
+ * presentation-only, so callers should just fall back to treating
+ * Transmission as unreachable rather than erroring.
+ */
+export async function getTransmissionTorrentSummary(
+  config: TransmissionConfig,
+  timeoutMs = 3000
+): Promise<TransmissionTorrentSummary | null> {
+  try {
+    const data = await rpcCall(config, "torrent-get", { fields: ["status", "error"] }, timeoutMs);
+    const torrents = (data.arguments?.torrents ?? []) as Array<{ status: number; error: number }>;
+    return {
+      total: torrents.length,
+      hasError: torrents.some((t) => t.error !== 0),
+      downloading: torrents.some((t) => t.status === STATUS_DOWNLOAD_WAIT || t.status === STATUS_DOWNLOADING),
+    };
+  } catch (err) {
+    console.warn(`[transmission] failed to fetch torrent summary from ${config.url}: ${err}`);
+    return null;
   }
 }

@@ -2,7 +2,7 @@
 
 Domestique watches a downloads folder for finished bike-race torrents and
 automatically files them into a clean, Plex-ready library - renamed out of
-whatever cryptic name the tracker gave them and into a consistent
+whatever name the tracker gave them and into a consistent
 `Show Name - SYYYYEnn - Title - ptNN.ext` scheme, sorted into the right
 show and season folder.
 

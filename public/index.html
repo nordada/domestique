@@ -22,12 +22,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Domestique</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script>
+  // Applied before first paint (and before the :root color-scheme rule
+  // below) so a saved dark/light preference doesn't flash the system
+  // default for a frame.
+  try {
+    var savedTheme = localStorage.getItem("domestique-theme");
+    document.documentElement.style.colorScheme =
+      savedTheme === "dark" ? "dark" : savedTheme === "light" ? "light" : "light dark";
+  } catch (e) {}
+  // Same idea for the accent color - this is just a cache of the last
+  // value /api/settings returned, applied early to avoid a flash of the
+  // default color; the real settings fetch after load corrects it if it's
+  // changed elsewhere (or been cleared) since. --accent-text is picked
+  // alongside it (light accents need dark text and vice versa) using the
+  // same YIQ threshold as applyAccentColor() further down.
+  try {
+    var savedAccent = localStorage.getItem("domestique-accent-color");
+    if (savedAccent) {
+      document.documentElement.style.setProperty("--accent", savedAccent);
+      var r = parseInt(savedAccent.slice(1, 3), 16);
+      var g = parseInt(savedAccent.slice(3, 5), 16);
+      var b = parseInt(savedAccent.slice(5, 7), 16);
+      var yiq = (r * 299 + g * 587 + b * 114) / 1000;
+      document.documentElement.style.setProperty("--accent-text", yiq >= 150 ? "#111" : "#fff");
+    }
+  } catch (e) {}
+</script>
 <style>
   :root {
     color-scheme: light dark;
     --border: #8888881f;
     --bg-card: #80808014;
-    --accent: #3b82f6;
+    --accent: #28e0ec;
+    /* Paired with the default --accent above (light, so dark text reads
+       better on it) - kept in sync with --accent by applyAccentColor()
+       whenever a custom color is set. */
+    --accent-text: #111;
+    --accent-complement: #f6af3b;
     --warn: #b45309;
     --ok: #15803d;
     --err: #b91c1c;
@@ -40,9 +72,17 @@
     padding: 1.5rem 1rem 2rem;
     line-height: 1.4;
   }
-  .brand { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem; }
-  .brand img { width: 2rem; height: 2rem; flex-shrink: 0; }
-  h1 { margin: 0; }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.25rem;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .brand img { width: 4.4rem; height: 4.4rem; flex-shrink: 0; }
   section {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -66,7 +106,7 @@
     background: transparent;
     cursor: pointer;
   }
-  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   button.danger { color: var(--err); border-color: var(--err); }
   button:hover { opacity: 0.85; }
   h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
@@ -110,7 +150,7 @@
     z-index: 5;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 0.75rem 1.25rem;
     flex-wrap: wrap;
     padding: 0.75rem 0;
@@ -119,7 +159,50 @@
     border-bottom: 1px solid var(--border);
   }
   .app-header .brand { margin-bottom: 0; }
-  .tabs { display: flex; gap: 0.25rem; }
+
+  /* Logo + status panel always share a row (never wrap apart from each
+     other) - on narrow screens the status panel shrinks and re-wraps its
+     own contents instead, so the tabs panel is the only thing that drops
+     to a row of its own. */
+  .header-top-row { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; gap: 0.75rem 1.25rem; }
+  .header-controls { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; gap: 0.85rem; }
+
+  .status-panel {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    min-width: 0;
+    gap: 0.6rem 0.75rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: inset 0 1px 2px #00000014;
+  }
+  .status-divider { width: 1px; align-self: stretch; margin: 0.15rem 0; background: var(--border); }
+  /* Once the panel is too narrow to hold the gauges and the pause/theme
+     controls on one line, they wrap onto their own rows - at that point the
+     vertical divider between them no longer separates anything and just
+     floats, so JS toggles this class to hide it (see updateStatusPanelWrap). */
+  .status-panel.wrapped .status-divider { display: none; }
+
+  /* A second panel, styled like .status-panel, holding the Activity/Events/
+     Settings tabs - left-aligned under the status panel on narrow screens
+     (natural flex-wrap order), pushed to the row's right edge once there's
+     room for everything on one line. */
+  .tabs {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: inset 0 1px 2px #00000014;
+  }
+  @media (min-width: 641px) {
+    .tabs { margin-left: auto; }
+  }
   .tab-btn {
     font: inherit;
     background: transparent;
@@ -132,19 +215,6 @@
   }
   .tab-btn:hover { opacity: 0.85; }
   .tab-btn.active { opacity: 1; border-color: var(--border); background: var(--bg-card); }
-  .header-controls { display: flex; align-items: center; gap: 0.85rem; margin-left: auto; }
-
-  .status-panel {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.45rem 0.9rem;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg-card);
-    box-shadow: inset 0 1px 2px #00000014;
-  }
-  .status-divider { width: 1px; align-self: stretch; margin: 0.15rem 0; background: var(--border); }
 
   .gauge-cluster { display: flex; gap: 0.6rem; }
   .gauge {
@@ -159,8 +229,8 @@
     cursor: pointer;
   }
   .gauge-icon-wrap {
-    width: 1.75rem;
-    height: 1.75rem;
+    width: 2.28rem;
+    height: 2.28rem;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -168,17 +238,42 @@
     box-shadow: inset 0 0 0 1px var(--border);
     transition: box-shadow 0.15s;
   }
+  /* "live" (secondary function: the reachability check succeeded, or - for
+     the hot-folder gauge - the user has acknowledged its no-seedback
+     tradeoff) gets a glow ring in the accent's complementary color,
+     distinct from the accent-blue fill that marks the icon as merely "on"
+     (configured). */
   .gauge.live .gauge-icon-wrap {
-    box-shadow: inset 0 0 0 1px var(--ok), 0 0 5px 1px rgba(21, 128, 61, 0.5);
+    box-shadow: inset 0 0 0 1px var(--accent-complement), 0 0 6px 1px rgba(246, 175, 59, 0.55);
   }
+  /* Hot folder: configured but not yet acknowledged as safe (it moves files
+     out instead of leaving them to seed). Transmission: at least one
+     torrent has a tracker/local error. Same red warning glow either way. */
+  .gauge.danger .gauge-icon-wrap {
+    box-shadow: inset 0 0 0 1px var(--err), 0 0 6px 1px rgba(185, 28, 28, 0.55);
+  }
+  /* Transmission only: reachable, no errors, nothing currently downloading
+     (idle/seeding) - the same green used for "Running" elsewhere in the UI. */
+  .gauge.healthy .gauge-icon-wrap {
+    box-shadow: inset 0 0 0 1px var(--ok), 0 0 6px 1px rgba(21, 128, 61, 0.55);
+  }
+  /* Icons are rendered as a CSS mask so their color comes from
+     background-color, not whatever fill each source SVG happens to have -
+     that lets "on" mean the same domestique blue for every integration. */
   .gauge-icon {
-    width: 1.1rem;
-    height: 1.1rem;
+    width: 1.44rem;
+    height: 1.44rem;
     display: block;
-    filter: grayscale(1) opacity(0.4);
-    transition: filter 0.15s;
+    background-color: rgba(136, 136, 136, 0.45);
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    transition: background-color 0.15s;
   }
-  .gauge.on .gauge-icon { filter: none; }
+  .gauge.on .gauge-icon { background-color: var(--accent); }
 
   .pause-switch { display: flex; align-items: center; gap: 0.5rem; height: 1.75rem; margin-bottom: 0; cursor: pointer; font-size: 0.8rem; user-select: none; }
   .pause-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -215,31 +310,68 @@
     text-transform: uppercase;
     opacity: 0.75;
   }
+
+  .control-stack { display: flex; flex-direction: column; gap: 0.35rem; align-items: stretch; }
+  .theme-toggle {
+    display: flex;
+    height: 1.3rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .theme-btn {
+    flex: 1;
+    font: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 0 0.5rem;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.55;
+    cursor: pointer;
+  }
+  .theme-btn + .theme-btn { border-left: 1px solid var(--border); }
+  .theme-btn:hover { opacity: 0.85; }
+  .theme-btn.active { opacity: 1; background: var(--bg-card); }
 </style>
 </head>
 <body>
 
 <header class="app-header">
-  <div class="brand">
-    <img src="/favicon.svg" alt="">
-    <h1>Domestique</h1>
+  <div class="header-top-row">
+    <button type="button" class="brand" id="logo-home-btn" title="Home" aria-label="Domestique home">
+      <img src="/favicon.svg" alt="">
+    </button>
+    <div class="header-controls">
+      <div class="status-panel">
+        <div class="gauge-cluster" id="integration-icons"></div>
+        <div class="status-divider"></div>
+        <div class="control-stack">
+          <label class="pause-switch" title="Pause/resume automatic processing (Transmission webhook + hot folder). Manual upload and the match tester are unaffected.">
+            <input type="checkbox" id="pause-toggle">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label" id="pause-label">Running</span>
+          </label>
+          <div class="theme-toggle" id="theme-toggle" role="group" aria-label="Theme">
+            <button type="button" class="theme-btn" data-theme="dark" title="Dark">Dark</button>
+            <button type="button" class="theme-btn" data-theme="system" title="Match system">Auto</button>
+            <button type="button" class="theme-btn" data-theme="light" title="Light">Light</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   <nav class="tabs">
-    <button type="button" class="tab-btn" data-tab="home">Home</button>
+    <button type="button" class="tab-btn" data-tab="home">Activity</button>
     <button type="button" class="tab-btn" data-tab="events">Events</button>
     <button type="button" class="tab-btn" data-tab="settings">Settings</button>
   </nav>
-  <div class="header-controls">
-    <div class="status-panel">
-      <div class="gauge-cluster" id="integration-icons"></div>
-      <div class="status-divider"></div>
-      <label class="pause-switch" title="Pause/resume automatic processing (Transmission webhook + hot folder). Manual upload and the match tester are unaffected.">
-        <input type="checkbox" id="pause-toggle">
-        <span class="switch-track"><span class="switch-thumb"></span></span>
-        <span class="switch-label" id="pause-label">Running</span>
-      </label>
-    </div>
-  </div>
 </header>
 
 <div id="tab-home" class="tab-panel">
@@ -361,6 +493,14 @@
     "Clear" to remove one instead.
   </p>
 
+  <h3>Appearance</h3>
+  <label><span>Accent color (6-digit hex; blank uses the default) - primary buttons and the "on" status icons</span>
+    <div class="row" style="align-items:center; margin-bottom:0;">
+      <input type="text" id="s-accent-color" placeholder="#28e0ec" style="flex:1;">
+      <span id="accent-color-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border); background:var(--accent);"></span>
+    </div>
+  </label>
+
   <h3>Plex partial-scan</h3>
   <div class="row">
     <label><span>Plex URL (blank disables)</span><input type="text" id="s-plex-url" placeholder="http://192.168.1.10:32400"></label>
@@ -387,6 +527,10 @@
   <label><span>Watch directory (blank disables)</span>
     <input type="text" id="s-hotfolder-dir" placeholder="/downloads/domestique">
   </label>
+  <label class="clear-toggle" style="margin-top:-0.4rem; margin-bottom:0.75rem; align-items:flex-start;">
+    <input type="checkbox" id="s-hotfolder-ack" style="margin-top:0.2rem;">
+    <span style="flex:1; min-width:0;">I understand hot-folder ingestion moves the original file out of the downloads share (into its <code>processed/</code> subfolder) instead of leaving it to keep seeding, and accept that tradeoff.</span>
+  </label>
   <div class="row">
     <label><span>Poll interval (ms)</span><input type="number" id="s-hotfolder-interval" placeholder="60000"></label>
     <label><span>Stable polls</span><input type="number" id="s-hotfolder-stable" placeholder="3"></label>
@@ -394,9 +538,11 @@
 
   <h3>Transmission status check</h3>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Only used to light up the header icon with a live reachability check -
-    unrelated to the webhook Transmission already sends this app on torrent
-    completion.
+    Drives the header icon's glow with what your torrents are actually doing,
+    not just whether Transmission is reachable: green when everything's
+    idle/seeding with no errors, amber while something's downloading, red if
+    any torrent has a tracker or local error. Unrelated to the webhook
+    Transmission already sends this app on torrent completion.
   </p>
   <label><span>RPC URL (blank disables)</span>
     <input type="text" id="s-transmission-url" placeholder="http://192.168.1.10:9091/transmission/rpc">
@@ -454,6 +600,68 @@ function showTab(name) {
   try { localStorage.setItem("domestique-tab", name); } catch {}
 }
 
+const THEME_KEY = "domestique-theme";
+
+function applyTheme(theme) {
+  document.documentElement.style.colorScheme = theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark";
+  document.querySelectorAll(".theme-btn").forEach((btn) => {
+    const active = btn.dataset.theme === theme;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active);
+  });
+}
+
+function setTheme(theme) {
+  applyTheme(theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
+}
+
+const ACCENT_COLOR_KEY = "domestique-accent-color";
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+// Standard YIQ perceived-brightness threshold - cheap, good enough to pick
+// readable button/label text against an arbitrary user-chosen background,
+// without pulling in full WCAG contrast-ratio math for what's a cosmetic
+// preference field.
+function pickTextColor(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 150 ? "#111" : "#fff";
+}
+
+// `color` may be blank/invalid (e.g. still being typed in the Settings
+// field) - falls back to the CSS default rather than accepting a bad value.
+function applyAccentColor(color) {
+  const root = document.documentElement;
+  const valid = HEX_COLOR_RE.test(color || "");
+  if (valid) {
+    root.style.setProperty("--accent", color);
+    root.style.setProperty("--accent-text", pickTextColor(color));
+    try { localStorage.setItem(ACCENT_COLOR_KEY, color); } catch {}
+  } else {
+    root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-text");
+    try { localStorage.removeItem(ACCENT_COLOR_KEY); } catch {}
+  }
+  const swatch = document.getElementById("accent-color-swatch");
+  if (swatch) swatch.style.background = "var(--accent)";
+}
+
+// The status panel's gauges and pause/theme controls wrap onto their own
+// rows once the panel is too narrow to hold both - when that happens the
+// vertical divider between them no longer separates anything on the same
+// line, so hide it. Re-checked on resize and whenever the gauges re-render.
+function updateStatusPanelWrap() {
+  const gaugeCluster = document.getElementById("integration-icons");
+  const controlStack = document.querySelector(".control-stack");
+  const panel = document.querySelector(".status-panel");
+  if (!gaugeCluster || !controlStack || !panel) return;
+  panel.classList.toggle("wrapped", controlStack.offsetTop > gaugeCluster.offsetTop + 4);
+}
+window.addEventListener("resize", updateStatusPanelWrap);
+
 function setPauseUI(paused) {
   document.getElementById("pause-toggle").checked = !paused;
   document.getElementById("pause-label").textContent = paused ? "Paused" : "Running";
@@ -478,26 +686,64 @@ async function togglePause() {
   }
 }
 
+// `t.torrents` is only non-null when `t.live` is true (see /api/status) -
+// once it's available, it drives the glow instead of the plain
+// reachability tier every other gauge uses.
+function transmissionTier(t) {
+  if (!t.enabled || !t.live) return null;
+  if (t.torrents.hasError) return "danger";
+  if (t.torrents.downloading) return "live";
+  return "healthy";
+}
+
+function transmissionStatusText(t) {
+  if (!t.enabled) return "disabled";
+  if (!t.live) return "enabled, unreachable";
+  const count = `${t.torrents.total} torrent${t.torrents.total === 1 ? "" : "s"}`;
+  if (t.torrents.hasError) return `enabled, reachable (${count}) - one or more torrents have an error`;
+  if (t.torrents.downloading) return `enabled, reachable (${count}) - downloading`;
+  return `enabled, reachable (${count}) - idle/seeding, no errors`;
+}
+
 async function loadStatus() {
   const el = document.getElementById("integration-icons");
   try {
     const status = await api("/api/status");
-    // `on` (configured) reveals the icon's color; `tier` adds a ring on top
-    // of that - a green ring for a verified-reachable connection.
+    // `on` fills the icon in accent blue; `tier` ("live" or "danger") adds
+    // a glow ring on top of that - see the CSS for what each tier means.
+    // The icon itself is a CSS mask (not an <img>) so its color always
+    // comes from these states, not the source SVG's own fill.
     const gauge = (label, iconFile, on, tier, statusText) => `
       <button type="button" class="gauge ${on ? "on" : "off"}${tier ? ` ${tier}` : ""}" data-goto-tab="settings" title="${label}: ${statusText}">
-        <span class="gauge-icon-wrap"><img class="gauge-icon" src="/icons/${iconFile}" alt="${label}"></span>
+        <span class="gauge-icon-wrap"><span class="gauge-icon" style="-webkit-mask-image:url(/icons/${iconFile});mask-image:url(/icons/${iconFile});" role="img" aria-label="${label}"></span></span>
       </button>`;
     el.innerHTML = [
+      // Unlike the other two gauges, "on" here tracks the downloads/seeding
+      // share's own reachability (not the hot-folder feature) - that's the
+      // thing actually worth knowing at a glance, since hot-folder
+      // ingestion is optional but the downloads mount isn't. The glow ring
+      // then flags hot-folder specifically: red until its no-seedback
+      // tradeoff is acknowledged in Settings, then the normal color.
       gauge(
-        "Hot folder", "hotfolder.svg", status.hotfolder.enabled,
-        status.hotfolder.enabled ? "live" : null,
-        status.hotfolder.enabled ? `enabled (${esc(status.hotfolder.dir)})` : "disabled"
+        "Hot folder", "hotfolder.svg", status.downloads.reachable,
+        !status.hotfolder.enabled ? null : (status.hotfolder.acknowledgeNoSeedback ? "live" : "danger"),
+        [
+          status.downloads.reachable ? "downloads folder reachable" : "downloads folder not reachable",
+          status.hotfolder.enabled
+            ? `hot folder enabled (${esc(status.hotfolder.dir)})${status.hotfolder.acknowledgeNoSeedback ? ", no-seedback tradeoff acknowledged" : " - no-seedback tradeoff not yet acknowledged in Settings"}`
+            : "hot folder disabled",
+        ].join("; ")
       ),
+      // When Transmission exposes torrent status (it always does once
+      // reachable - see getTransmissionTorrentSummary), the glow reflects
+      // what's actually going on instead of just reachability: red for a
+      // tracker/local error, the usual complementary color while something's
+      // downloading, or green ("healthy") when everything's idle/seeding
+      // clean.
       gauge(
         "Transmission", "transmission.svg", status.transmission.enabled,
-        status.transmission.enabled && status.transmission.live ? "live" : null,
-        status.transmission.enabled ? (status.transmission.live ? "enabled, reachable" : "enabled, unreachable") : "disabled"
+        transmissionTier(status.transmission),
+        transmissionStatusText(status.transmission)
       ),
       gauge(
         "Plex", "plex.svg", status.plex.enabled,
@@ -516,12 +762,15 @@ async function loadStatus() {
     el.textContent = "?";
     console.error(`Failed to load status: ${err.message}`);
   }
+  updateStatusPanelWrap();
 }
 
 async function loadSettingsPanel() {
   const statusEl = document.getElementById("settings-status");
   try {
     const s = await api("/api/settings");
+    document.getElementById("s-accent-color").value = s.accentColor;
+    applyAccentColor(s.accentColor);
     document.getElementById("s-plex-url").value = s.plex.url;
     document.getElementById("s-plex-sectionId").value = s.plex.sectionId;
     document.getElementById("s-plex-libraryRoot").value = s.plex.libraryRoot;
@@ -529,6 +778,7 @@ async function loadSettingsPanel() {
     document.getElementById("s-discord-webhook").placeholder = s.discord.webhookUrlSet ? "already set - leave blank to keep" : "not set";
     document.getElementById("s-discord-mention").value = s.discord.mentionUserId;
     document.getElementById("s-hotfolder-dir").value = s.hotfolder.dir;
+    document.getElementById("s-hotfolder-ack").checked = s.hotfolder.acknowledgeNoSeedback;
     document.getElementById("s-hotfolder-interval").value = s.hotfolder.pollIntervalMs;
     document.getElementById("s-hotfolder-stable").value = s.hotfolder.stablePolls;
     document.getElementById("s-transmission-url").value = s.transmission.url;
@@ -543,6 +793,7 @@ async function loadSettingsPanel() {
 async function saveSettingsPanel() {
   const statusEl = document.getElementById("settings-status");
   const payload = {
+    accentColor: document.getElementById("s-accent-color").value.trim(),
     plex: {
       url: document.getElementById("s-plex-url").value.trim(),
       sectionId: document.getElementById("s-plex-sectionId").value.trim(),
@@ -553,6 +804,7 @@ async function saveSettingsPanel() {
     },
     hotfolder: {
       dir: document.getElementById("s-hotfolder-dir").value.trim(),
+      acknowledgeNoSeedback: document.getElementById("s-hotfolder-ack").checked,
       pollIntervalMs: parseInt(document.getElementById("s-hotfolder-interval").value, 10) || undefined,
       stablePolls: parseInt(document.getElementById("s-hotfolder-stable").value, 10) || undefined,
     },
@@ -895,8 +1147,13 @@ document.getElementById("refresh-activity-btn").addEventListener("click", loadAc
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => showTab(btn.dataset.tab));
 });
+document.getElementById("logo-home-btn").addEventListener("click", () => showTab("home"));
 document.getElementById("pause-toggle").addEventListener("change", togglePause);
+document.querySelectorAll(".theme-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setTheme(btn.dataset.theme));
+});
 document.getElementById("save-settings-btn").addEventListener("click", saveSettingsPanel);
+document.getElementById("s-accent-color").addEventListener("input", (e) => applyAccentColor(e.target.value.trim()));
 document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
 document.getElementById("upload-folder-btn").addEventListener("click", () => document.getElementById("upload-folder-input").click());
 document.getElementById("upload-file-input").addEventListener("change", (e) => {
@@ -915,6 +1172,14 @@ try {
 } catch {}
 showTab(initialTab);
 
+let initialTheme = "system";
+try {
+  const savedTheme = localStorage.getItem(THEME_KEY);
+  if (savedTheme === "dark" || savedTheme === "system" || savedTheme === "light") initialTheme = savedTheme;
+} catch {}
+applyTheme(initialTheme);
+
+updateStatusPanelWrap();
 loadStatus();
 loadSettingsPanel();
 loadEvents();

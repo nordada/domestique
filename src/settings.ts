@@ -29,6 +29,8 @@ export interface HotfolderSettings {
   dir: string;
   pollIntervalMs: number;
   stablePolls: number;
+  /** User has acknowledged that hot-folder ingestion moves the original file (into its `processed/` subfolder) instead of leaving it in place to keep seeding. Gates the header gauge's warning glow - see webui.ts's /api/status. */
+  acknowledgeNoSeedback: boolean;
 }
 
 export interface Settings {
@@ -39,6 +41,8 @@ export interface Settings {
   transmission: TransmissionConfig | null;
   /** Global pause of automatic processing (Transmission webhook + hot-folder poller). Manual paths (web UI upload, match tester) are unaffected. */
   paused: boolean;
+  /** Web UI accent color override (6-digit hex, e.g. "#3b82f6") - primary buttons and the "on" status icons. Null uses the built-in default blue. */
+  accentColor: string | null;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -56,13 +60,19 @@ function seedFromEnv(libraryRoot: string): Settings {
     plex: plexConfigFromEnv(libraryRoot),
     discord: discordConfigFromEnv(),
     hotfolder: hotfolder
-      ? { dir: hotfolder.dir, pollIntervalMs: hotfolder.pollIntervalMs, stablePolls: hotfolder.stablePolls }
+      ? {
+          dir: hotfolder.dir,
+          pollIntervalMs: hotfolder.pollIntervalMs,
+          stablePolls: hotfolder.stablePolls,
+          acknowledgeNoSeedback: false,
+        }
       : null,
     // No env-var seeding for this one - it's a new, purely optional status
     // check with no prior deployment relying on env vars for it, unlike
     // Plex/Discord/hot-folder which predate settings.json entirely.
     transmission: null,
     paused: false,
+    accentColor: null,
   };
 }
 
@@ -84,7 +94,16 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     hotfolder: normalizeHotfolder(raw.hotfolder),
     transmission: normalizeTransmission(raw.transmission),
     paused: raw.paused === true,
+    accentColor: normalizeAccentColor(raw.accentColor),
   };
+}
+
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+function normalizeAccentColor(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  return HEX_COLOR_RE.test(trimmed) ? trimmed : null;
 }
 
 function normalizePlex(input: unknown, appLibraryRoot: string): PlexConfig | null {
@@ -131,13 +150,14 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
 
 function normalizeHotfolder(input: unknown): HotfolderSettings | null {
   if (!input || typeof input !== "object") return null;
-  const { dir, pollIntervalMs, stablePolls } = input as Record<string, unknown>;
+  const { dir, pollIntervalMs, stablePolls, acknowledgeNoSeedback } = input as Record<string, unknown>;
   if (typeof dir !== "string" || !dir.trim()) return null;
 
   return {
     dir,
     pollIntervalMs: normalizePositiveInt(pollIntervalMs, 60000),
     stablePolls: normalizePositiveInt(stablePolls, 3),
+    acknowledgeNoSeedback: acknowledgeNoSeedback === true,
   };
 }
 

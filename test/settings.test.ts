@@ -62,6 +62,7 @@ test("loadSettings seeds a missing path from the current env vars", async () => 
         dir: "/downloads/domestique",
         pollIntervalMs: 60000,
         stablePolls: 3,
+        acknowledgeNoSeedback: false,
       });
     }
   );
@@ -112,7 +113,7 @@ test("saveSettings + loadSettings round-trip, and normalizes partial Plex fields
     {
       plex: { url: "http://plex.local:32400", sectionId: "35" }, // no token - collapses to null
       discord: { webhookUrl: "https://discord.example/webhook", mentionUserId: "999" },
-      hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 },
+      hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2, acknowledgeNoSeedback: true },
       transmission: { url: "http://tower:9091/transmission/rpc/", username: "admin", password: "hunter2" },
     },
     "/library",
@@ -121,7 +122,12 @@ test("saveSettings + loadSettings round-trip, and normalizes partial Plex fields
 
   assert.equal(saved.plex, null);
   assert.deepEqual(saved.discord, { webhookUrl: "https://discord.example/webhook", mentionUserId: "999" });
-  assert.deepEqual(saved.hotfolder, { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 });
+  assert.deepEqual(saved.hotfolder, {
+    dir: "/downloads/domestique",
+    pollIntervalMs: 5000,
+    stablePolls: 2,
+    acknowledgeNoSeedback: true,
+  });
   assert.deepEqual(saved.transmission, {
     url: "http://tower:9091/transmission/rpc", // trailing slash stripped
     username: "admin",
@@ -173,7 +179,12 @@ test("loadSettings defaults paused to false when seeding fresh, and setPaused fl
 
   const paused = setPaused(true, "/library", settingsPath);
   assert.equal(paused.paused, true);
-  assert.deepEqual(paused.hotfolder, { dir: "/downloads/domestique", pollIntervalMs: 60000, stablePolls: 3 });
+  assert.deepEqual(paused.hotfolder, {
+    dir: "/downloads/domestique",
+    pollIntervalMs: 60000,
+    stablePolls: 3,
+    acknowledgeNoSeedback: false,
+  });
 
   const resumed = setPaused(false, "/library", settingsPath);
   assert.equal(resumed.paused, false);
@@ -191,4 +202,15 @@ test("saveSettings falls back invalid hot-folder tuning numbers to defaults inst
 
   assert.equal(saved.hotfolder?.pollIntervalMs, 60000);
   assert.equal(saved.hotfolder?.stablePolls, 3);
+});
+
+test("saveSettings accepts a valid 6-digit hex accentColor, normalizes case, and rejects anything else", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  assert.equal(saveSettings({ accentColor: "#3B82F6" }, "/library", settingsPath).accentColor, "#3B82F6");
+  assert.equal(saveSettings({ accentColor: "#zzz111" }, "/library", settingsPath).accentColor, null);
+  assert.equal(saveSettings({ accentColor: "#fff" }, "/library", settingsPath).accentColor, null); // 3-digit shorthand not accepted
+  assert.equal(saveSettings({ accentColor: "" }, "/library", settingsPath).accentColor, null);
+  assert.equal(saveSettings({}, "/library", settingsPath).accentColor, null);
 });

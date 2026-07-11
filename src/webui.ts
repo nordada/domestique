@@ -17,7 +17,7 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -28,7 +28,7 @@ import { parseName } from "./parser.js";
 import { getRecentActivity } from "./activity.js";
 import { handleUploadRequest, type ProcessTorrentDone } from "./upload.js";
 import { checkPlexLive } from "./plex.js";
-import { checkTransmissionLive } from "./transmission.js";
+import { getTransmissionTorrentSummary } from "./transmission.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +41,15 @@ function readAppVersion(): string {
     return (JSON.parse(raw) as { version?: string }).version ?? "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+/** Best-effort check that the downloads/seeding share is actually mounted and readable - used only for the header status gauge, never to gate real processing (a webhook/hot-folder file that fails to resolve just fails normally with its own error). */
+function isDownloadsReachable(downloadsPath: string): boolean {
+  try {
+    return statSync(downloadsPath).isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -135,6 +144,7 @@ function maskSettings(settings: Settings) {
       dir: settings.hotfolder?.dir ?? "",
       pollIntervalMs: settings.hotfolder?.pollIntervalMs ?? 60000,
       stablePolls: settings.hotfolder?.stablePolls ?? 3,
+      acknowledgeNoSeedback: settings.hotfolder?.acknowledgeNoSeedback ?? false,
     },
     transmission: {
       url: settings.transmission?.url ?? "",
@@ -142,6 +152,7 @@ function maskSettings(settings: Settings) {
       passwordSet: Boolean(settings.transmission?.password),
     },
     paused: settings.paused,
+    accentColor: settings.accentColor ?? "",
   };
 }
 
@@ -254,10 +265,12 @@ export async function handleWebUiRequest(
     if (req.method === "GET" && url === "/api/status") {
       const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
       // Live-probed in parallel so one slow/unreachable service doesn't
-      // multiply the page's load time by the number of integrations.
-      const [plexLive, transmissionLive] = await Promise.all([
+      // multiply the page's load time by the number of integrations. A
+      // successful torrent summary fetch doubles as the Transmission
+      // liveness check - one RPC round-trip instead of two.
+      const [plexLive, transmissionSummary] = await Promise.all([
         settings.plex ? checkPlexLive(settings.plex) : Promise.resolve(false),
-        settings.transmission ? checkTransmissionLive(settings.transmission) : Promise.resolve(false),
+        settings.transmission ? getTransmissionTorrentSummary(settings.transmission) : Promise.resolve(null),
       ]);
       sendJson(res, 200, {
         version: APP_VERSION,
@@ -267,10 +280,18 @@ export async function handleWebUiRequest(
         discord: settings.discord
           ? { enabled: true, hasMention: Boolean(settings.discord.mentionUserId) }
           : { enabled: false, hasMention: false },
-        hotfolder: settings.hotfolder ? { enabled: true, dir: settings.hotfolder.dir } : { enabled: false },
+        hotfolder: settings.hotfolder
+          ? { enabled: true, dir: settings.hotfolder.dir, acknowledgeNoSeedback: settings.hotfolder.acknowledgeNoSeedback }
+          : { enabled: false },
         transmission: settings.transmission
-          ? { enabled: true, url: settings.transmission.url, live: transmissionLive }
-          : { enabled: false, live: false },
+          ? {
+              enabled: true,
+              url: settings.transmission.url,
+              live: transmissionSummary !== null,
+              torrents: transmissionSummary,
+            }
+          : { enabled: false, live: false, torrents: null },
+        downloads: { reachable: isDownloadsReachable(opts.downloadsPath) },
         paused: settings.paused,
       });
       return true;
@@ -301,9 +322,10 @@ export async function handleWebUiRequest(
         plexToken?: string;
         discord?: { mentionUserId?: string };
         discordWebhookUrl?: string;
-        hotfolder?: { dir?: string; pollIntervalMs?: number; stablePolls?: number };
+        hotfolder?: { dir?: string; pollIntervalMs?: number; stablePolls?: number; acknowledgeNoSeedback?: boolean };
         transmission?: { url?: string; username?: string };
         transmissionPassword?: string;
+        accentColor?: string;
       };
 
       // A field only overwrites its stored secret when the caller actually
@@ -327,6 +349,7 @@ export async function handleWebUiRequest(
             hotfolder: payload.hotfolder,
             transmission: { ...payload.transmission, password: transmissionPassword },
             paused: current.paused,
+            accentColor: payload.accentColor,
           },
           opts.libraryRoot,
           opts.settingsPath
