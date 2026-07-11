@@ -249,6 +249,7 @@
     justify-content: center;
     box-shadow: inset 0 0 0 1px var(--border);
     transition: box-shadow 0.15s;
+    position: relative;
   }
   /* The indexer's own icon is a true-color favicon, not a mask, so it can't
      also turn accent-colored the way the other gauges' icons do - this ring
@@ -294,20 +295,25 @@
     transition: background-color 0.15s;
   }
   .gauge.on .gauge-icon { background-color: var(--accent); }
-  /* The indexer gauge shows the linked site's own favicon instead of a
-     mask icon (its shape/colors are the whole point - a generic magnifying
-     glass or globe wouldn't tell two indexers apart), so it skips the mask
-     entirely and just dims/desaturates while disabled instead of relying on
-     "on" to swap a mask's background-color. */
+  /* The indexer gauge tries to show the linked site's own favicon - its
+     shape/colors are the whole point, a generic icon can't tell two
+     indexers apart - but plenty of sites (especially private trackers,
+     which often gate everything behind login) don't actually serve one at
+     the well-known /favicon.ico path. indexer.svg's mask icon (same
+     ".gauge-icon" every other gauge uses) is always rendered as the base
+     layer so there's never a blank gauge; the favicon <img> is absolutely
+     positioned on top of it and only visually wins once it actually loads.
+     Its onerror just hides itself, which reveals the mask icon underneath
+     with no JS-side fallback logic needed. */
   .gauge-icon-img {
+    position: absolute;
+    inset: 0;
+    margin: auto;
     width: 1.44rem;
     height: 1.44rem;
-    display: block;
     object-fit: contain;
     border-radius: 3px;
-    transition: opacity 0.15s, filter 0.15s;
   }
-  .gauge:not(.on) .gauge-icon-img { opacity: 0.45; filter: grayscale(1); }
 
   .pause-switch { display: flex; align-items: center; gap: 0.5rem; height: 1.75rem; margin-bottom: 0; cursor: pointer; font-size: 0.8rem; user-select: none; }
   .pause-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -827,10 +833,15 @@ function indexerGauge(indexer) {
   const statusText = !indexer.enabled
     ? "disabled"
     : `enabled, ${indexer.live ? "reachable" : "unreachable"} (${esc(indexer.url)})`;
-  const icon = indexer.enabled
-    ? `<img class="gauge-icon-img" src="${esc(faviconUrl(indexer.url))}" alt="" role="img" aria-label="Indexer" onerror="this.style.visibility='hidden'">`
+  // Fallback mask icon is always present (aria-labeled), same as every
+  // other gauge - it's the only thing shown while disabled, and the base
+  // layer underneath the favicon while enabled. aria-hidden on the <img>
+  // avoids the label being announced twice for the same gauge.
+  const fallbackIcon = `<span class="gauge-icon" style="-webkit-mask-image:url(/icons/indexer.svg);mask-image:url(/icons/indexer.svg);" role="img" aria-label="Indexer"></span>`;
+  const favicon = indexer.enabled
+    ? `<img class="gauge-icon-img" src="${esc(faviconUrl(indexer.url))}" alt="" aria-hidden="true" onerror="this.style.display='none'">`
     : "";
-  const wrap = `<span class="gauge-icon-wrap">${icon}</span>`;
+  const wrap = `<span class="gauge-icon-wrap">${fallbackIcon}${favicon}</span>`;
   if (!indexer.enabled) {
     return `<button type="button" class="gauge indexer off" data-goto-tab="settings" title="Indexer: ${statusText}">${wrap}</button>`;
   }

@@ -36,7 +36,7 @@ const ICONS_DIR = join(__dirname, "..", "public", "icons");
 // Allow-listed rather than an open static-file route off req.url, so a
 // crafted path can't escape ICONS_DIR - same "unauthenticated but not
 // attacker-controlled" trust level as the favicon route below.
-const ICON_FILES = new Set(["plex.svg", "hotfolder.svg", "transmission.svg"]);
+const ICON_FILES = new Set(["plex.svg", "hotfolder.svg", "transmission.svg", "indexer.svg"]);
 
 export interface ServerOptions {
   port: number;
