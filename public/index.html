@@ -379,30 +379,7 @@
   </nav>
 </header>
 
-<div id="tab-home" class="tab-panel">
-
-<section id="activity-section">
-  <div class="toolbar">
-    <h2 style="margin:0">Recent activity</h2>
-    <button class="primary" id="refresh-activity-btn">Refresh</button>
-  </div>
-  <div id="activity-list">Loading…</div>
-</section>
-
-<section id="match-tester-section">
-  <h2>Match tester</h2>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Paste a raw torrent/release name to see which event it would match - or
-    that it would auto-create - without saving anything. If it wouldn't
-    match, add it as a new event below.
-  </p>
-  <div class="row">
-    <input type="text" id="match-input" placeholder="Tour-de-France-2026-Stage-05-1080p-Eurosport">
-    <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
-  </div>
-  <div id="match-result" class="status-msg"></div>
-  <button class="primary hidden" id="add-from-match-btn" style="margin-top:0.5rem;">Add as new event</button>
-</section>
+<div id="tab-home" class="tab-panel" style="padding-top:2px;">
 
 <section id="add-torrent-section">
   <h2>Add torrent</h2>
@@ -411,11 +388,19 @@
     the tracker's RSS feed, without adding it in Transmission's own UI.
     Requires Transmission's RPC connection to be configured in Settings.
     Waits briefly after adding to confirm Transmission actually registered
-    it; check Recent activity above for the result.
+    it; check Recent activity below for the result.
   </p>
   <button class="primary" id="add-torrent-btn">Add .torrent file…</button>
   <input type="file" id="add-torrent-input" class="hidden" accept=".torrent">
   <div id="add-torrent-status" class="status-msg"></div>
+</section>
+
+<section id="activity-section">
+  <div class="toolbar">
+    <h2 style="margin:0">Recent activity</h2>
+    <button class="primary" id="refresh-activity-btn">Refresh</button>
+  </div>
+  <div id="activity-list">Loading…</div>
 </section>
 
 <section id="upload-section">
@@ -434,6 +419,21 @@
   <input type="file" id="upload-file-input" class="hidden">
   <input type="file" id="upload-folder-input" class="hidden" webkitdirectory multiple>
   <div id="upload-status" class="status-msg"></div>
+</section>
+
+<section id="match-tester-section">
+  <h2>Match tester</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Paste a raw torrent/release name to see which event it would match - or
+    that it would auto-create - without saving anything. If it wouldn't
+    match, add it as a new event below.
+  </p>
+  <div class="row">
+    <input type="text" id="match-input" placeholder="Tour-de-France-2026-Stage-05-1080p-Eurosport">
+    <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
+  </div>
+  <div id="match-result" class="status-msg"></div>
+  <button class="primary hidden" id="add-from-match-btn" style="margin-top:0.5rem;">Add as new event</button>
 </section>
 
 </div>
