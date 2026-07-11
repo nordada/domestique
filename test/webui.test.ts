@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer as createHttpServer } from "node:http";
 import { createApp, type ServerOptions } from "../src/server.js";
 import { webUiConfigFromEnv } from "../src/webui.js";
 
@@ -401,5 +402,113 @@ test("when WEBUI_USER is configured, both username and password must match", asy
     assert.equal(rightUserWrongPass.status, 401);
   } finally {
     await close();
+  }
+});
+
+/** Minimal fake Transmission RPC server, just enough to exercise POST /api/transmission/add-torrent end to end. */
+function startFakeTransmissionRpc(
+  handleMethod: (method: string, args: Record<string, unknown> | undefined) => Record<string, unknown>
+): Promise<{ url: string; close: () => Promise<void> }> {
+  const sessionId = "fake-session-id-webui";
+  return new Promise((resolve) => {
+    const server = createHttpServer((req, res) => {
+      if (req.headers["x-transmission-session-id"] !== sessionId) {
+        res.writeHead(409, { "X-Transmission-Session-Id": sessionId });
+        res.end();
+        return;
+      }
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        const { method, arguments: args } = JSON.parse(body) as {
+          method: string;
+          arguments?: Record<string, unknown>;
+        };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ result: "success", arguments: handleMethod(method, args) }));
+      });
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      resolve({
+        url: `http://127.0.0.1:${port}/transmission/rpc`,
+        close: () => new Promise((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
+test("POST /api/transmission/add-torrent without Transmission configured logs to activity and returns 400", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const res = await fetch(`${baseUrl}/api/transmission/add-torrent?name=stage05.torrent`, {
+      method: "POST",
+      headers: { Authorization: authHeader("correct-password") },
+      body: Buffer.from("fake torrent bytes"),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /not.*configured|isn't configured/i);
+
+    // Checks the newest entry (index 0, recordActivity unshifts) rather
+    // than an absolute activity.events.length - the activity log is
+    // process-global shared state across every test in this file, not
+    // reset between tests.
+    const activityRes = await fetch(`${baseUrl}/api/activity`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    const activity = await activityRes.json();
+    assert.equal(activity.events[0].torrentName, "stage05.torrent");
+    assert.equal(activity.events[0].reviewWorthy, true);
+    assert.match(activity.events[0].lines[0], /isn't configured/);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/transmission/add-torrent adds, polls to confirm, and logs a success activity entry", async () => {
+  const { baseUrl, close: closeApp, settingsPath } = await makeScratchServer({ password: "correct-password" });
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-add") {
+      return { "torrent-added": { id: 11, name: "Tour de France Stage 5", hashString: "abc123" } };
+    }
+    if (method === "torrent-get") {
+      return { torrents: [{ id: 11, status: 4, error: 0, errorString: "" }] };
+    }
+    return {};
+  });
+  try {
+    // Seed transmission settings directly (bypassing PUT /api/settings -
+    // this test only cares about the add-torrent route, not settings
+    // round-tripping, which is already covered elsewhere).
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+
+    const res = await fetch(`${baseUrl}/api/transmission/add-torrent?name=stage05.torrent`, {
+      method: "POST",
+      headers: { Authorization: authHeader("correct-password") },
+      body: Buffer.from("fake torrent bytes"),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.added.name, "Tour de France Stage 5");
+    assert.equal(body.confirmed, true);
+
+    const activityRes = await fetch(`${baseUrl}/api/activity`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    const activity = await activityRes.json();
+    assert.equal(activity.events[0].torrentName, "Tour de France Stage 5");
+    assert.equal(activity.events[0].reviewWorthy, false);
+    assert.match(activity.events[0].lines.join("\n"), /added to Transmission/);
+    assert.match(activity.events[0].lines.join("\n"), /Confirmed by Transmission/);
+  } finally {
+    await closeApp();
+    await closeTransmission();
   }
 });

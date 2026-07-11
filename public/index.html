@@ -394,6 +394,20 @@
   <button id="add-from-match-btn" class="hidden" style="margin-top:0.5rem;">Add as new event</button>
 </section>
 
+<section id="add-torrent-section">
+  <h2>Add torrent</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Hand a .torrent file straight to Transmission - for a race found outside
+    the tracker's RSS feed, without adding it in Transmission's own UI.
+    Requires Transmission's RPC connection to be configured in Settings.
+    Waits briefly after adding to confirm Transmission actually registered
+    it; check Recent activity above for the result.
+  </p>
+  <button id="add-torrent-btn">Add .torrent file…</button>
+  <input type="file" id="add-torrent-input" class="hidden" accept=".torrent">
+  <div id="add-torrent-status" class="status-msg"></div>
+</section>
+
 <section id="upload-section">
   <h2>Upload</h2>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
@@ -1096,6 +1110,26 @@ async function uploadFolder(fileList) {
   }
 }
 
+async function addTorrentFile(file) {
+  const statusEl = document.getElementById("add-torrent-status");
+  statusEl.textContent = `Adding "${file.name}" to Transmission…`;
+  statusEl.className = "status-msg";
+  try {
+    const data = await api(`/api/transmission/add-torrent?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      body: file,
+    });
+    statusEl.textContent = data.confirmed
+      ? `✅ "${data.added.name}" added and confirmed by Transmission.`
+      : `⚠️ "${data.added.name}" was accepted but couldn't be confirmed - check Recent activity.`;
+    statusEl.className = `status-msg ${data.confirmed ? "ok" : "err"}`;
+  } catch (err) {
+    statusEl.textContent = `Failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+  await loadActivity();
+}
+
 async function loadActivity() {
   const el = document.getElementById("activity-list");
   try {
@@ -1148,6 +1182,11 @@ document.querySelectorAll(".theme-btn").forEach((btn) => {
 });
 document.getElementById("save-settings-btn").addEventListener("click", saveSettingsPanel);
 document.getElementById("s-accent-color").addEventListener("input", (e) => applyAccentColor(e.target.value.trim()));
+document.getElementById("add-torrent-btn").addEventListener("click", () => document.getElementById("add-torrent-input").click());
+document.getElementById("add-torrent-input").addEventListener("change", (e) => {
+  if (e.target.files.length > 0) addTorrentFile(e.target.files[0]);
+  e.target.value = "";
+});
 document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
 document.getElementById("upload-folder-btn").addEventListener("click", () => document.getElementById("upload-folder-input").click());
 document.getElementById("upload-file-input").addEventListener("change", (e) => {

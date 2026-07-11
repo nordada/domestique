@@ -25,10 +25,10 @@ import { loadConfig, saveConfig, type ShowsConfigFile } from "./config.js";
 import { loadSettings, saveSettings, setPaused, type Settings } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
-import { getRecentActivity } from "./activity.js";
-import { handleUploadRequest, type ProcessTorrentDone } from "./upload.js";
+import { getRecentActivity, recordActivity } from "./activity.js";
+import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
 import { checkPlexLive } from "./plex.js";
-import { getTransmissionTorrentSummary } from "./transmission.js";
+import { getTransmissionTorrentSummary, addTorrentToTransmission, pollTorrentAdded } from "./transmission.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -114,6 +114,16 @@ function readBody(req: IncomingMessage): Promise<string> {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
+}
+
+/** Binary-safe counterpart to readBody - string concatenation of raw chunks would corrupt a .torrent file's bencoded bytes. .torrent files are tiny (rarely more than a few hundred KB even for huge multi-file torrents), so buffering in memory is fine, unlike the video uploads in upload.ts which stream straight to disk. */
+function readBodyBuffer(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
@@ -259,6 +269,72 @@ export async function handleWebUiRequest(
 
     if (req.method === "GET" && url === "/api/activity") {
       sendJson(res, 200, { events: getRecentActivity() });
+      return true;
+    }
+
+    if (req.method === "POST" && url.startsWith("/api/transmission/add-torrent")) {
+      const rawName = new URL(req.url ?? "", "http://internal").searchParams.get("name") || "upload.torrent";
+      let name: string;
+      try {
+        name = sanitizeName(rawName);
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: String(err) });
+        return true;
+      }
+
+      const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+      if (!settings.transmission) {
+        const message = "Transmission isn't configured - set its RPC URL in Settings before adding torrents.";
+        recordActivity({
+          timestamp: new Date().toISOString(),
+          torrentName: name,
+          lines: [`❌ ${message}`],
+          reviewWorthy: true,
+        });
+        sendJson(res, 400, { ok: false, error: message });
+        return true;
+      }
+
+      const body = await readBodyBuffer(req);
+      try {
+        const added = await addTorrentToTransmission(settings.transmission, body.toString("base64"));
+        // torrent-add returning success already means Transmission accepted
+        // it, but polling torrent-get confirms it's actually registered and
+        // gets a fresher error/status than the add response carries.
+        const confirmed = await pollTorrentAdded(settings.transmission, added.id);
+
+        const lines = [
+          added.duplicate
+            ? `⚠️ "${added.name}" was already in Transmission (duplicate) - not a new download.`
+            : `✅ "${added.name}" added to Transmission.`,
+        ];
+        if (confirmed) {
+          lines.push(
+            confirmed.error
+              ? `⚠️ Confirmed by Transmission, but it's reporting an error: ${confirmed.errorString}`
+              : "Confirmed by Transmission."
+          );
+        } else {
+          lines.push("⚠️ Added, but could not confirm Transmission registered it after polling - check Transmission directly.");
+        }
+
+        recordActivity({
+          timestamp: new Date().toISOString(),
+          torrentName: added.name,
+          lines,
+          reviewWorthy: added.duplicate || !confirmed || Boolean(confirmed?.error),
+        });
+        sendJson(res, 200, { ok: true, added, confirmed: Boolean(confirmed), status: confirmed });
+      } catch (err) {
+        const message = `Failed to add torrent to Transmission: ${err}`;
+        recordActivity({
+          timestamp: new Date().toISOString(),
+          torrentName: name,
+          lines: [`❌ ${message}`],
+          reviewWorthy: true,
+        });
+        sendJson(res, 500, { ok: false, error: message });
+      }
       return true;
     }
 

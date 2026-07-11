@@ -122,3 +122,74 @@ export async function getTransmissionTorrentSummary(
     return null;
   }
 }
+
+export interface AddedTorrent {
+  id: number;
+  name: string;
+  hashString: string;
+  /** True if Transmission already had this torrent (RPC's "torrent-duplicate" rather than "torrent-added") - not an error, just not a new download. */
+  duplicate: boolean;
+}
+
+/**
+ * Hands a .torrent file's raw bytes to Transmission via RPC `torrent-add`
+ * (its `metainfo` argument, base64-encoded file contents - as opposed to
+ * `filename`, which is for a URL/magnet/path Transmission itself fetches).
+ * Throws on any failure, same as the other RPC calls here - callers decide
+ * how to surface that.
+ */
+export async function addTorrentToTransmission(
+  config: TransmissionConfig,
+  metainfoBase64: string,
+  timeoutMs = 10000
+): Promise<AddedTorrent> {
+  const data = await rpcCall(config, "torrent-add", { metainfo: metainfoBase64 }, timeoutMs);
+  const added = data.arguments?.["torrent-added"] as { id: number; name: string; hashString: string } | undefined;
+  const duplicate = data.arguments?.["torrent-duplicate"] as
+    | { id: number; name: string; hashString: string }
+    | undefined;
+  const torrent = added ?? duplicate;
+  if (!torrent) {
+    throw new Error(`unexpected torrent-add response: ${JSON.stringify(data.arguments)}`);
+  }
+  return { id: torrent.id, name: torrent.name, hashString: torrent.hashString, duplicate: Boolean(duplicate) };
+}
+
+export interface TorrentPollResult {
+  id: number;
+  status: number;
+  error: number;
+  errorString: string;
+}
+
+/**
+ * Polls torrent-get for a single torrent id until Transmission reports it
+ * (confirming the add was actually registered, not just that the RPC call
+ * itself returned success) or the attempts run out. A transient RPC hiccup
+ * mid-poll doesn't abort early - it just counts as a miss for that attempt.
+ */
+export async function pollTorrentAdded(
+  config: TransmissionConfig,
+  id: number,
+  { attempts = 5, intervalMs = 1000, timeoutMs = 3000 }: { attempts?: number; intervalMs?: number; timeoutMs?: number } = {}
+): Promise<TorrentPollResult | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    try {
+      const data = await rpcCall(
+        config,
+        "torrent-get",
+        { ids: [id], fields: ["id", "status", "error", "errorString"] },
+        timeoutMs
+      );
+      const torrents = (data.arguments?.torrents ?? []) as TorrentPollResult[];
+      const match = torrents.find((t) => t.id === id);
+      if (match) return match;
+    } catch {
+      // Keep polling - a single failed attempt doesn't mean Transmission
+      // rejected the torrent, and the caller already knows torrent-add
+      // itself succeeded.
+    }
+  }
+  return null;
+}

@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { checkTransmissionLive, getTransmissionTorrentSummary } from "../src/transmission.js";
+import {
+  checkTransmissionLive,
+  getTransmissionTorrentSummary,
+  addTorrentToTransmission,
+  pollTorrentAdded,
+} from "../src/transmission.js";
 
 /**
  * Stubs Transmission's real CSRF handshake: the first request (no session
@@ -121,4 +126,127 @@ test("getTransmissionTorrentSummary reports neither error nor downloading when e
 
 test("getTransmissionTorrentSummary returns null when nothing is listening", async () => {
   assert.equal(await getTransmissionTorrentSummary({ url: "http://127.0.0.1:1" }, 500), null);
+});
+
+/**
+ * A more general fake Transmission than startFakeTransmission above - lets
+ * each test script how the server responds per RPC method, needed to
+ * exercise torrent-add and to simulate torrent-get returning empty on early
+ * poll attempts before the torrent "shows up".
+ */
+function startFakeTransmissionRpc(
+  handleMethod: (method: string, args: Record<string, unknown> | undefined) => Record<string, unknown>
+): Promise<{ url: string; close: () => Promise<void> }> {
+  const sessionId = "fake-session-id-789";
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      if (req.headers["x-transmission-session-id"] !== sessionId) {
+        res.writeHead(409, { "X-Transmission-Session-Id": sessionId });
+        res.end();
+        return;
+      }
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        const { method, arguments: args } = JSON.parse(body) as {
+          method: string;
+          arguments?: Record<string, unknown>;
+        };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ result: "success", arguments: handleMethod(method, args) }));
+      });
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      resolve({
+        url: `http://127.0.0.1:${port}/transmission/rpc`,
+        close: () => new Promise((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
+test("addTorrentToTransmission sends the base64 metainfo and returns the added torrent", async () => {
+  let receivedMetainfo: unknown;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-add") {
+      receivedMetainfo = args?.metainfo;
+      return { "torrent-added": { id: 7, name: "Tour de France Stage 5", hashString: "abc123" } };
+    }
+    return {};
+  });
+  try {
+    const result = await addTorrentToTransmission({ url }, Buffer.from("fake torrent bytes").toString("base64"));
+    assert.deepEqual(result, { id: 7, name: "Tour de France Stage 5", hashString: "abc123", duplicate: false });
+    assert.equal(receivedMetainfo, Buffer.from("fake torrent bytes").toString("base64"));
+  } finally {
+    await close();
+  }
+});
+
+test("addTorrentToTransmission reports duplicate:true for an already-added torrent", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-add") {
+      return { "torrent-duplicate": { id: 3, name: "Paris-Roubaix", hashString: "dup456" } };
+    }
+    return {};
+  });
+  try {
+    const result = await addTorrentToTransmission({ url }, "irrelevant-base64");
+    assert.deepEqual(result, { id: 3, name: "Paris-Roubaix", hashString: "dup456", duplicate: true });
+  } finally {
+    await close();
+  }
+});
+
+test("addTorrentToTransmission throws when the response has neither torrent-added nor torrent-duplicate", async () => {
+  const { url, close } = await startFakeTransmissionRpc(() => ({}));
+  try {
+    await assert.rejects(() => addTorrentToTransmission({ url }, "irrelevant-base64"));
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentAdded returns the torrent as soon as torrent-get reports it", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return { torrents: [{ id: 7, status: 4, error: 0, errorString: "" }] };
+    }
+    return {};
+  });
+  try {
+    const result = await pollTorrentAdded({ url }, 7, { attempts: 3, intervalMs: 10 });
+    assert.deepEqual(result, { id: 7, status: 4, error: 0, errorString: "" });
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentAdded retries until the torrent shows up, then returns it", async () => {
+  let calls = 0;
+  const { url, close } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      calls += 1;
+      return { torrents: calls < 3 ? [] : [{ id: 9, status: 6, error: 0, errorString: "" }] };
+    }
+    return {};
+  });
+  try {
+    const result = await pollTorrentAdded({ url }, 9, { attempts: 5, intervalMs: 10 });
+    assert.deepEqual(result, { id: 9, status: 6, error: 0, errorString: "" });
+    assert.equal(calls, 3);
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentAdded gives up and returns null once attempts run out", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => (method === "torrent-get" ? { torrents: [] } : {}));
+  try {
+    const result = await pollTorrentAdded({ url }, 42, { attempts: 3, intervalMs: 10 });
+    assert.equal(result, null);
+  } finally {
+    await close();
+  }
 });
