@@ -24,6 +24,7 @@ import { plexConfigFromEnv, type PlexConfig } from "./plex.js";
 import { discordConfigFromEnv, type DiscordConfig } from "./discord.js";
 import { hotfolderConfigFromEnv, type HotfolderConfig } from "./hotfolder.js";
 import type { TransmissionConfig } from "./transmission.js";
+import type { IndexerConfig } from "./indexer.js";
 
 export interface HotfolderSettings {
   dir: string;
@@ -39,6 +40,8 @@ export interface Settings {
   hotfolder: HotfolderSettings | null;
   /** Optional RPC connection Domestique polls for the header status gauge - unrelated to the webhook Transmission sends this app on torrent completion. */
   transmission: TransmissionConfig | null;
+  /** Optional external race indexer site - the header gauge links straight to it and glows by whether it's reachable. Purely a bookmark + reachability check, Domestique doesn't talk to it otherwise. */
+  indexer: IndexerConfig | null;
   /** Global pause of automatic processing (Transmission webhook + hot-folder poller). Manual paths (web UI upload, match tester) are unaffected. */
   paused: boolean;
   /** Web UI accent color override (6-digit hex, e.g. "#3b82f6") - primary buttons and the "on" status icons. Null uses the built-in default blue. */
@@ -71,10 +74,12 @@ function seedFromEnv(libraryRoot: string): Settings {
           acknowledgeNoSeedback: false,
         }
       : null,
-    // No env-var seeding for this one - it's a new, purely optional status
-    // check with no prior deployment relying on env vars for it, unlike
-    // Plex/Discord/hot-folder which predate settings.json entirely.
+    // No env-var seeding for either of these - both are new, purely
+    // optional status checks with no prior deployment relying on env vars
+    // for them, unlike Plex/Discord/hot-folder which predate settings.json
+    // entirely.
     transmission: null,
+    indexer: null,
     paused: false,
     accentColor: null,
     statusPollIntervalMs: DEFAULT_STATUS_POLL_INTERVAL_MS,
@@ -99,6 +104,7 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     discord: normalizeDiscord(raw.discord),
     hotfolder: normalizeHotfolder(raw.hotfolder),
     transmission: normalizeTransmission(raw.transmission),
+    indexer: normalizeIndexer(raw.indexer),
     paused: raw.paused === true,
     accentColor: normalizeAccentColor(raw.accentColor),
     statusPollIntervalMs: normalizeStatusPollIntervalMs(raw.statusPollIntervalMs),
@@ -160,6 +166,13 @@ function normalizeTransmission(input: unknown): TransmissionConfig | null {
     username: typeof username === "string" && username.trim() ? username : undefined,
     password: typeof password === "string" && password ? password : undefined,
   };
+}
+
+function normalizeIndexer(input: unknown): IndexerConfig | null {
+  if (!input || typeof input !== "object") return null;
+  const { url } = input as Record<string, unknown>;
+  if (typeof url !== "string" || !url.trim()) return null;
+  return { url: url.trim() };
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {

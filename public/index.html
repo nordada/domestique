@@ -237,6 +237,8 @@
     padding: 0;
     margin: 0;
     cursor: pointer;
+    text-decoration: none;
+    color: inherit;
   }
   .gauge-icon-wrap {
     width: 2.85rem;
@@ -279,6 +281,20 @@
     transition: background-color 0.15s;
   }
   .gauge.on .gauge-icon { background-color: var(--accent); }
+  /* The indexer gauge shows the linked site's own favicon instead of a
+     mask icon (its shape/colors are the whole point - a generic magnifying
+     glass or globe wouldn't tell two indexers apart), so it skips the mask
+     entirely and just dims/desaturates while disabled instead of relying on
+     "on" to swap a mask's background-color. */
+  .gauge-icon-img {
+    width: 1.44rem;
+    height: 1.44rem;
+    display: block;
+    object-fit: contain;
+    border-radius: 3px;
+    transition: opacity 0.15s, filter 0.15s;
+  }
+  .gauge:not(.on) .gauge-icon-img { opacity: 0.45; filter: grayscale(1); }
 
   .pause-switch { display: flex; align-items: center; gap: 0.5rem; height: 1.75rem; margin-bottom: 0; cursor: pointer; font-size: 0.8rem; user-select: none; }
   .pause-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -588,6 +604,17 @@
     </label>
   </div>
 
+  <h3>External indexer</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Bookmarks the race indexer/tracker site this instance sources torrents
+    from. Unlike the other header icons, clicking it opens the site itself
+    in a new tab instead of jumping here. The glow just reflects whether the
+    site is reachable: green when it is, red when it's configured but down.
+  </p>
+  <label><span>Indexer URL (blank disables)</span>
+    <input type="text" id="s-indexer-url" placeholder="https://example-indexer.com">
+  </label>
+
   <div class="actions">
     <button class="primary" id="save-settings-btn">Save settings</button>
   </div>
@@ -759,6 +786,35 @@ function transmissionStatusText(t) {
   return `enabled, reachable (${count}) - idle/seeding, no errors`;
 }
 
+/** Best-effort favicon guess (origin + /favicon.ico) - good enough for the common case, no third-party favicon service involved. */
+function faviconUrl(url) {
+  try {
+    return `${new URL(url).origin}/favicon.ico`;
+  } catch {
+    return "";
+  }
+}
+
+// Unlike every other gauge, this one is a real link to the external site
+// itself rather than a shortcut back to Settings - and shows that site's
+// own favicon instead of a shared mask icon, so its shape/branding is
+// actually recognizable. Disabled (no URL configured) falls back to the
+// same "off" look and click-to-Settings behavior as the other gauges.
+function indexerGauge(indexer) {
+  const tier = !indexer.enabled ? null : indexer.live ? "healthy" : "danger";
+  const statusText = !indexer.enabled
+    ? "disabled"
+    : `enabled, ${indexer.live ? "reachable" : "unreachable"} (${esc(indexer.url)})`;
+  const icon = indexer.enabled
+    ? `<img class="gauge-icon-img" src="${esc(faviconUrl(indexer.url))}" alt="" role="img" aria-label="Indexer" onerror="this.style.visibility='hidden'">`
+    : "";
+  const wrap = `<span class="gauge-icon-wrap">${icon}</span>`;
+  if (!indexer.enabled) {
+    return `<button type="button" class="gauge off" data-goto-tab="settings" title="Indexer: ${statusText}">${wrap}</button>`;
+  }
+  return `<a class="gauge on${tier ? ` ${tier}` : ""}" href="${esc(indexer.url)}" target="_blank" rel="noopener noreferrer" title="Indexer: ${statusText}">${wrap}</a>`;
+}
+
 async function loadStatus() {
   const el = document.getElementById("integration-icons");
   try {
@@ -803,6 +859,7 @@ async function loadStatus() {
         status.plex.enabled && status.plex.live ? "healthy" : null,
         status.plex.enabled ? (status.plex.live ? "enabled, reachable" : "enabled, unreachable") : "disabled"
       ),
+      indexerGauge(status.indexer),
     ].join("");
     el.querySelectorAll("[data-goto-tab]").forEach((btn) => {
       btn.addEventListener("click", () => showTab(btn.dataset.gotoTab));
@@ -840,6 +897,7 @@ async function loadSettingsPanel() {
     document.getElementById("s-transmission-url").value = s.transmission.url;
     document.getElementById("s-transmission-username").value = s.transmission.username;
     document.getElementById("s-transmission-password").placeholder = s.transmission.passwordSet ? "already set - leave blank to keep" : "not set";
+    document.getElementById("s-indexer-url").value = s.indexer.url;
   } catch (err) {
     statusEl.textContent = `Failed to load settings: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -869,6 +927,9 @@ async function saveSettingsPanel() {
     transmission: {
       url: document.getElementById("s-transmission-url").value.trim(),
       username: document.getElementById("s-transmission-username").value.trim(),
+    },
+    indexer: {
+      url: document.getElementById("s-indexer-url").value.trim(),
     },
   };
 

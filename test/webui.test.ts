@@ -193,12 +193,15 @@ test("GET /api/activity and /api/status respond with the expected shape", async 
       plex: { enabled: boolean };
       discord: { enabled: boolean };
       transmission: { enabled: boolean; live: boolean };
+      indexer: { enabled: boolean; live: boolean };
       downloads: { reachable: boolean };
     };
     assert.equal(statusBody.plex.enabled, false);
     assert.equal(statusBody.discord.enabled, false);
     assert.equal(statusBody.transmission.enabled, false);
     assert.equal(statusBody.transmission.live, false);
+    assert.equal(statusBody.indexer.enabled, false);
+    assert.equal(statusBody.indexer.live, false);
     // makeScratchServer points downloadsPath at a path that doesn't exist.
     assert.equal(statusBody.downloads.reachable, false);
     assert.equal(typeof statusBody.version, "string");
@@ -221,6 +224,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       discord: { mentionUserId: "", webhookUrlSet: false },
       hotfolder: { dir: "", pollIntervalMs: 60000, stablePolls: 3, acknowledgeNoSeedback: false },
       transmission: { url: "", username: "", passwordSet: false },
+      indexer: { url: "" },
       paused: false,
       accentColor: "",
       statusPollIntervalMs: 20000,
@@ -238,6 +242,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
         hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 },
         transmission: { url: "http://tower:9091/transmission/rpc", username: "admin" },
         transmissionPassword: "secret-password",
+        indexer: { url: "https://indexer.example" },
         accentColor: "#22c55e",
       }),
     });
@@ -250,6 +255,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(putBody.hotfolder.pollIntervalMs, 5000);
     assert.equal(putBody.transmission.passwordSet, true);
     assert.equal(putBody.transmission.url, "http://tower:9091/transmission/rpc");
+    assert.equal(putBody.indexer.url, "https://indexer.example");
     assert.equal(putBody.accentColor, "#22c55e");
     assert.ok(!("token" in putBody.plex));
     assert.ok(!("webhookUrl" in putBody.discord));
@@ -259,6 +265,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(onDisk.plex.token, "secret-token");
     assert.equal(onDisk.discord.webhookUrl, "https://discord.example/webhook");
     assert.equal(onDisk.transmission.password, "secret-password");
+    assert.equal(onDisk.indexer.url, "https://indexer.example");
     assert.equal(onDisk.accentColor, "#22c55e");
   } finally {
     await close();

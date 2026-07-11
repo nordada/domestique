@@ -29,6 +29,7 @@ import { getRecentActivity, recordActivity } from "./activity.js";
 import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
 import { checkPlexLive } from "./plex.js";
 import { getTransmissionTorrentSummary, addTorrentToTransmission, pollTorrentAdded } from "./transmission.js";
+import { checkIndexerLive } from "./indexer.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -160,6 +161,9 @@ function maskSettings(settings: Settings) {
       url: settings.transmission?.url ?? "",
       username: settings.transmission?.username ?? "",
       passwordSet: Boolean(settings.transmission?.password),
+    },
+    indexer: {
+      url: settings.indexer?.url ?? "",
     },
     paused: settings.paused,
     accentColor: settings.accentColor ?? "",
@@ -346,9 +350,10 @@ export async function handleWebUiRequest(
       // multiply the page's load time by the number of integrations. A
       // successful torrent summary fetch doubles as the Transmission
       // liveness check - one RPC round-trip instead of two.
-      const [plexLive, transmissionSummary] = await Promise.all([
+      const [plexLive, transmissionSummary, indexerLive] = await Promise.all([
         settings.plex ? checkPlexLive(settings.plex) : Promise.resolve(false),
         settings.transmission ? getTransmissionTorrentSummary(settings.transmission) : Promise.resolve(null),
+        settings.indexer ? checkIndexerLive(settings.indexer) : Promise.resolve(false),
       ]);
       sendJson(res, 200, {
         version: APP_VERSION,
@@ -369,6 +374,9 @@ export async function handleWebUiRequest(
               torrents: transmissionSummary,
             }
           : { enabled: false, live: false, torrents: null },
+        indexer: settings.indexer
+          ? { enabled: true, url: settings.indexer.url, live: indexerLive }
+          : { enabled: false, live: false },
         downloads: { reachable: isDownloadsReachable(opts.downloadsPath) },
         paused: settings.paused,
       });
@@ -403,6 +411,7 @@ export async function handleWebUiRequest(
         hotfolder?: { dir?: string; pollIntervalMs?: number; stablePolls?: number; acknowledgeNoSeedback?: boolean };
         transmission?: { url?: string; username?: string };
         transmissionPassword?: string;
+        indexer?: { url?: string };
         accentColor?: string;
         statusPollIntervalMs?: number;
         statusPollWhenHidden?: boolean;
@@ -428,6 +437,7 @@ export async function handleWebUiRequest(
             discord: { ...payload.discord, webhookUrl: discordWebhookUrl },
             hotfolder: payload.hotfolder,
             transmission: { ...payload.transmission, password: transmissionPassword },
+            indexer: payload.indexer,
             paused: current.paused,
             accentColor: payload.accentColor,
             statusPollIntervalMs: payload.statusPollIntervalMs,
