@@ -16,14 +16,34 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Cheap reachability probe - a plain GET rather than HEAD, since indexer/tracker sites are often fronted by Cloudflare or similar and commonly reject HEAD. Stateless: callers that want to throttle how often this actually runs (see webui.ts's /api/status) cache the result themselves. */
+/**
+ * Cheap reachability probe - a plain GET rather than HEAD, since
+ * indexer/tracker sites are often fronted by Cloudflare or similar and
+ * commonly reject HEAD. Stateless: callers that want to throttle how often
+ * this actually runs (see webui.ts's /api/status) cache the result
+ * themselves.
+ *
+ * Only ever probes the site's origin, not whatever path/query the
+ * configured URL happens to carry - a bookmarked deep link (e.g. a
+ * browse.php search) commonly needs an authenticated session to load and
+ * would always read as "down" even while the site itself is fine, so the
+ * health check deliberately checks the domain root instead of the exact
+ * page the gauge links to.
+ */
 export async function checkIndexerLive(config: { url: string }, timeoutMs = 3000): Promise<boolean> {
+  let origin: string;
   try {
-    const res = await fetch(config.url, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) console.warn(`[indexer] ${config.url} responded ${res.status} ${res.statusText}`);
+    origin = new URL(config.url).origin;
+  } catch (err) {
+    console.warn(`[indexer] invalid URL ${config.url}: ${err}`);
+    return false;
+  }
+  try {
+    const res = await fetch(origin, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) console.warn(`[indexer] ${origin} responded ${res.status} ${res.statusText}`);
     return res.ok;
   } catch (err) {
-    console.warn(`[indexer] failed to reach ${config.url}: ${err}`);
+    console.warn(`[indexer] failed to reach ${origin}: ${err}`);
     return false;
   }
 }
