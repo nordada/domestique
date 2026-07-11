@@ -252,10 +252,15 @@
   }
   /* The indexer's own icon is a true-color favicon, not a mask, so it can't
      also turn accent-colored the way the other gauges' icons do - this ring
-     around the wrap is how it signals "configured" instead. Same specificity
-     as the tier rules below, so source order decides: once a tier's known
-     (healthy/danger), those rules win over this plain accent ring. */
-  .gauge.indexer.on .gauge-icon-wrap {
+     around the wrap is how it signals "configured" instead. Deliberately
+     ".indexer.on" rather than ".gauge.indexer.on" - three classes here would
+     out-specificity the two-class tier rules below and always win regardless
+     of source order, permanently masking the green/red glow. Tied at three
+     classes total (".indexer.on" + ".gauge-icon-wrap") the same as the tier
+     rules (".gauge.healthy" + ".gauge-icon-wrap"), so source order decides
+     and the tier rules - declared after this one - correctly override it
+     once a tier's known. */
+  .indexer.on .gauge-icon-wrap {
     box-shadow: inset 0 0 0 1.5px var(--accent);
   }
   /* Glow rings use a plain traffic-light convention across every gauge
@@ -832,6 +837,16 @@ function indexerGauge(indexer) {
   return `<a class="gauge indexer on${tier ? ` ${tier}` : ""}" href="${esc(indexer.url)}" target="_blank" rel="noopener noreferrer" title="Indexer: ${statusText}">${wrap}</a>`;
 }
 
+// Set once loadStatus() actually writes el.innerHTML, so a poll that
+// produces byte-for-byte the same gauge markup as last time (the common
+// case - nothing changed) can skip the DOM write entirely. Necessary
+// because the indexer gauge's icon is a real <img>: rebuilding the DOM
+// every poll destroys and recreates it, which re-requests the favicon and
+// visibly flashes even when its src hasn't changed. The mask-icon gauges
+// don't have this problem, but skipping redundant writes is harmless for
+// them too.
+let lastGaugeHtml = null;
+
 async function loadStatus() {
   const el = document.getElementById("integration-icons");
   try {
@@ -844,7 +859,7 @@ async function loadStatus() {
       <button type="button" class="gauge ${on ? "on" : "off"}${tier ? ` ${tier}` : ""}" data-goto-tab="settings" title="${label}: ${statusText}">
         <span class="gauge-icon-wrap"><span class="gauge-icon" style="-webkit-mask-image:url(/icons/${iconFile});mask-image:url(/icons/${iconFile});" role="img" aria-label="${label}"></span></span>
       </button>`;
-    el.innerHTML = [
+    const gaugeHtml = [
       // Unlike the other two gauges, "on" here tracks the downloads/seeding
       // share's own reachability (not the hot-folder feature) - that's the
       // thing actually worth knowing at a glance, since hot-folder
@@ -878,9 +893,13 @@ async function loadStatus() {
       ),
       indexerGauge(status.indexer),
     ].join("");
-    el.querySelectorAll("[data-goto-tab]").forEach((btn) => {
-      btn.addEventListener("click", () => showTab(btn.dataset.gotoTab));
-    });
+    if (gaugeHtml !== lastGaugeHtml) {
+      lastGaugeHtml = gaugeHtml;
+      el.innerHTML = gaugeHtml;
+      el.querySelectorAll("[data-goto-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => showTab(btn.dataset.gotoTab));
+      });
+    }
     setPauseUI(status.paused);
     if (status.version) {
       document.getElementById("app-footer-version").textContent = `Domestique v${status.version}`;
