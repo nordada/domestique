@@ -30,20 +30,23 @@ UI gives you a shortcut a plain Docker host doesn't.
 
 ## Screenshots
 
-The web UI (see [step 7](#7-optional-web-ui)) - a home tab with recent
-activity, a match tester, and manual upload:
+The web UI (see [step 7](#7-optional-web-ui)) - a home tab to add a torrent
+straight to Transmission, watch recent activity, upload a finished file
+directly, and test the matcher, with status icons that glow by what's
+actually happening (green good, amber in progress, red needs attention):
 
-![Home tab: recent activity, match tester, and upload](docs/screenshots/home.png)
+![Home tab: add torrent, recent activity, upload, and match tester](docs/screenshots/home.png)
 
 An events tab for adding/editing which races and shows it recognizes,
 without hand-editing JSON:
 
 ![Events tab: searchable table of configured races/shows](docs/screenshots/events.png)
 
-And a settings tab for Plex, Discord, hot-folder, and Transmission
-status-check configuration - editable live, no restart needed:
+And a settings tab for the web UI's own appearance (accent color, status
+polling) plus Plex, Discord, hot-folder, and Transmission configuration -
+all editable live, no restart needed:
 
-![Settings tab: Plex, Discord, hot-folder, and Transmission config](docs/screenshots/settings.png)
+![Settings tab: appearance, status polling, Plex, Discord, hot-folder, and Transmission config](docs/screenshots/settings.png)
 
 ## Requirements
 
@@ -426,8 +429,9 @@ whether a file gets archived.
 ### 7. Optional: web UI
 
 A small web UI at `/ui` for editing `config/events.json` without hand-editing
-JSON, testing the matcher against a sample release name, and viewing recent
-activity and integration status. Set in `.env`:
+JSON, testing the matcher against a sample release name, adding a torrent
+straight to Transmission, and viewing recent activity and integration
+status. Set in `.env`:
 
 ```
 WEBUI_PASSWORD=<a password you choose>
@@ -450,21 +454,18 @@ rather than being reachable without a password - this surface can read and
 overwrite your config, so "unconfigured" must not mean "open to anyone on
 the LAN."
 
-What's in it:
-- **Match tester** - paste a raw release name and see which event it
-  matches (or that it would auto-create, and as what) using the app's real
-  parser/matcher, without touching `config/events.json` or the library. Handy
-  for checking a `matchKeywords` change before a real download exercises it.
-  If nothing matches, an "Add as new event" button pre-fills the form below
-  with the guessed name/type.
-- **Events table** - add/edit/delete entries, including the `categories`
-  editor for `multi-category-fixed` events (Nationals/Worlds-style). Saves
-  write the whole file back through the same `saveConfig` validation
-  (duplicate ids, required fields, etc.) the app already uses, so an invalid
-  save is rejected with the same error message you'd get from a bad
-  hand-edit - nothing is written to disk unless it's valid. (Internally this
-  is still the `ShowConfig`/`ShowsConfigFile` shape in `src/config.ts` - only
-  the file name, API route, and UI wording say "events".)
+What's in it, on the Home tab:
+- **Add torrent** - upload a `.torrent` file and hand it straight to
+  Transmission via its RPC `torrent-add`, for a race found outside the
+  tracker's own RSS feed, without adding it in Transmission's own UI.
+  Requires the Transmission RPC connection below to be configured. Waits
+  briefly after adding to confirm Transmission actually registered it (not
+  just that the request itself was accepted); either way the outcome is
+  logged to Recent activity, including a clear error there if Transmission
+  isn't configured at all.
+- **Recent activity** - the last ~100 torrent-done events (in-memory only,
+  resets on container restart), the same summary shown in Discord
+  notifications if you have those enabled.
 - **Upload** - send a file or folder straight into the library from the
   browser, bypassing Transmission and the hot folder entirely. Unlike a real
   hot-folder drop, an HTTP upload has a known length and is unambiguously
@@ -479,19 +480,52 @@ What's in it:
   live in a hidden `.uploads-tmp` folder under `LIBRARY_ROOT` (not the
   container's own `/tmp`) since it's already read-write and already sized
   for large video files - no new volume mount needed.
-- **Activity log** - the last ~100 torrent-done events (in-memory only,
-  resets on container restart), the same summary shown in Discord
-  notifications if you have those enabled.
-- **Status panel** - at-a-glance whether Plex refresh, hot-folder ingestion,
-  and Discord notifications are currently configured, plus the running
-  version.
-- **Settings panel** - edit the Plex, Discord, and hot-folder settings from
-  steps 4-6 above live, no restart needed (backed by `config/settings.json`,
-  bind-mounted and gitignored the same way `config/events.json` is, minus the
-  git tracking, since this one holds live secrets once set). Secret fields
-  (Plex token, Discord webhook URL) are never echoed back once saved - the
-  form shows whether one is set, not its value; leave a secret field blank to
-  keep what's already stored, or check its "Clear" box to remove it.
+- **Match tester** - paste a raw release name and see which event it
+  matches (or that it would auto-create, and as what) using the app's real
+  parser/matcher, without touching `config/events.json` or the library. Handy
+  for checking a `matchKeywords` change before a real download exercises it.
+  If nothing matches, an "Add as new event" button pre-fills the form below
+  with the guessed name/type.
+
+The Events tab has:
+- **Events table** - add/edit/delete entries, including the `categories`
+  editor for `multi-category-fixed` events (Nationals/Worlds-style). Saves
+  write the whole file back through the same `saveConfig` validation
+  (duplicate ids, required fields, etc.) the app already uses, so an invalid
+  save is rejected with the same error message you'd get from a bad
+  hand-edit - nothing is written to disk unless it's valid. (Internally this
+  is still the `ShowConfig`/`ShowsConfigFile` shape in `src/config.ts` - only
+  the file name, API route, and UI wording say "events".)
+
+The header (visible on every tab):
+- **Status icons** - at a glance, whether the hot folder, Transmission RPC,
+  and Plex are configured (a dim icon means not configured) and how they're
+  actually doing right now, not just whether they're reachable: green means
+  good (reachable, or - for hot folder - its no-seedback tradeoff has been
+  acknowledged in Settings), amber means work's actively in progress
+  (Transmission only, while something's downloading), red means it needs
+  attention (a torrent error, or an unacknowledged hot-folder tradeoff).
+  Click any icon to jump to Settings.
+- **Pause switch** and a **Dark/Auto/Light theme toggle**, both persisted
+  across reloads (the theme choice in the browser's own `localStorage`, so
+  it's per-browser, not shared account-wide).
+
+The Settings tab has:
+- **Appearance** - override the accent color used by primary buttons and
+  the "on" status icons (any 6-digit hex, live-previewed as you type; blank
+  reverts to the built-in default) and how often the header's status icons
+  poll in the background (interval in seconds, plus whether to keep polling
+  while the browser tab isn't active - both purely cosmetic, no restart
+  needed).
+- Plex, Discord, hot-folder, and Transmission settings from steps 4-6 above
+  (plus the Transmission RPC connection, which has no `.env`-seeded
+  equivalent - it's Settings-only) live, no restart needed (backed by
+  `config/settings.json`, bind-mounted and gitignored the same way
+  `config/events.json` is, minus the git tracking, since this one holds live
+  secrets once set). Secret fields (Plex token, Discord webhook URL,
+  Transmission password) are never echoed back once saved - the form shows
+  whether one is set, not its value; leave a secret field blank to keep
+  what's already stored, or check its "Clear" box to remove it.
 
 `public/index.html` is bind-mounted the same way `config/events.json` is, so
 tweaking it doesn't require a rebuild.
