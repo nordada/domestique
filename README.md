@@ -1,10 +1,16 @@
 # Domestique
 
-Domestique watches a downloads folder for finished bike-race torrents and
-automatically files them into a clean, Plex-ready library - renamed out of
-whatever name the tracker gave them and into a consistent
+Domestique is a boutique PVR for bike racing: the same idea as a DVR, or
+tools like Sonarr/Radarr if you know those, but built specifically for how
+race footage actually gets released, with multi-part stages, the same race
+re-released by different broadcasters, and trackers that name every file
+slightly differently. It watches a downloads folder for finished race
+torrents and automatically files them into a clean, Plex-ready library,
+renamed out of whatever name the tracker gave them and into a consistent
 `Show Name - SYYYYEnn - Title - ptNN.ext` scheme, sorted into the right
-show and season folder.
+show and season folder, so your library looks the same whether a file came
+from this year's Tour de France or a Nationals road race from a country you
+didn't know held one.
 
 **What it does:**
 
@@ -26,27 +32,192 @@ show and season folder.
 Runs anywhere Docker does - Unraid, Synology, a bare Linux box, or macOS
 (via Docker Desktop or [Colima](https://github.com/abiosoft/colima)) - the
 setup below is written generically, with Unraid called out only where its
-UI gives you a shortcut a plain Docker host doesn't.
+UI gives you a shortcut a plain Docker host doesn't. **If you're building a
+server from scratch just to run this** (Domestique plus Plex and
+Transmission, on a machine with a stack of drives for storage), Unraid is
+the most approachable starting point of that list: it has a graphical
+installer for all three, and the Unraid-specific notes throughout this
+README exist for exactly that path.
 
-## Screenshots
+## Web UI tour
 
-The web UI (see [step 7](#7-optional-web-ui)) - a home tab to add a torrent
-straight to Transmission, watch recent activity, upload a finished file
-directly, and test the matcher, with status icons that glow by what's
-actually happening (green good, amber in progress, red needs attention):
+Most day-to-day use happens through the web UI, not the command line or a
+config file. This section walks through every screen in it, what each
+control actually does, and (for anyone who wants to know) exactly what it
+touches on your system to do it. It's optional (see [step
+7](#7-optional-web-ui) to enable it) but recommended; without it you'd be
+hand-editing JSON files instead.
 
-![Home tab: add torrent, recent activity, upload, and match tester](docs/screenshots/home.png)
+### Header: status at a glance
 
-An events tab for adding/editing which races and shows it recognizes,
-without hand-editing JSON:
+The header sits at the top of every tab.
 
-![Events tab: searchable table of configured races/shows](docs/screenshots/events.png)
+<img src="docs/screenshots/header.png" width="640" alt="Full header: logo, four status icons, pause switch, theme toggle, and tab navigation">
 
-And a settings tab for the web UI's own appearance (accent color, status
-polling) plus Plex, Discord, hot-folder, and Transmission configuration -
-all editable live, no restart needed:
+<img src="docs/screenshots/header-icons.png" width="260" alt="Close-up of the four status icons, all glowing green">
 
-![Settings tab: appearance, status polling, Plex, Discord, hot-folder, and Transmission config](docs/screenshots/settings.png)
+Four circular icons, left to right, each dim/gray when that integration
+isn't configured at all:
+
+- **Hot folder:** lit whenever the downloads share itself is reachable
+  (regardless of whether hot-folder ingestion is turned on); the ring glows
+  green once hot-folder ingestion is enabled *and* you've acknowledged its
+  one tradeoff in Settings (see below), red if you've enabled it but not
+  yet acknowledged that.
+- **Transmission:** green when Transmission's RPC is reachable and every
+  torrent is idle/seeding with no errors, amber while something's actively
+  downloading, red if any torrent has a tracker or local error. Click it to
+  open Transmission's own web UI in a new tab.
+- **Plex:** green when Plex responds to a lightweight identity check. Click
+  it to jump straight to the configured library section in Plex Web.
+- **External indexer:** bookmarks whatever race indexer/tracker site you
+  source torrents from; shows that site's own favicon (falling back to a
+  generic icon if the site doesn't serve one). Green/red reflects a
+  reachability check that runs on its own timer (see Settings below), not
+  on every page load, so a slow response from that site doesn't flicker the
+  icon.
+
+Clicking a dim/unconfigured icon, or Transmission/Plex before they're
+reachable, jumps to the Settings tab instead of a dead link. Next to the
+icons: a **pause switch** (stops the Transmission webhook and hot-folder
+watcher without touching manual upload or the match tester, handy if
+you're about to bulk-reorganize your library by hand and don't want the
+automation fighting you), and a **Dark/Auto/Light theme toggle**, both
+remembered per-browser across reloads.
+
+### Activity tab
+
+The tab you land on by default, and where you'd actually watch things
+happen.
+
+<table>
+<tr>
+<td><img src="docs/screenshots/home.png" width="620" alt="Activity tab in dark mode, showing all four sections"><br><sub>Dark (default)</sub></td>
+<td><img src="docs/screenshots/home-light.png" width="340" alt="The same tab in light mode"><br><sub>Light mode</sub></td>
+</tr>
+</table>
+
+**Add torrent:** hands a `.torrent` file straight to Transmission via its
+RPC API, for a race you found outside your tracker's own RSS feed, without
+opening Transmission's own UI at all. Nothing is written to your library by
+this step; it only tells Transmission to start downloading. Requires the
+Transmission connection under Settings.
+
+<img src="docs/screenshots/home-add-torrent.png" width="560" alt="Add torrent section">
+
+**Recent activity:** the last ~100 completed-download events, whether they
+came from the Transmission webhook, the hot folder, or a manual upload.
+This list lives in memory only and resets if the container restarts; it's a
+log for your own peace of mind, not a database anything else depends on. A
+✅ line means a file was copied into the library, and a ⚠️ means something
+worth a look (an auto-created show, a possible resolution upgrade filed
+alongside an existing one, a failed Plex refresh); those get an orange
+**(needs review)** tag next to the timestamp, same wording used in Discord
+notifications if you have those on.
+
+<img src="docs/screenshots/home-recent-activity.png" width="560" alt="Recent activity section, showing a clean success and a review-worthy auto-created entry">
+
+**Upload:** drag a file (or a whole folder, for a multi-part release) from
+your own computer straight into the library through the browser, bypassing
+Transmission and the hot folder entirely. This is a real HTTP upload: the
+file's bytes travel from your browser to wherever Domestique is running,
+staged in a temporary folder under the library path, then processed through
+the exact same parse/match/rename/copy pipeline as everything else, then
+the staged copy is deleted. Your original file on your own machine is never
+touched.
+
+<img src="docs/screenshots/home-upload.png" width="560" alt="Upload section">
+
+**Match tester:** paste a raw filename and see which show it would match
+(or that it would auto-create, and what the guessed name would be), without
+touching your config or copying anything; purely a dry run. Useful for
+checking a tricky name, or a new `matchKeywords` phrase, before a real
+download exercises it for real.
+
+<img src="docs/screenshots/home-match-tester.png" width="560" alt="Match tester section">
+
+### Events tab
+
+"Events" here means races/shows, every entry your tracker's releases need
+to match against to file correctly. This tab edits the same
+`config/events.json` file the app itself reads, through the browser instead
+of a text editor.
+
+<img src="docs/screenshots/events.png" width="620" alt="Events table, filtered to &quot;Tour de France&quot;, showing several related entries">
+
+The filter box searches id, folder name, and keywords at once, handy once
+you have a few hundred entries, which happens fast if your tracker covers
+more than a handful of race series. **Add event** opens the same form used
+for editing an existing one:
+
+<img src="docs/screenshots/events-add-form.png" width="560" alt="Add/edit event form: id, folder name, filename prefix, match keywords, type, and highlights flag">
+
+Saves are validated the same way a hand-edit of the JSON file would be
+(unique ids, required fields); an invalid save is rejected with an error
+instead of corrupting the file. See [Add a new show](#3-add-a-new-show)
+below for what each field actually means.
+
+### Settings tab
+
+Everything here is **live**: saved straight to `config/settings.json` and
+picked up immediately, no container restart needed. Each field maps to an
+environment variable described later in this README; think of those env
+vars as a one-time seed for a fresh install, and this tab as how you'd
+actually change any of it afterward.
+
+**Appearance:** override the accent color used by primary buttons and "on"
+status icons (any 6-digit hex, previewed live as you type). Purely
+cosmetic, stored per-server (not per-browser like the theme toggle).
+
+<img src="docs/screenshots/settings-appearance.png" width="560" alt="Appearance section: accent color field with a live swatch preview">
+
+**Status polling:** how often the header's status icons refresh in the
+background. Lower means more current information, but also more frequent
+requests to Transmission/Plex/your indexer site; the default (20s) is a
+reasonable middle ground for a home server.
+
+<img src="docs/screenshots/settings-status-polling.png" width="560" alt="Status polling section: interval in seconds">
+
+**Plex partial-scan:** tells Plex to rescan just the one folder that
+changed, right after a file's copied in, instead of waiting for Plex's own
+scan schedule. Nothing here affects whether a file gets filed; a failed
+Plex refresh only ever shows up as a ⚠️ warning in Recent activity, never
+blocks the copy.
+
+<img src="docs/screenshots/settings-plex.png" width="560" alt="Plex settings section: URL, section id, library root override, token">
+
+**Discord notifications:** posts a summary to a Discord channel after every
+completed-download event, success and warnings alike, with a mention only
+on the review-worthy ones if you set a user id.
+
+<img src="docs/screenshots/settings-discord.png" width="560" alt="Discord settings section: webhook URL and mention user id">
+
+**Hot-folder ingestion:** for files that arrive some way other than
+Transmission's webhook (a manual download, something copied over from
+another machine), drop it in the watched directory and it goes through the
+same pipeline. The one tradeoff worth understanding before turning this on:
+unlike the webhook path (which only ever *copies*, so Transmission keeps
+seeding untouched), hot-folder ingestion *moves* the original file out of
+the downloads share, into a `processed/` subfolder, trading seedback for
+automation on anything dropped this way. The checkbox exists specifically
+to make sure you've seen that tradeoff before it's live.
+
+<img src="docs/screenshots/settings-hotfolder.png" width="560" alt="Hot-folder settings section: watch directory, tradeoff acknowledgement, poll tuning">
+
+**Transmission status check:** a separate RPC connection purely for the
+header gauge's live status (and the Add-torrent feature above), unrelated
+to the webhook Transmission itself sends this app on completion. Leaving
+this unset doesn't break anything else; the gauge just stays dim. Unlike
+Plex/Discord/hot-folder, there's no `.env` equivalent for this one: it's
+Settings-only, entered here or not at all.
+
+<img src="docs/screenshots/settings-transmission.png" width="560" alt="Transmission settings section: RPC URL, username, password">
+
+**External indexer:** see the header section above; this is where you set
+the URL and how often it's health-checked. Also Settings-only, no `.env`
+equivalent.
+
+<img src="docs/screenshots/settings-indexer.png" width="560" alt="External indexer settings section: URL and check interval">
 
 ## Requirements
 
@@ -62,7 +233,7 @@ all editable live, no restart needed:
 
 ## Contents
 
-- [Screenshots](#screenshots)
+- [Web UI tour](#web-ui-tour)
 - [How it works](#how-it-works)
 - [Handling re-releases of the same race](#handling-re-releases-of-the-same-race)
 - [Alternate versions (different commentary/broadcaster)](#alternate-versions-different-commentarybroadcaster)
@@ -454,81 +625,10 @@ rather than being reachable without a password - this surface can read and
 overwrite your config, so "unconfigured" must not mean "open to anyone on
 the LAN."
 
-What's in it, on the Home tab:
-- **Add torrent** - upload a `.torrent` file and hand it straight to
-  Transmission via its RPC `torrent-add`, for a race found outside the
-  tracker's own RSS feed, without adding it in Transmission's own UI.
-  Requires the Transmission RPC connection below to be configured. Waits
-  briefly after adding to confirm Transmission actually registered it (not
-  just that the request itself was accepted); either way the outcome is
-  logged to Recent activity, including a clear error there if Transmission
-  isn't configured at all.
-- **Recent activity** - the last ~100 torrent-done events (in-memory only,
-  resets on container restart), the same summary shown in Discord
-  notifications if you have those enabled.
-- **Upload** - send a file or folder straight into the library from the
-  browser, bypassing Transmission and the hot folder entirely. Unlike a real
-  hot-folder drop, an HTTP upload has a known length and is unambiguously
-  "done" the moment it finishes, so this never waits out the hot-folder's
-  stability-poll interval - it's staged and processed immediately through
-  the exact same pipeline the webhook uses. The staged copy is deleted right
-  after successful processing (the real original still lives on your own
-  machine); a failed upload is left in place so you can investigate or retry
-  without re-uploading. Uploading a folder (multiple files at once) is how
-  you'd hand it a multi-part stage release - the parts group together
-  (`pt01`/`pt02`/etc) exactly like a real folder-based drop. Staged uploads
-  live in a hidden `.uploads-tmp` folder under `LIBRARY_ROOT` (not the
-  container's own `/tmp`) since it's already read-write and already sized
-  for large video files - no new volume mount needed.
-- **Match tester** - paste a raw release name and see which event it
-  matches (or that it would auto-create, and as what) using the app's real
-  parser/matcher, without touching `config/events.json` or the library. Handy
-  for checking a `matchKeywords` change before a real download exercises it.
-  If nothing matches, an "Add as new event" button pre-fills the form below
-  with the guessed name/type.
-
-The Events tab has:
-- **Events table** - add/edit/delete entries, including the `categories`
-  editor for `multi-category-fixed` events (Nationals/Worlds-style). Saves
-  write the whole file back through the same `saveConfig` validation
-  (duplicate ids, required fields, etc.) the app already uses, so an invalid
-  save is rejected with the same error message you'd get from a bad
-  hand-edit - nothing is written to disk unless it's valid. (Internally this
-  is still the `ShowConfig`/`ShowsConfigFile` shape in `src/config.ts` - only
-  the file name, API route, and UI wording say "events".)
-
-The header (visible on every tab):
-- **Status icons** - at a glance, whether the hot folder, Transmission RPC,
-  and Plex are configured (a dim icon means not configured) and how they're
-  actually doing right now, not just whether they're reachable: green means
-  good (reachable, or - for hot folder - its no-seedback tradeoff has been
-  acknowledged in Settings), amber means work's actively in progress
-  (Transmission only, while something's downloading), red means it needs
-  attention (a torrent error, or an unacknowledged hot-folder tradeoff).
-  Click any icon to jump to Settings.
-- **Pause switch** and a **Dark/Auto/Light theme toggle**, both persisted
-  across reloads (the theme choice in the browser's own `localStorage`, so
-  it's per-browser, not shared account-wide).
-
-The Settings tab has:
-- **Appearance** - override the accent color used by primary buttons and
-  the "on" status icons (any 6-digit hex, live-previewed as you type; blank
-  reverts to the built-in default) and how often the header's status icons
-  poll in the background (interval in seconds, plus whether to keep polling
-  while the browser tab isn't active - both purely cosmetic, no restart
-  needed).
-- Plex, Discord, hot-folder, and Transmission settings from steps 4-6 above
-  (plus the Transmission RPC connection, which has no `.env`-seeded
-  equivalent - it's Settings-only) live, no restart needed (backed by
-  `config/settings.json`, bind-mounted and gitignored the same way
-  `config/events.json` is, minus the git tracking, since this one holds live
-  secrets once set). Secret fields (Plex token, Discord webhook URL,
-  Transmission password) are never echoed back once saved - the form shows
-  whether one is set, not its value; leave a secret field blank to keep
-  what's already stored, or check its "Clear" box to remove it.
-
-`public/index.html` is bind-mounted the same way `config/events.json` is, so
-tweaking it doesn't require a rebuild.
+For what's actually in it (every tab, every setting, with screenshots), see
+the [Web UI tour](#web-ui-tour) near the top of this README.
+`public/index.html` is bind-mounted the same way `config/events.json` is,
+so tweaking it doesn't require a rebuild.
 
 ## Known limitations / assumptions (check these against reality as you go)
 
