@@ -16,6 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Plenty of tracker/indexer sites run basic bot filtering that silently
+// drops (not even a 403 - just no response, so the request hangs until it
+// times out) any request without a normal-looking browser User-Agent.
+// Node's fetch sends none by default, which reads as "down" against a site
+// that's actually fine - confirmed against cyclingarchive.club, where a bare
+// `fetch()` timed out every time but adding this header got an instant 200.
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 /**
  * Cheap reachability probe - a plain GET rather than HEAD, since
  * indexer/tracker sites are often fronted by Cloudflare or similar and
@@ -39,7 +48,10 @@ export async function checkIndexerLive(config: { url: string }, timeoutMs = 3000
     return false;
   }
   try {
-    const res = await fetch(origin, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(origin, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!res.ok) console.warn(`[indexer] ${origin} responded ${res.status} ${res.statusText}`);
     return res.ok;
   } catch (err) {
