@@ -16,13 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** The external site Domestique sources race torrents from (e.g. a private tracker or indexer) - purely a header-gauge link/reachability check, unrelated to how autobrr/Transmission actually pull torrents from it. */
-export interface IndexerConfig {
-  url: string;
-}
-
-/** Cheap reachability probe - a plain GET rather than HEAD, since indexer/tracker sites are often fronted by Cloudflare or similar and commonly reject HEAD. */
-export async function checkIndexerLive(config: IndexerConfig, timeoutMs = 3000): Promise<boolean> {
+/** Cheap reachability probe - a plain GET rather than HEAD, since indexer/tracker sites are often fronted by Cloudflare or similar and commonly reject HEAD. Stateless: callers that want to throttle how often this actually runs (see webui.ts's /api/status) cache the result themselves. */
+export async function checkIndexerLive(config: { url: string }, timeoutMs = 3000): Promise<boolean> {
   try {
     const res = await fetch(config.url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) console.warn(`[indexer] ${config.url} responded ${res.status} ${res.statusText}`);

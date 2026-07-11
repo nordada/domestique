@@ -250,11 +250,19 @@
     box-shadow: inset 0 0 0 1px var(--border);
     transition: box-shadow 0.15s;
   }
-  /* Glow rings use a plain traffic-light convention across all three
-     gauges: green = good (reachable/acknowledged/idle-clean), amber = work
-     actively in progress (not bad, just busy - Transmission only, while
-     downloading), red = needs attention. Kept as three separate classes
-     since a gauge is only ever one of these at a time. */
+  /* The indexer's own icon is a true-color favicon, not a mask, so it can't
+     also turn accent-colored the way the other gauges' icons do - this ring
+     around the wrap is how it signals "configured" instead. Same specificity
+     as the tier rules below, so source order decides: once a tier's known
+     (healthy/danger), those rules win over this plain accent ring. */
+  .gauge.indexer.on .gauge-icon-wrap {
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+  /* Glow rings use a plain traffic-light convention across every gauge
+     that has one: green = good (reachable/acknowledged/idle-clean), amber =
+     work actively in progress (not bad, just busy - Transmission only,
+     while downloading), red = needs attention. Kept as three separate
+     classes since a gauge is only ever one of these at a time. */
   .gauge.healthy .gauge-icon-wrap {
     box-shadow: inset 0 0 0 1px var(--ok), 0 0 6px 1px rgba(21, 128, 61, 0.55);
   }
@@ -608,12 +616,21 @@
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
     Bookmarks the race indexer/tracker site this instance sources torrents
     from. Unlike the other header icons, clicking it opens the site itself
-    in a new tab instead of jumping here. The glow just reflects whether the
-    site is reachable: green when it is, red when it's configured but down.
+    in a new tab instead of jumping here, and it shows that site's own
+    favicon with an accent ring once a URL is set. The glow layers on top of
+    that once reachability is known: green while the site's responding, red
+    if a check finds it down. Checked on its own heartbeat below rather than
+    the general status-poll interval, so a single slow response doesn't
+    flicker the glow.
   </p>
-  <label><span>Indexer URL (blank disables)</span>
-    <input type="text" id="s-indexer-url" placeholder="https://example-indexer.com">
-  </label>
+  <div class="row">
+    <label><span>Indexer URL (blank disables)</span>
+      <input type="text" id="s-indexer-url" placeholder="https://example-indexer.com">
+    </label>
+    <label><span>Check interval (seconds)</span>
+      <input type="number" id="s-indexer-check-interval" placeholder="300" min="30" max="3600" style="max-width:10rem;">
+    </label>
+  </div>
 
   <div class="actions">
     <button class="primary" id="save-settings-btn">Save settings</button>
@@ -810,9 +827,9 @@ function indexerGauge(indexer) {
     : "";
   const wrap = `<span class="gauge-icon-wrap">${icon}</span>`;
   if (!indexer.enabled) {
-    return `<button type="button" class="gauge off" data-goto-tab="settings" title="Indexer: ${statusText}">${wrap}</button>`;
+    return `<button type="button" class="gauge indexer off" data-goto-tab="settings" title="Indexer: ${statusText}">${wrap}</button>`;
   }
-  return `<a class="gauge on${tier ? ` ${tier}` : ""}" href="${esc(indexer.url)}" target="_blank" rel="noopener noreferrer" title="Indexer: ${statusText}">${wrap}</a>`;
+  return `<a class="gauge indexer on${tier ? ` ${tier}` : ""}" href="${esc(indexer.url)}" target="_blank" rel="noopener noreferrer" title="Indexer: ${statusText}">${wrap}</a>`;
 }
 
 async function loadStatus() {
@@ -898,6 +915,7 @@ async function loadSettingsPanel() {
     document.getElementById("s-transmission-username").value = s.transmission.username;
     document.getElementById("s-transmission-password").placeholder = s.transmission.passwordSet ? "already set - leave blank to keep" : "not set";
     document.getElementById("s-indexer-url").value = s.indexer.url;
+    document.getElementById("s-indexer-check-interval").value = Math.round(s.indexer.checkIntervalMs / 1000);
   } catch (err) {
     statusEl.textContent = `Failed to load settings: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -930,6 +948,7 @@ async function saveSettingsPanel() {
     },
     indexer: {
       url: document.getElementById("s-indexer-url").value.trim(),
+      checkIntervalMs: (parseInt(document.getElementById("s-indexer-check-interval").value, 10) || 300) * 1000,
     },
   };
 

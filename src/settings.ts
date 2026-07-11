@@ -24,7 +24,6 @@ import { plexConfigFromEnv, type PlexConfig } from "./plex.js";
 import { discordConfigFromEnv, type DiscordConfig } from "./discord.js";
 import { hotfolderConfigFromEnv, type HotfolderConfig } from "./hotfolder.js";
 import type { TransmissionConfig } from "./transmission.js";
-import type { IndexerConfig } from "./indexer.js";
 
 export interface HotfolderSettings {
   dir: string;
@@ -34,14 +33,20 @@ export interface HotfolderSettings {
   acknowledgeNoSeedback: boolean;
 }
 
+/** The external site Domestique sources race torrents from (e.g. a private tracker or indexer) - purely a header-gauge bookmark + reachability check, unrelated to how autobrr/Transmission actually pull torrents from it. `checkIntervalMs` throttles how often the header gauge's glow re-probes the site (see webui.ts's /api/status caching) - decoupled from the general statusPollIntervalMs so a fast header refresh doesn't also mean hammering a third-party site. */
+export interface IndexerSettings {
+  url: string;
+  checkIntervalMs: number;
+}
+
 export interface Settings {
   plex: PlexConfig | null;
   discord: DiscordConfig | null;
   hotfolder: HotfolderSettings | null;
   /** Optional RPC connection Domestique polls for the header status gauge - unrelated to the webhook Transmission sends this app on torrent completion. */
   transmission: TransmissionConfig | null;
-  /** Optional external race indexer site - the header gauge links straight to it and glows by whether it's reachable. Purely a bookmark + reachability check, Domestique doesn't talk to it otherwise. */
-  indexer: IndexerConfig | null;
+  /** Optional external race indexer site - the header gauge links straight to it, illuminates once it's set, and glows green/red by its own throttled reachability heartbeat (IndexerSettings.checkIntervalMs). */
+  indexer: IndexerSettings | null;
   /** Global pause of automatic processing (Transmission webhook + hot-folder poller). Manual paths (web UI upload, match tester) are unaffected. */
   paused: boolean;
   /** Web UI accent color override (6-digit hex, e.g. "#3b82f6") - primary buttons and the "on" status icons. Null uses the built-in default blue. */
@@ -168,11 +173,21 @@ function normalizeTransmission(input: unknown): TransmissionConfig | null {
   };
 }
 
-function normalizeIndexer(input: unknown): IndexerConfig | null {
+export const DEFAULT_INDEXER_CHECK_INTERVAL_MS = 300000; // 5 minutes
+const MIN_INDEXER_CHECK_INTERVAL_MS = 30000; // 30 seconds - a floor, not a target; keeps a fat-fingered value from hammering a third-party site
+const MAX_INDEXER_CHECK_INTERVAL_MS = 3600000; // 1 hour
+
+function normalizeIndexerCheckIntervalMs(input: unknown): number {
+  const parsed = typeof input === "number" ? input : typeof input === "string" ? parseInt(input, 10) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_INDEXER_CHECK_INTERVAL_MS;
+  return Math.min(MAX_INDEXER_CHECK_INTERVAL_MS, Math.max(MIN_INDEXER_CHECK_INTERVAL_MS, Math.round(parsed)));
+}
+
+function normalizeIndexer(input: unknown): IndexerSettings | null {
   if (!input || typeof input !== "object") return null;
-  const { url } = input as Record<string, unknown>;
+  const { url, checkIntervalMs } = input as Record<string, unknown>;
   if (typeof url !== "string" || !url.trim()) return null;
-  return { url: url.trim() };
+  return { url: url.trim(), checkIntervalMs: normalizeIndexerCheckIntervalMs(checkIntervalMs) };
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {

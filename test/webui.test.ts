@@ -224,7 +224,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       discord: { mentionUserId: "", webhookUrlSet: false },
       hotfolder: { dir: "", pollIntervalMs: 60000, stablePolls: 3, acknowledgeNoSeedback: false },
       transmission: { url: "", username: "", passwordSet: false },
-      indexer: { url: "" },
+      indexer: { url: "", checkIntervalMs: 300000 },
       paused: false,
       accentColor: "",
       statusPollIntervalMs: 20000,
@@ -242,7 +242,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
         hotfolder: { dir: "/downloads/domestique", pollIntervalMs: 5000, stablePolls: 2 },
         transmission: { url: "http://tower:9091/transmission/rpc", username: "admin" },
         transmissionPassword: "secret-password",
-        indexer: { url: "https://indexer.example" },
+        indexer: { url: "https://indexer.example", checkIntervalMs: 60000 },
         accentColor: "#22c55e",
       }),
     });
@@ -256,6 +256,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(putBody.transmission.passwordSet, true);
     assert.equal(putBody.transmission.url, "http://tower:9091/transmission/rpc");
     assert.equal(putBody.indexer.url, "https://indexer.example");
+    assert.equal(putBody.indexer.checkIntervalMs, 60000);
     assert.equal(putBody.accentColor, "#22c55e");
     assert.ok(!("token" in putBody.plex));
     assert.ok(!("webhookUrl" in putBody.discord));

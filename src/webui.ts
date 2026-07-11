@@ -22,7 +22,14 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig, saveConfig, type ShowsConfigFile } from "./config.js";
-import { loadSettings, saveSettings, setPaused, type Settings } from "./settings.js";
+import {
+  loadSettings,
+  saveSettings,
+  setPaused,
+  DEFAULT_INDEXER_CHECK_INTERVAL_MS,
+  type Settings,
+  type IndexerSettings,
+} from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity, recordActivity } from "./activity.js";
@@ -55,6 +62,27 @@ function isDownloadsReachable(downloadsPath: string): boolean {
 }
 
 const APP_VERSION = readAppVersion();
+
+/**
+ * Throttles the indexer's reachability probe to IndexerSettings.checkIntervalMs,
+ * independent of how often the browser itself polls /api/status (which can be
+ * every few seconds) - otherwise every header refresh re-probes a third-party
+ * site and a single flaky response flips the glow before the next poll fixes
+ * it. Keyed by settingsPath so concurrent app instances (notably parallel
+ * tests, each with their own scratch settings file) never share a cache entry.
+ */
+const indexerLiveCache = new Map<string, { url: string; checkedAt: number; live: boolean }>();
+
+async function getIndexerLive(settingsPath: string, indexer: IndexerSettings): Promise<boolean> {
+  const cached = indexerLiveCache.get(settingsPath);
+  const now = Date.now();
+  if (cached && cached.url === indexer.url && now - cached.checkedAt < indexer.checkIntervalMs) {
+    return cached.live;
+  }
+  const live = await checkIndexerLive(indexer);
+  indexerLiveCache.set(settingsPath, { url: indexer.url, checkedAt: now, live });
+  return live;
+}
 
 export interface WebUiConfig {
   password: string;
@@ -164,6 +192,7 @@ function maskSettings(settings: Settings) {
     },
     indexer: {
       url: settings.indexer?.url ?? "",
+      checkIntervalMs: settings.indexer?.checkIntervalMs ?? DEFAULT_INDEXER_CHECK_INTERVAL_MS,
     },
     paused: settings.paused,
     accentColor: settings.accentColor ?? "",
@@ -349,11 +378,15 @@ export async function handleWebUiRequest(
       // Live-probed in parallel so one slow/unreachable service doesn't
       // multiply the page's load time by the number of integrations. A
       // successful torrent summary fetch doubles as the Transmission
-      // liveness check - one RPC round-trip instead of two.
+      // liveness check - one RPC round-trip instead of two. The indexer
+      // check goes through getIndexerLive's own cache instead of a raw
+      // probe here - see its comment for why (a third-party site polled as
+      // often as this endpoint itself, which can be every few seconds,
+      // flickers its glow between green/red on ordinary network noise).
       const [plexLive, transmissionSummary, indexerLive] = await Promise.all([
         settings.plex ? checkPlexLive(settings.plex) : Promise.resolve(false),
         settings.transmission ? getTransmissionTorrentSummary(settings.transmission) : Promise.resolve(null),
-        settings.indexer ? checkIndexerLive(settings.indexer) : Promise.resolve(false),
+        settings.indexer ? getIndexerLive(opts.settingsPath, settings.indexer) : Promise.resolve(false),
       ]);
       sendJson(res, 200, {
         version: APP_VERSION,
@@ -411,7 +444,7 @@ export async function handleWebUiRequest(
         hotfolder?: { dir?: string; pollIntervalMs?: number; stablePolls?: number; acknowledgeNoSeedback?: boolean };
         transmission?: { url?: string; username?: string };
         transmissionPassword?: string;
-        indexer?: { url?: string };
+        indexer?: { url?: string; checkIntervalMs?: number };
         accentColor?: string;
         statusPollIntervalMs?: number;
         statusPollWhenHidden?: boolean;
