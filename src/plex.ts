@@ -49,8 +49,10 @@ export async function checkPlexLive(plex: PlexConfig, timeoutMs = 3000): Promise
     const url = new URL(`${plex.url}/identity`);
     url.searchParams.set("X-Plex-Token", plex.token);
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) console.warn(`[plex] ${plex.url}/identity responded ${res.status} ${res.statusText}`);
     return res.ok;
-  } catch {
+  } catch (err) {
+    console.warn(`[plex] failed to reach ${plex.url}/identity: ${err}`);
     return false;
   }
 }

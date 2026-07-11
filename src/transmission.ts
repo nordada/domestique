@@ -42,7 +42,10 @@ export async function checkTransmissionLive(config: TransmissionConfig, timeoutM
     let res = first;
     if (first.status === 409) {
       const sessionId = first.headers.get("x-transmission-session-id");
-      if (!sessionId) return false;
+      if (!sessionId) {
+        console.warn(`[transmission] ${config.url} returned 409 without an X-Transmission-Session-Id header`);
+        return false;
+      }
       res = await fetch(config.url, {
         method: "POST",
         headers: { ...headers, "X-Transmission-Session-Id": sessionId },
@@ -50,10 +53,23 @@ export async function checkTransmissionLive(config: TransmissionConfig, timeoutM
         signal: AbortSignal.timeout(timeoutMs),
       });
     }
-    if (!res.ok) return false;
+    if (!res.ok) {
+      // The two most common causes here: rpc-whitelist/rpc-host-whitelist in
+      // Transmission's own settings.json rejecting this container's IP/Host
+      // header (403), or the RPC URL missing its /transmission/rpc suffix
+      // (404) - both look identical from here, so surface the status to
+      // point whoever's debugging at Transmission's own config/logs.
+      console.warn(`[transmission] ${config.url} responded ${res.status} ${res.statusText}`);
+      return false;
+    }
     const data = (await res.json()) as { result?: string };
-    return data.result === "success";
-  } catch {
+    if (data.result !== "success") {
+      console.warn(`[transmission] ${config.url} responded with result "${data.result}"`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[transmission] failed to reach ${config.url}: ${err}`);
     return false;
   }
 }
