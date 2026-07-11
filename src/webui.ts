@@ -163,6 +163,8 @@ function maskSettings(settings: Settings) {
     },
     paused: settings.paused,
     accentColor: settings.accentColor ?? "",
+    statusPollIntervalMs: settings.statusPollIntervalMs,
+    statusPollWhenHidden: settings.statusPollWhenHidden,
   };
 }
 
@@ -402,6 +404,8 @@ export async function handleWebUiRequest(
         transmission?: { url?: string; username?: string };
         transmissionPassword?: string;
         accentColor?: string;
+        statusPollIntervalMs?: number;
+        statusPollWhenHidden?: boolean;
       };
 
       // A field only overwrites its stored secret when the caller actually
@@ -426,6 +430,8 @@ export async function handleWebUiRequest(
             transmission: { ...payload.transmission, password: transmissionPassword },
             paused: current.paused,
             accentColor: payload.accentColor,
+            statusPollIntervalMs: payload.statusPollIntervalMs,
+            statusPollWhenHidden: payload.statusPollWhenHidden,
           },
           opts.libraryRoot,
           opts.settingsPath

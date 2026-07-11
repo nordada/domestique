@@ -214,3 +214,22 @@ test("saveSettings accepts a valid 6-digit hex accentColor, normalizes case, and
   assert.equal(saveSettings({ accentColor: "" }, "/library", settingsPath).accentColor, null);
   assert.equal(saveSettings({}, "/library", settingsPath).accentColor, null);
 });
+
+test("saveSettings clamps statusPollIntervalMs to [5s, 10min] and falls back to the 20s default for garbage input", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  assert.equal(saveSettings({ statusPollIntervalMs: 45000 }, "/library", settingsPath).statusPollIntervalMs, 45000);
+  assert.equal(saveSettings({ statusPollIntervalMs: 1000 }, "/library", settingsPath).statusPollIntervalMs, 5000);
+  assert.equal(saveSettings({ statusPollIntervalMs: 999999999 }, "/library", settingsPath).statusPollIntervalMs, 600000);
+  assert.equal(saveSettings({ statusPollIntervalMs: "not-a-number" }, "/library", settingsPath).statusPollIntervalMs, 20000);
+  assert.equal(saveSettings({}, "/library", settingsPath).statusPollIntervalMs, 20000);
+});
+
+test("saveSettings defaults statusPollWhenHidden to false and round-trips true", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  assert.equal(saveSettings({}, "/library", settingsPath).statusPollWhenHidden, false);
+  assert.equal(saveSettings({ statusPollWhenHidden: true }, "/library", settingsPath).statusPollWhenHidden, true);
+});

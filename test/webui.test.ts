@@ -223,6 +223,8 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       transmission: { url: "", username: "", passwordSet: false },
       paused: false,
       accentColor: "",
+      statusPollIntervalMs: 20000,
+      statusPollWhenHidden: false,
     });
 
     const putRes = await fetch(`${baseUrl}/api/settings`, {

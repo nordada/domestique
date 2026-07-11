@@ -43,6 +43,10 @@ export interface Settings {
   paused: boolean;
   /** Web UI accent color override (6-digit hex, e.g. "#3b82f6") - primary buttons and the "on" status icons. Null uses the built-in default blue. */
   accentColor: string | null;
+  /** How often the web UI re-polls /api/status (header gauges, incl. Transmission's torrent-status glow) in the background, in milliseconds. */
+  statusPollIntervalMs: number;
+  /** If true, keeps polling /api/status even while the browser tab/window isn't active. Defaults to false (pause when hidden) to avoid needlessly hitting Plex/Transmission while no one's looking. */
+  statusPollWhenHidden: boolean;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -73,6 +77,8 @@ function seedFromEnv(libraryRoot: string): Settings {
     transmission: null,
     paused: false,
     accentColor: null,
+    statusPollIntervalMs: DEFAULT_STATUS_POLL_INTERVAL_MS,
+    statusPollWhenHidden: false,
   };
 }
 
@@ -95,7 +101,20 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     transmission: normalizeTransmission(raw.transmission),
     paused: raw.paused === true,
     accentColor: normalizeAccentColor(raw.accentColor),
+    statusPollIntervalMs: normalizeStatusPollIntervalMs(raw.statusPollIntervalMs),
+    statusPollWhenHidden: raw.statusPollWhenHidden === true,
   };
+}
+
+const DEFAULT_STATUS_POLL_INTERVAL_MS = 20000;
+const MIN_STATUS_POLL_INTERVAL_MS = 5000;
+const MAX_STATUS_POLL_INTERVAL_MS = 600000; // 10 minutes
+
+/** Clamped rather than left unbounded - a too-small interval would hammer Plex/Transmission, and a bad/huge value (or NaN from a stray string) would silently look like polling had stopped. */
+function normalizeStatusPollIntervalMs(input: unknown): number {
+  const parsed = typeof input === "number" ? input : typeof input === "string" ? parseInt(input, 10) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_STATUS_POLL_INTERVAL_MS;
+  return Math.min(MAX_STATUS_POLL_INTERVAL_MS, Math.max(MIN_STATUS_POLL_INTERVAL_MS, Math.round(parsed)));
 }
 
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;

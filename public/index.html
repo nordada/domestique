@@ -510,6 +510,20 @@
     </div>
   </label>
 
+  <h3>Status polling</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Controls how often the header gauges (including Transmission's
+    torrent-status glow) refresh in the background, without needing a page
+    reload.
+  </p>
+  <label><span>Poll interval (seconds)</span>
+    <input type="number" id="s-status-poll-interval" placeholder="20" min="5" max="600" style="max-width:10rem;">
+  </label>
+  <label class="clear-toggle" style="margin-top:-0.4rem;">
+    <input type="checkbox" id="s-status-poll-when-hidden">
+    Keep polling even when this browser tab/window isn't active
+  </label>
+
   <h3>Plex partial-scan</h3>
   <div class="row">
     <label><span>Plex URL (blank disables)</span><input type="text" id="s-plex-url" placeholder="http://192.168.1.10:32400"></label>
@@ -671,6 +685,27 @@ function updateStatusPanelWrap() {
 }
 window.addEventListener("resize", updateStatusPanelWrap);
 
+// Keeps the status gauges (including Transmission's torrent-status glow)
+// current without a manual page reload - doesn't need to be real-time, just
+// not stale. `whenHidden` false (the default) pauses polling while the tab
+// isn't visible, so an idle background tab doesn't keep hitting
+// Plex/Transmission for no one to see; visibilitychange below always
+// refreshes immediately on return regardless, instead of waiting out the
+// rest of the interval. Re-called from loadSettingsPanel() whenever the
+// interval/whenHidden setting changes, replacing the previous timer.
+let statusPollTimer = null;
+let statusPollWhenHidden = false;
+function scheduleStatusPoll(intervalMs, whenHidden) {
+  statusPollWhenHidden = whenHidden;
+  if (statusPollTimer) clearInterval(statusPollTimer);
+  statusPollTimer = setInterval(() => {
+    if (statusPollWhenHidden || !document.hidden) loadStatus();
+  }, intervalMs);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) loadStatus();
+});
+
 function setPauseUI(paused) {
   document.getElementById("pause-toggle").checked = !paused;
   document.getElementById("pause-label").textContent = paused ? "Paused" : "Running";
@@ -779,6 +814,9 @@ async function loadSettingsPanel() {
     const s = await api("/api/settings");
     document.getElementById("s-accent-color").value = s.accentColor;
     applyAccentColor(s.accentColor);
+    document.getElementById("s-status-poll-interval").value = Math.round(s.statusPollIntervalMs / 1000);
+    document.getElementById("s-status-poll-when-hidden").checked = s.statusPollWhenHidden;
+    scheduleStatusPoll(s.statusPollIntervalMs, s.statusPollWhenHidden);
     document.getElementById("s-plex-url").value = s.plex.url;
     document.getElementById("s-plex-sectionId").value = s.plex.sectionId;
     document.getElementById("s-plex-libraryRoot").value = s.plex.libraryRoot;
@@ -802,6 +840,8 @@ async function saveSettingsPanel() {
   const statusEl = document.getElementById("settings-status");
   const payload = {
     accentColor: document.getElementById("s-accent-color").value.trim(),
+    statusPollIntervalMs: (parseInt(document.getElementById("s-status-poll-interval").value, 10) || 20) * 1000,
+    statusPollWhenHidden: document.getElementById("s-status-poll-when-hidden").checked,
     plex: {
       url: document.getElementById("s-plex-url").value.trim(),
       sectionId: document.getElementById("s-plex-sectionId").value.trim(),
@@ -1214,6 +1254,10 @@ applyTheme(initialTheme);
 
 updateStatusPanelWrap();
 loadStatus();
+// Starts polling with the built-in default immediately, rather than
+// waiting on the settings fetch to resolve; loadSettingsPanel() reschedules
+// with the real configured interval/whenHidden as soon as it loads.
+scheduleStatusPoll(20000, false);
 loadSettingsPanel();
 loadEvents();
 loadActivity();
