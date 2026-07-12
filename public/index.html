@@ -658,6 +658,25 @@
     <span class="clear-toggle"><input type="checkbox" id="s-webhook-secret-clear"> Clear stored secret</span>
   </label>
 
+  <h3>Login lockout</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Basic Auth (the password prompt for this whole site) has no built-in
+    brute-force protection, so this app adds its own: after this many
+    wrong-password attempts in a row, further attempts are rejected for a
+    cooldown instead of even being checked. The cooldown clears itself
+    automatically (no restart needed) and doubles each time it's triggered
+    again right after expiring, up to a 30-minute cap, then resets to the
+    base once a login actually succeeds.
+  </p>
+  <div class="row">
+    <label><span>Failed attempts before lockout</span>
+      <input type="number" id="s-lockout-threshold" placeholder="5" min="3" max="20" style="max-width:10rem;">
+    </label>
+    <label><span>Base cooldown (seconds)</span>
+      <input type="number" id="s-lockout-seconds" placeholder="60" min="10" max="3600" style="max-width:10rem;">
+    </label>
+  </div>
+
   <div class="actions">
     <button class="primary" id="save-settings-btn">Save settings</button>
   </div>
@@ -972,6 +991,8 @@ async function loadSettingsPanel() {
     document.getElementById("s-indexer-url").value = s.indexer.url;
     document.getElementById("s-indexer-check-interval").value = Math.round(s.indexer.checkIntervalMs / 1000);
     document.getElementById("s-webhook-secret").placeholder = s.webhookSecretSet ? "already set, leave blank to keep" : "not set";
+    document.getElementById("s-lockout-threshold").value = s.loginLockoutThreshold;
+    document.getElementById("s-lockout-seconds").value = s.loginLockoutSeconds;
   } catch (err) {
     statusEl.textContent = `Failed to load settings: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -1006,6 +1027,8 @@ async function saveSettingsPanel() {
       url: document.getElementById("s-indexer-url").value.trim(),
       checkIntervalMs: (parseInt(document.getElementById("s-indexer-check-interval").value, 10) || 300) * 1000,
     },
+    loginLockoutThreshold: parseInt(document.getElementById("s-lockout-threshold").value, 10) || 5,
+    loginLockoutSeconds: parseInt(document.getElementById("s-lockout-seconds").value, 10) || 60,
   };
 
   const plexToken = document.getElementById("s-plex-token").value;

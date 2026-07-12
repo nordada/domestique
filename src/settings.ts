@@ -67,6 +67,18 @@ export interface Settings {
    * timing attack can't narrow down the secret character by character.
    */
   webhookSecret: string | null;
+  /**
+   * After this many consecutive failed /ui login attempts (wrong Basic Auth
+   * credentials), further attempts are rejected with 429 for a cooldown
+   * instead of even being checked; auto-expiring, no restart needed. See
+   * webui.ts's login-lockout state for the cooldown itself: it starts at
+   * loginLockoutSeconds and doubles on each immediately-repeated trigger up
+   * to a fixed internal cap, resetting back to this threshold once a login
+   * succeeds.
+   */
+  loginLockoutThreshold: number;
+  /** Base cooldown, in seconds, applied the first time the lockout triggers. */
+  loginLockoutSeconds: number;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -102,6 +114,8 @@ function seedFromEnv(libraryRoot: string): Settings {
     statusPollIntervalMs: DEFAULT_STATUS_POLL_INTERVAL_MS,
     statusPollWhenHidden: false,
     webhookSecret: normalizeWebhookSecret(process.env.WEBHOOK_SECRET),
+    loginLockoutThreshold: DEFAULT_LOGIN_LOCKOUT_THRESHOLD,
+    loginLockoutSeconds: DEFAULT_LOGIN_LOCKOUT_SECONDS,
   };
 }
 
@@ -128,6 +142,8 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     statusPollIntervalMs: normalizeStatusPollIntervalMs(raw.statusPollIntervalMs),
     statusPollWhenHidden: raw.statusPollWhenHidden === true,
     webhookSecret: normalizeWebhookSecret(raw.webhookSecret),
+    loginLockoutThreshold: normalizeLoginLockoutThreshold(raw.loginLockoutThreshold),
+    loginLockoutSeconds: normalizeLoginLockoutSeconds(raw.loginLockoutSeconds),
   };
 }
 
@@ -154,6 +170,26 @@ function normalizeWebhookSecret(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
   return trimmed ? trimmed : null;
+}
+
+const DEFAULT_LOGIN_LOCKOUT_THRESHOLD = 5;
+const MIN_LOGIN_LOCKOUT_THRESHOLD = 3;
+const MAX_LOGIN_LOCKOUT_THRESHOLD = 20;
+
+function normalizeLoginLockoutThreshold(input: unknown): number {
+  const parsed = typeof input === "number" ? input : typeof input === "string" ? parseInt(input, 10) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_LOGIN_LOCKOUT_THRESHOLD;
+  return Math.min(MAX_LOGIN_LOCKOUT_THRESHOLD, Math.max(MIN_LOGIN_LOCKOUT_THRESHOLD, Math.round(parsed)));
+}
+
+const DEFAULT_LOGIN_LOCKOUT_SECONDS = 60;
+const MIN_LOGIN_LOCKOUT_SECONDS = 10;
+const MAX_LOGIN_LOCKOUT_SECONDS = 3600;
+
+function normalizeLoginLockoutSeconds(input: unknown): number {
+  const parsed = typeof input === "number" ? input : typeof input === "string" ? parseInt(input, 10) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_LOGIN_LOCKOUT_SECONDS;
+  return Math.min(MAX_LOGIN_LOCKOUT_SECONDS, Math.max(MIN_LOGIN_LOCKOUT_SECONDS, Math.round(parsed)));
 }
 
 function normalizePlex(input: unknown, appLibraryRoot: string): PlexConfig | null {

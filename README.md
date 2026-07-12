@@ -188,7 +188,9 @@ blocks the copy.
 
 **Discord notifications:** posts a summary to a Discord channel after every
 completed-download event, success and warnings alike, with a mention only
-on the review-worthy ones if you set a user id.
+on the review-worthy ones if you set a user id. Also used for one other
+thing entirely: a mention-tagged alert the moment the login lockout below
+actually triggers (see Login lockout).
 
 <img src="docs/screenshots/settings-discord.png" width="560" alt="Discord settings section: webhook URL and mention user id">
 
@@ -228,6 +230,19 @@ webhook will reject any request missing a correct `X-Webhook-Secret`
 header. Leave blank to keep the original open behavior.
 
 <img src="docs/screenshots/settings-webhook.png" width="560" alt="Webhook security settings section: shared secret field">
+
+**Login lockout:** HTTP Basic Auth (the password prompt for `/ui`) has no
+brute-force protection of its own, so this is the retrofit for that too.
+After this many consecutive wrong-password attempts, further attempts are
+rejected with a cooldown instead of even being checked. The cooldown
+auto-expires (no restart needed), doubling each time it's triggered again
+right after the previous one expires, up to a fixed 30-minute cap, and
+resetting back to the base once a login actually succeeds. If Discord
+notifications above are configured, the moment a lockout triggers also
+posts a mention-tagged alert, once per trigger, not on every request
+rejected while still locked out.
+
+<img src="docs/screenshots/settings-lockout.png" width="560" alt="Login lockout settings section: failed-attempts threshold and base cooldown">
 
 ## Requirements
 

@@ -42,6 +42,7 @@ import {
   transmissionWebUrl,
 } from "./transmission.js";
 import { checkIndexerLive } from "./indexer.js";
+import { sendDiscordNotification } from "./discord.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -109,6 +110,42 @@ export function constantTimeEqual(a: string, b: string): boolean {
   // short-circuit on length (which would otherwise leak length via timing).
   if (bufA.length !== bufB.length) return false;
   return timingSafeEqual(bufA, bufB);
+}
+
+// Basic Auth has no brute-force protection of its own: this is that
+// protection, auto-expiring rather than needing a restart to clear (unlike
+// a hard lockout, which would just hand an attacker a free way to lock the
+// real owner out with a handful of bad requests). The cooldown starts at
+// Settings.loginLockoutSeconds once loginLockoutThreshold consecutive
+// failures land, and doubles on each immediately-repeated trigger up to
+// LOGIN_LOCKOUT_MAX_SECONDS (a fixed ceiling, not itself configurable, so a
+// sustained attack keeps getting slower rather than growing unbounded). A
+// successful login resets it back to the base. Keyed by settingsPath so
+// concurrent app instances (notably parallel tests) never share state.
+export const LOGIN_LOCKOUT_MAX_SECONDS = 1800; // 30 minutes
+
+interface LoginLockoutState {
+  failedAttempts: number;
+  /** Epoch ms; 0 means not currently locked out. */
+  lockedUntil: number;
+  /** How many times the lockout itself has triggered in a row, without an intervening successful login: drives the doubling. */
+  consecutiveLockouts: number;
+}
+
+const loginLockoutByPath = new Map<string, LoginLockoutState>();
+
+function getLoginLockoutState(settingsPath: string): LoginLockoutState {
+  let state = loginLockoutByPath.get(settingsPath);
+  if (!state) {
+    state = { failedAttempts: 0, lockedUntil: 0, consecutiveLockouts: 0 };
+    loginLockoutByPath.set(settingsPath, state);
+  }
+  return state;
+}
+
+/** Pure cooldown math, pulled out of the request-handling flow so it's testable without any real waiting. */
+export function nextLockoutCooldownSeconds(baseSeconds: number, consecutiveLockouts: number): number {
+  return Math.min(baseSeconds * 2 ** consecutiveLockouts, LOGIN_LOCKOUT_MAX_SECONDS);
 }
 
 /**
@@ -204,6 +241,8 @@ function maskSettings(settings: Settings) {
     statusPollIntervalMs: settings.statusPollIntervalMs,
     statusPollWhenHidden: settings.statusPollWhenHidden,
     webhookSecretSet: Boolean(settings.webhookSecret),
+    loginLockoutThreshold: settings.loginLockoutThreshold,
+    loginLockoutSeconds: settings.loginLockoutSeconds,
   };
 }
 
@@ -229,10 +268,40 @@ export async function handleWebUiRequest(
     return true;
   }
 
+  const lockout = getLoginLockoutState(opts.settingsPath);
+  const now = Date.now();
+  if (lockout.lockedUntil > now) {
+    const retryAfterSeconds = Math.ceil((lockout.lockedUntil - now) / 1000);
+    res.writeHead(429, { "Content-Type": "application/json", "Retry-After": String(retryAfterSeconds) });
+    res.end(JSON.stringify({ error: `too many failed login attempts, try again in ${retryAfterSeconds}s` }));
+    return true;
+  }
+
   if (!isAuthorized(req, opts.webui)) {
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    lockout.failedAttempts++;
+    if (lockout.failedAttempts >= settings.loginLockoutThreshold) {
+      const cooldownSeconds = nextLockoutCooldownSeconds(settings.loginLockoutSeconds, lockout.consecutiveLockouts);
+      lockout.lockedUntil = now + cooldownSeconds * 1000;
+      lockout.consecutiveLockouts++;
+      lockout.failedAttempts = 0;
+      // Fired once per trigger, not on every subsequent 429 while still
+      // locked out (this whole block only runs the moment the threshold is
+      // crossed), so a sustained attack doesn't spam the channel.
+      if (settings.discord) {
+        const from = req.socket.remoteAddress ?? "unknown address";
+        sendDiscordNotification(
+          settings.discord,
+          `🔒 Login lockout triggered: ${settings.loginLockoutThreshold} failed /ui login attempts from ${from}, locked out for ${cooldownSeconds}s.`,
+          { mention: true }
+        ).catch((notifyErr) => console.warn(`[discord] failed to send lockout notification: ${notifyErr}`));
+      }
+    }
     requireAuth(res);
     return true;
   }
+  lockout.failedAttempts = 0;
+  lockout.consecutiveLockouts = 0;
 
   if (url.startsWith("/api/upload/")) {
     if (await handleUploadRequest(req, res, opts, processTorrentDone)) {
@@ -469,6 +538,8 @@ export async function handleWebUiRequest(
         statusPollIntervalMs?: number;
         statusPollWhenHidden?: boolean;
         webhookSecret?: string;
+        loginLockoutThreshold?: number;
+        loginLockoutSeconds?: number;
       };
 
       // A field only overwrites its stored secret when the caller actually
@@ -499,6 +570,8 @@ export async function handleWebUiRequest(
             statusPollIntervalMs: payload.statusPollIntervalMs,
             statusPollWhenHidden: payload.statusPollWhenHidden,
             webhookSecret,
+            loginLockoutThreshold: payload.loginLockoutThreshold,
+            loginLockoutSeconds: payload.loginLockoutSeconds,
           },
           opts.libraryRoot,
           opts.settingsPath

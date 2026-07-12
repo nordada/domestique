@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer as createHttpServer } from "node:http";
 import { createApp, type ServerOptions } from "../src/server.js";
-import { webUiConfigFromEnv } from "../src/webui.js";
+import { webUiConfigFromEnv, nextLockoutCooldownSeconds } from "../src/webui.js";
 
 test("webUiConfigFromEnv returns null unless WEBUI_PASSWORD is set, and picks up WEBUI_USER when present", () => {
   const saved = { WEBUI_PASSWORD: process.env.WEBUI_PASSWORD, WEBUI_USER: process.env.WEBUI_USER };
@@ -230,6 +230,8 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       statusPollIntervalMs: 20000,
       statusPollWhenHidden: false,
       webhookSecretSet: false,
+      loginLockoutThreshold: 5,
+      loginLockoutSeconds: 60,
     });
 
     const putRes = await fetch(`${baseUrl}/api/settings`, {
@@ -274,6 +276,100 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(onDisk.accentColor, "#22c55e");
     assert.equal(onDisk.webhookSecret, "shh-its-a-secret");
   } finally {
+    await close();
+  }
+});
+
+test("nextLockoutCooldownSeconds doubles per repeat trigger and caps at 30 minutes", () => {
+  assert.equal(nextLockoutCooldownSeconds(60, 0), 60);
+  assert.equal(nextLockoutCooldownSeconds(60, 1), 120);
+  assert.equal(nextLockoutCooldownSeconds(60, 2), 240);
+  assert.equal(nextLockoutCooldownSeconds(60, 5), 1800); // 60 * 2^5 = 1920, clamped to the 1800s (30min) cap
+  assert.equal(nextLockoutCooldownSeconds(60, 20), 1800); // stays capped, doesn't grow unbounded
+});
+
+test("web UI login lockout: locks out after N failures with the correct Retry-After, then auto-expires with no restart involved", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    // loginLockoutSeconds is clamped to a 10s floor (see settings.ts's
+    // MIN_LOGIN_LOCKOUT_SECONDS): that's the shortest this test can
+    // legitimately configure, so it's also the shortest it can wait.
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ loginLockoutThreshold: 3, loginLockoutSeconds: 10 }),
+    });
+
+    const badLogin = () => fetch(`${baseUrl}/api/settings`, { headers: { Authorization: authHeader("wrong-password") } });
+    const goodLogin = () => fetch(`${baseUrl}/api/settings`, { headers: { Authorization: authHeader("correct-password") } });
+
+    // The 3rd failure itself is still an ordinary 401, not a 429: the
+    // lockout takes effect starting with the NEXT request.
+    assert.equal((await badLogin()).status, 401);
+    assert.equal((await badLogin()).status, 401);
+    assert.equal((await badLogin()).status, 401);
+
+    const lockedRes = await goodLogin();
+    assert.equal(lockedRes.status, 429);
+    assert.ok(Number(lockedRes.headers.get("retry-after")) >= 9);
+
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10500));
+
+    // Auto-expired with no restart involved, and a correct login now succeeds.
+    assert.equal((await goodLogin()).status, 200);
+  } finally {
+    await close();
+  }
+});
+
+test("web UI login lockout posts a Discord notification exactly once per trigger, not on every subsequent 429", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  const discordCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const originalFetch = global.fetch;
+  // Both the test's own requests to baseUrl AND the server's outgoing
+  // Discord webhook call go through global.fetch in this same process -
+  // only intercept the Discord URL specifically, delegate everything else
+  // to the real fetch so the test's own HTTP calls still work.
+  global.fetch = (async (url, init) => {
+    if (typeof url === "string" && url.includes("discord.example")) {
+      discordCalls.push({ url, body: JSON.parse((init as { body: string }).body) });
+      return { ok: true } as Response;
+    }
+    return originalFetch(url as Parameters<typeof fetch>[0], init as Parameters<typeof fetch>[1]);
+  }) as typeof fetch;
+
+  try {
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        discord: { mentionUserId: "12345" },
+        discordWebhookUrl: "https://discord.example/webhook",
+        loginLockoutThreshold: 3,
+        loginLockoutSeconds: 10,
+      }),
+    });
+
+    const badLogin = () => fetch(`${baseUrl}/api/settings`, { headers: { Authorization: authHeader("wrong-password") } });
+    await badLogin();
+    await badLogin();
+    await badLogin(); // the 3rd failure crosses the threshold and triggers the lockout
+
+    // The notification is fire-and-forget (doesn't block the HTTP
+    // response), so give it a moment to actually land.
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+
+    assert.equal(discordCalls.length, 1);
+    assert.match(discordCalls[0].body.content as string, /Login lockout triggered/);
+    assert.match(discordCalls[0].body.content as string, /3 failed/);
+
+    // A further request while still locked out (429, not a fresh trigger)
+    // must not post a second notification.
+    await badLogin();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    assert.equal(discordCalls.length, 1);
+  } finally {
+    global.fetch = originalFetch;
     await close();
   }
 });
