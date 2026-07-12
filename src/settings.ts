@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ensureSeeded } from "./fileseed.js";
@@ -274,6 +274,26 @@ export function toHotfolderConfig(settings: HotfolderSettings): HotfolderConfig 
   };
 }
 
+/**
+ * settings.json holds real secrets in plaintext (Plex token, Transmission
+ * password, Discord webhook URL, the webhook secret), so it must be readable
+ * by the app's own user only: never the default-umask 0644 that would let
+ * any other user on the host read it. Applied on every load (not just on
+ * write) so files created by earlier versions of the app, which wrote with
+ * the default umask, get tightened the first time an upgraded app touches
+ * them. Best-effort: a filesystem that doesn't support chmod (some network
+ * mounts) shouldn't take the whole app down over it.
+ */
+const SETTINGS_FILE_MODE = 0o600;
+
+function tightenSettingsPermissions(path: string): void {
+  try {
+    chmodSync(path, SETTINGS_FILE_MODE);
+  } catch (err) {
+    console.warn(`[settings] could not tighten permissions on ${path}: ${err}`);
+  }
+}
+
 function ensureSettingsSeeded(path: string, libraryRoot: string): void {
   const seeded = ensureSeeded(path, () => JSON.stringify(seedFromEnv(libraryRoot), null, 2) + "\n");
   if (seeded) console.log(`[settings] seeded missing settings at ${path} from environment variables`);
@@ -286,6 +306,7 @@ function ensureSettingsSeeded(path: string, libraryRoot: string): void {
  */
 export function loadSettings(path: string = DEFAULT_SETTINGS_PATH, libraryRoot = ""): Settings {
   ensureSettingsSeeded(path, libraryRoot);
+  tightenSettingsPermissions(path);
   const raw = readFileSync(path, "utf-8");
   return normalizeSettings(JSON.parse(raw), libraryRoot);
 }
@@ -293,7 +314,10 @@ export function loadSettings(path: string = DEFAULT_SETTINGS_PATH, libraryRoot =
 export function saveSettings(input: unknown, appLibraryRoot: string, path: string = DEFAULT_SETTINGS_PATH): Settings {
   const settings = normalizeSettings(input, appLibraryRoot);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+  // mode only applies when writeFileSync creates the file; loadSettings's
+  // tightenSettingsPermissions covers files that already exist with looser
+  // permissions from before this was added.
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf-8", mode: SETTINGS_FILE_MODE });
   return settings;
 }
 

@@ -233,3 +233,17 @@ test("saveSettings defaults statusPollWhenHidden to false and round-trips true",
   assert.equal(saveSettings({}, "/library", settingsPath).statusPollWhenHidden, false);
   assert.equal(saveSettings({ statusPollWhenHidden: true }, "/library", settingsPath).statusPollWhenHidden, true);
 });
+
+test("settings.json is written with owner-only 0600 permissions, and loadSettings tightens a looser existing file", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  saveSettings({}, "/library", settingsPath);
+  assert.equal((await fs.stat(settingsPath)).mode & 0o777, 0o600);
+
+  // Simulate a file left behind by an older version that wrote with the
+  // default umask: loading it should tighten it, not leave it world-readable.
+  await fs.chmod(settingsPath, 0o644);
+  loadSettings(settingsPath, "/library");
+  assert.equal((await fs.stat(settingsPath)).mode & 0o777, 0o600);
+});
