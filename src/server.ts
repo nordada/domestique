@@ -180,6 +180,22 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 
 export function createApp(opts: ServerOptions) {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Defense-in-depth headers on every response, set up front so each
+    // route's own writeHead merges with (rather than needs to repeat) them.
+    // frame-ancestors/X-Frame-Options: a hostile site must not be able to
+    // iframe /ui (the browser would helpfully attach cached Basic Auth
+    // credentials to the framed requests). nosniff: never let a browser
+    // second-guess a Content-Type. no-store on /api/*: those responses
+    // carry settings/activity data that has no business in any cache.
+    // HSTS is deliberately absent: TLS terminates at Cloudflare, which
+    // manages that header itself.
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (req.url?.startsWith("/api/")) {
+      res.setHeader("Cache-Control", "no-store");
+    }
+
     // The bare root has no route of its own; redirect straight to the web
     // UI so a bookmark or a reverse proxy's default hostname (Cloudflare
     // Tunnel, etc) lands somewhere useful instead of a 404. Unconditional:

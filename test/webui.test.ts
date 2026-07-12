@@ -750,3 +750,29 @@ test("unexpected route errors return a generic 500 without echoing internals", a
     await close();
   }
 });
+
+test("security headers are set on every response, with Cache-Control: no-store on /api/* only", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const ui = await fetch(`${baseUrl}/health`);
+    assert.equal(ui.headers.get("x-frame-options"), "DENY");
+    assert.equal(ui.headers.get("content-security-policy"), "frame-ancestors 'none'");
+    assert.equal(ui.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(ui.headers.get("cache-control"), null);
+
+    const api = await fetch(`${baseUrl}/api/activity`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    assert.equal(api.status, 200);
+    assert.equal(api.headers.get("cache-control"), "no-store");
+    assert.equal(api.headers.get("x-frame-options"), "DENY");
+
+    // Also present pre-auth, where clickjacking protection matters most.
+    const unauthed = await fetch(`${baseUrl}/api/activity`);
+    assert.equal(unauthed.status, 401);
+    assert.equal(unauthed.headers.get("x-frame-options"), "DENY");
+    assert.equal(unauthed.headers.get("cache-control"), "no-store");
+  } finally {
+    await close();
+  }
+});
