@@ -302,6 +302,11 @@ export async function handleWebUiRequest(
       // locked out (this whole block only runs the moment the threshold is
       // crossed), so a sustained attack doesn't spam the channel.
       if (settings.discord) {
+        // Behind a tunnel or reverse proxy this is the proxy's own address,
+        // not the attacker's. The forwarded-for style headers that would
+        // carry the real one are spoofable unless direct origin access is
+        // blocked, so this deliberately reports the socket's honest (if
+        // less useful) address rather than trusting a header.
         const from = req.socket.remoteAddress ?? "unknown address";
         sendDiscordNotification(
           settings.discord,

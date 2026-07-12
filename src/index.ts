@@ -50,6 +50,14 @@ app.listen(opts.port, () => {
       ? `  hot folder:   enabled (watching ${settings.hotfolder.dir}, ${settings.hotfolder.pollIntervalMs}ms / ${settings.hotfolder.stablePolls} stable polls)`
       : `  hot folder:   disabled (set via the web UI, or HOTFOLDER_DIR before first boot)`
   );
+  // Deliberately loud: the app can't detect whether it's actually exposed
+  // past the LAN, so it can't enforce a secret, but anyone reading the
+  // startup log should see the open webhook called out.
+  if (!settings.webhookSecret) {
+    console.warn(
+      `  WARNING: /webhook/torrent-done has no shared secret configured. Fine on a trusted LAN; if this app is reachable from the internet, set one in the web UI's Settings tab and in torrent-done.env.`
+    );
+  }
 
   // Always started - it re-reads settings on every cycle and cheaply no-ops
   // while hot-folder ingestion is disabled, so enabling/disabling and tuning

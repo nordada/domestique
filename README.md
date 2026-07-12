@@ -748,6 +748,20 @@ guarantee, just the posture the code is built around:
   gates the completion webhook (see [Webhook
   security](#web-ui-tour)), and the web UI has an auto-expiring login
   lockout after repeated failures (see [Login lockout](#web-ui-tour)).
+- **Cross-site request forgery guard.** State-changing API requests whose
+  `Origin` header names another site are rejected outright, so a hostile
+  page can't ride the browser's cached credentials into an upload or
+  settings change.
+- **Bounded and hardened HTTP handling.** JSON and `.torrent` request
+  bodies are size-capped (large video uploads stream to disk instead of
+  memory), request headers have a strict timeout, every response carries
+  anti-clickjacking and content-type-sniffing protection headers, API
+  responses are marked uncacheable, and unexpected errors return a generic
+  message with the detail kept in the server log.
+- **Secrets file locked down.** `config/settings.json` (the one file
+  holding secrets in plaintext) is created with owner-only `0600`
+  permissions, and existing looser files are tightened automatically on
+  startup.
 
 **If you expose this publicly**, put it behind an identity-aware proxy
 (e.g. Cloudflare Access / Zero Trust) rather than relying on the built-in
