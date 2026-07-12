@@ -180,6 +180,17 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 
 export function createApp(opts: ServerOptions) {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // The bare root has no route of its own; redirect straight to the web
+    // UI so a bookmark or a reverse proxy's default hostname (Cloudflare
+    // Tunnel, etc) lands somewhere useful instead of a 404. Unconditional:
+    // if the web UI itself is disabled, /ui just shows its own 503, same
+    // as navigating there directly.
+    if (req.method === "GET" && req.url === "/") {
+      res.writeHead(302, { Location: "/ui" });
+      res.end();
+      return;
+    }
+
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));

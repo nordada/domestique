@@ -643,8 +643,11 @@ WEBUI_PASSWORD=<a password you choose>
 ```
 
 Then browse to `http://<TOWER-IP>:8420/ui` - your browser will prompt for
-credentials (HTTP Basic Auth). By default any username is accepted and only
-the password is checked. Optionally also set
+credentials (HTTP Basic Auth). The bare root (no `/ui`) redirects there
+automatically too, so a plain hostname (e.g. behind a reverse proxy or a
+Cloudflare Tunnel) also lands somewhere useful instead of a 404. By default
+any username is accepted and only the password is checked. Optionally also
+set
 
 ```
 WEBUI_USER=<a username you choose>

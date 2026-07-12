@@ -70,6 +70,26 @@ function authHeader(password: string, username = "anything"): string {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
+test("GET / redirects to /ui, unauthenticated and regardless of whether the web UI is enabled", async () => {
+  const enabled = await makeScratchServer({ password: "correct-password" });
+  try {
+    const res = await fetch(`${enabled.baseUrl}/`, { redirect: "manual" });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), "/ui");
+  } finally {
+    await enabled.close();
+  }
+
+  const disabled = await makeScratchServer(null);
+  try {
+    const res = await fetch(`${disabled.baseUrl}/`, { redirect: "manual" });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), "/ui");
+  } finally {
+    await disabled.close();
+  }
+});
+
 test("web UI routes 503 when WEBUI_PASSWORD isn't configured", async () => {
   const { baseUrl, close } = await makeScratchServer(null);
   try {
