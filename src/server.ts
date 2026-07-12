@@ -281,8 +281,11 @@ export function createApp(opts: ServerOptions) {
             mention: true,
           }).catch((notifyErr) => console.warn(`[discord] failed to send notification: ${notifyErr}`));
         }
+        // The full error already went to the console (and Discord, a private
+        // owner-only channel) above; the HTTP response stays generic so a
+        // caller can't fish for internal filesystem paths in error strings.
         res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: String(err) }));
+        res.end(JSON.stringify({ ok: false, error: "internal error" }));
       }
       return;
     }

@@ -731,3 +731,22 @@ test("POST /api/transmission/add-torrent adds, polls to confirm, and logs a succ
     await closeTransmission();
   }
 });
+
+test("unexpected route errors return a generic 500 without echoing internals", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    // Malformed JSON makes JSON.parse throw inside the route, landing in the
+    // catch-all: the response must not carry the raw error string (which can
+    // include internal filesystem paths for fs-originated errors).
+    const res = await fetch(`${baseUrl}/api/events`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password") },
+      body: "{not json",
+    });
+    assert.equal(res.status, 500);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, "internal error");
+  } finally {
+    await close();
+  }
+});

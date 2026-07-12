@@ -583,7 +583,11 @@ export async function handleWebUiRequest(
       return true;
     }
   } catch (err) {
-    sendJson(res, 500, { error: String(err) });
+    // Detail stays server-side only: a raw String(err) can leak internal
+    // filesystem paths (e.g. an ENOENT's full path) to the client, which
+    // matters now that the app can be internet-exposed.
+    console.error(`[webui] error handling ${req.method} ${url}:`, err);
+    sendJson(res, 500, { error: "internal error" });
     return true;
   }
 

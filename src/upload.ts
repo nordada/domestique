@@ -122,7 +122,10 @@ async function handleSingleFileUpload(
   try {
     await writeRequestBodyToFile(req, destPath);
   } catch (err) {
-    sendJson(res, 500, { error: `upload failed: ${err}` });
+    // Full error to the server log only: fs errors carry internal paths
+    // that don't belong in an HTTP response (see webui.ts's catch-all).
+    console.error(`[upload] failed to stage "${name}":`, err);
+    sendJson(res, 500, { error: "upload failed" });
     return;
   }
 
@@ -131,7 +134,8 @@ async function handleSingleFileUpload(
     await clearIfExists(destPath);
     sendJson(res, 200, { ok: true, results });
   } catch (err) {
-    sendJson(res, 500, { ok: false, error: String(err) });
+    console.error(`[upload] failed to process "${name}":`, err);
+    sendJson(res, 500, { ok: false, error: "internal error" });
   }
 }
 
@@ -183,7 +187,8 @@ async function handleFolderFileUpload(
   try {
     await writeRequestBodyToFile(req, destPath);
   } catch (err) {
-    sendJson(res, 500, { error: `upload failed: ${err}` });
+    console.error(`[upload] failed to stage "${folder}/${name}":`, err);
+    sendJson(res, 500, { error: "upload failed" });
     return;
   }
   sendJson(res, 200, { ok: true });
@@ -220,7 +225,8 @@ async function handleFolderFinalize(
     await clearIfExists(folderDir);
     sendJson(res, 200, { ok: true, results });
   } catch (err) {
-    sendJson(res, 500, { ok: false, error: String(err) });
+    console.error(`[upload] failed to process folder "${folder}":`, err);
+    sendJson(res, 500, { ok: false, error: "internal error" });
   }
 }
 
