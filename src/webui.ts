@@ -102,7 +102,7 @@ export function webUiConfigFromEnv(): WebUiConfig | null {
   return { password, username };
 }
 
-function constantTimeEqual(a: string, b: string): boolean {
+export function constantTimeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
   // timingSafeEqual throws on mismatched lengths, so bail out rather than
@@ -203,6 +203,7 @@ function maskSettings(settings: Settings) {
     accentColor: settings.accentColor ?? "",
     statusPollIntervalMs: settings.statusPollIntervalMs,
     statusPollWhenHidden: settings.statusPollWhenHidden,
+    webhookSecretSet: Boolean(settings.webhookSecret),
   };
 }
 
@@ -467,12 +468,13 @@ export async function handleWebUiRequest(
         accentColor?: string;
         statusPollIntervalMs?: number;
         statusPollWhenHidden?: boolean;
+        webhookSecret?: string;
       };
 
       // A field only overwrites its stored secret when the caller actually
-      // sent it - omitting plexToken/discordWebhookUrl/transmissionPassword
-      // keeps the existing one, since GET /api/settings never echoes the
-      // current value back for the frontend to round-trip.
+      // sent it: omitting plexToken/discordWebhookUrl/transmissionPassword/
+      // webhookSecret keeps the existing one, since GET /api/settings never
+      // echoes the current value back for the frontend to round-trip.
       const current = loadSettings(opts.settingsPath, opts.libraryRoot);
       const plexToken = payload.plexToken !== undefined ? payload.plexToken : (current.plex?.token ?? "");
       const discordWebhookUrl =
@@ -481,6 +483,8 @@ export async function handleWebUiRequest(
         payload.transmissionPassword !== undefined
           ? payload.transmissionPassword
           : (current.transmission?.password ?? "");
+      const webhookSecret =
+        payload.webhookSecret !== undefined ? payload.webhookSecret : (current.webhookSecret ?? "");
 
       try {
         const saved = saveSettings(
@@ -494,6 +498,7 @@ export async function handleWebUiRequest(
             accentColor: payload.accentColor,
             statusPollIntervalMs: payload.statusPollIntervalMs,
             statusPollWhenHidden: payload.statusPollWhenHidden,
+            webhookSecret,
           },
           opts.libraryRoot,
           opts.settingsPath

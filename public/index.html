@@ -643,6 +643,21 @@
     </label>
   </div>
 
+  <h3>Webhook security</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    /webhook/torrent-done (what Transmission's hook script calls) has no
+    other authentication of its own: it's meant to be reached only by that
+    script, trusted implicitly on your LAN. Set a secret here if that route
+    is ever reachable from outside your LAN, e.g. behind a reverse proxy or
+    a Cloudflare Tunnel, and put the same value in torrent-done.env's
+    WEBHOOK_SECRET so the hook script keeps working. Leave blank to keep
+    the original open behavior.
+  </p>
+  <label><span>Shared secret</span>
+    <input type="password" id="s-webhook-secret">
+    <span class="clear-toggle"><input type="checkbox" id="s-webhook-secret-clear"> Clear stored secret</span>
+  </label>
+
   <div class="actions">
     <button class="primary" id="save-settings-btn">Save settings</button>
   </div>
@@ -956,6 +971,7 @@ async function loadSettingsPanel() {
     document.getElementById("s-transmission-password").placeholder = s.transmission.passwordSet ? "already set - leave blank to keep" : "not set";
     document.getElementById("s-indexer-url").value = s.indexer.url;
     document.getElementById("s-indexer-check-interval").value = Math.round(s.indexer.checkIntervalMs / 1000);
+    document.getElementById("s-webhook-secret").placeholder = s.webhookSecretSet ? "already set, leave blank to keep" : "not set";
   } catch (err) {
     statusEl.textContent = `Failed to load settings: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -1004,6 +1020,10 @@ async function saveSettingsPanel() {
   if (transmissionPassword) payload.transmissionPassword = transmissionPassword;
   else if (document.getElementById("s-transmission-password-clear").checked) payload.transmissionPassword = "";
 
+  const webhookSecret = document.getElementById("s-webhook-secret").value;
+  if (webhookSecret) payload.webhookSecret = webhookSecret;
+  else if (document.getElementById("s-webhook-secret-clear").checked) payload.webhookSecret = "";
+
   try {
     await api("/api/settings", {
       method: "PUT",
@@ -1018,6 +1038,8 @@ async function saveSettingsPanel() {
     document.getElementById("s-discord-webhook-clear").checked = false;
     document.getElementById("s-transmission-password").value = "";
     document.getElementById("s-transmission-password-clear").checked = false;
+    document.getElementById("s-webhook-secret").value = "";
+    document.getElementById("s-webhook-secret-clear").checked = false;
     await loadSettingsPanel();
     await loadStatus();
   } catch (err) {

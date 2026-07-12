@@ -229,6 +229,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       accentColor: "",
       statusPollIntervalMs: 20000,
       statusPollWhenHidden: false,
+      webhookSecretSet: false,
     });
 
     const putRes = await fetch(`${baseUrl}/api/settings`, {
@@ -244,6 +245,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
         transmissionPassword: "secret-password",
         indexer: { url: "https://indexer.example", checkIntervalMs: 60000 },
         accentColor: "#22c55e",
+        webhookSecret: "shh-its-a-secret",
       }),
     });
     assert.equal(putRes.status, 200);
@@ -258,9 +260,11 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(putBody.indexer.url, "https://indexer.example");
     assert.equal(putBody.indexer.checkIntervalMs, 60000);
     assert.equal(putBody.accentColor, "#22c55e");
+    assert.equal(putBody.webhookSecretSet, true);
     assert.ok(!("token" in putBody.plex));
     assert.ok(!("webhookUrl" in putBody.discord));
     assert.ok(!("password" in putBody.transmission));
+    assert.ok(!("webhookSecret" in putBody));
 
     const onDisk = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
     assert.equal(onDisk.plex.token, "secret-token");
@@ -268,6 +272,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(onDisk.transmission.password, "secret-password");
     assert.equal(onDisk.indexer.url, "https://indexer.example");
     assert.equal(onDisk.accentColor, "#22c55e");
+    assert.equal(onDisk.webhookSecret, "shh-its-a-secret");
   } finally {
     await close();
   }
@@ -358,7 +363,7 @@ test("POST /webhook/torrent-done is skipped without side effects while paused", 
     const res = await fetch(`${baseUrl}/webhook/torrent-done`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dir: "/downloads", name: "Tour-de-France-2026-Stage-05.mp4" }),
+      body: JSON.stringify({ dir: "/nonexistent", name: "Tour-de-France-2026-Stage-05.mp4" }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
@@ -373,6 +378,94 @@ test("POST /webhook/torrent-done is skipped without side effects while paused", 
 
     const onDisk = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
     assert.equal(onDisk.paused, true);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /webhook/torrent-done requires a matching X-Webhook-Secret once one is configured, but stays open when unset", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    // Paused, so an authorized request short-circuits at 200 before ever
+    // touching the filesystem: isolates the secret check itself from real
+    // file processing, which this scratch server isn't set up for.
+    await fetch(`${baseUrl}/api/paused`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: true }),
+    });
+
+    const call = (headers) =>
+      fetch(`${baseUrl}/webhook/torrent-done`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ dir: "/nonexistent", name: "Tour-de-France-2026-Stage-05.mp4" }),
+      });
+
+    // No secret configured yet: original open behavior, no header needed.
+    assert.equal((await call({})).status, 200);
+
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ webhookSecret: "correct-horse-battery-staple" }),
+    });
+
+    assert.equal((await call({})).status, 401);
+    assert.equal((await call({ "X-Webhook-Secret": "wrong-guess" })).status, 401);
+    assert.equal((await call({ "X-Webhook-Secret": "correct-horse-battery-staple" })).status, 200);
+
+    // Clearing it (empty string, same convention as the other secret
+    // fields) restores the original open behavior.
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ webhookSecret: "" }),
+    });
+    assert.equal((await call({})).status, 200);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /webhook/torrent-done rejects a dir/name that resolves outside the downloads share", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    // Paused, so a request that DOES pass the confinement check short-
+    // circuits cleanly at 200 rather than hitting the real filesystem.
+    await fetch(`${baseUrl}/api/paused`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password"), "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: true }),
+    });
+
+    const call = (dir, name) =>
+      fetch(`${baseUrl}/webhook/torrent-done`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dir, name }),
+      });
+
+    // A dir entirely outside the configured downloads share (/nonexistent
+    // in this scratch server) is rejected outright, regardless of pause
+    // state or whether a webhookSecret is even configured: this check
+    // doesn't depend on the secret at all.
+    const outsideRes = await call("/etc", "passwd");
+    assert.equal(outsideRes.status, 400);
+    assert.match((await outsideRes.json()).error, /downloads share/);
+
+    // A dir that looks like it's inside the share, but escapes via the
+    // name field's own "../" segments, is caught too: the check runs on
+    // the fully joined path, not dir alone.
+    const escapeRes = await call("/nonexistent", "../../etc/passwd");
+    assert.equal(escapeRes.status, 400);
+
+    // A dir/name combo that genuinely resolves inside the configured
+    // share passes the check, then hits the paused short-circuit, proving
+    // it got past this check specifically rather than failing some other
+    // way.
+    const insideRes = await call("/nonexistent", "Tour-de-France-2026-Stage-05.mp4");
+    assert.equal(insideRes.status, 200);
   } finally {
     await close();
   }

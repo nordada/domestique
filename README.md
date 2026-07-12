@@ -219,6 +219,16 @@ equivalent.
 
 <img src="docs/screenshots/settings-indexer.png" width="560" alt="External indexer settings section: URL and check interval">
 
+**Webhook security:** `/webhook/torrent-done` (what Transmission's hook
+script calls) has no authentication of its own; it's meant to be reached
+only by that script, trusted implicitly on a LAN. If you ever expose this
+app past your LAN (a reverse proxy, a Cloudflare Tunnel), set a secret
+here and the matching `WEBHOOK_SECRET` in `torrent-done.env`, and the
+webhook will reject any request missing a correct `X-Webhook-Secret`
+header. Leave blank to keep the original open behavior.
+
+<img src="docs/screenshots/settings-webhook.png" width="560" alt="Webhook security settings section: shared secret field">
+
 ## Requirements
 
 - Docker with the Compose v2 plugin (`docker compose`, not the older
@@ -428,6 +438,15 @@ your Transmission container maps its share to something other than
 `/downloads` internally, change the mount in `docker-compose.yml` to match
 it instead. Get this wrong and the hook will fire successfully but the
 archiver will fail to find the file (a `ENOENT`-style error in its logs).
+
+**If this webhook is ever reachable from outside your LAN** (behind a
+reverse proxy, a Cloudflare Tunnel, etc), also set `WEBHOOK_SECRET` in
+both Domestique's `.env` (or the web UI's Settings tab) and this same
+`torrent-done.env`, matching exactly. See [Webhook
+security](#web-ui-tour) in the Web UI tour above for what this actually
+does. By default, with neither set, the webhook accepts any request with
+no authentication at all, which is fine on a trusted LAN but not once
+it's internet-reachable.
 
 ### 3. Add a new show
 

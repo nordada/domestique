@@ -17,8 +17,21 @@
  */
 
 import { promises as fs } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { mergeParsed, parseName, type ParsedName } from "./parser.js";
+
+/**
+ * True if `candidate` is `root` itself or somewhere underneath it, resolved
+ * against real path segments (via node:path's own relative/resolve) rather
+ * than a naive string prefix check, which a sibling directory sharing the
+ * same prefix (e.g. `/downloads-evil` vs `/downloads`) would otherwise slip
+ * past. Used to keep the webhook's attacker-suppliable `dir`/`name` confined
+ * to the actual downloads share; see server.ts's /webhook/torrent-done.
+ */
+export function isPathWithin(candidate: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(candidate));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
 
 export interface SourceItem {
   /** absolute path to the actual media file to copy */

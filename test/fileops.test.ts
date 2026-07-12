@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { copyIntoLibrary, type CopyOutcome } from "../src/fileops.js";
+import { copyIntoLibrary, isPathWithin, type CopyOutcome } from "../src/fileops.js";
 
 async function makeScratch() {
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "bra-library-"));
@@ -28,6 +28,22 @@ function assertSkipped(outcome: CopyOutcome): asserts outcome is Extract<CopyOut
     assert.fail(`expected "skipped", got "${outcome.status}"`);
   }
 }
+
+test("isPathWithin allows the root itself and real subpaths, rejects siblings and traversal", () => {
+  assert.equal(isPathWithin("/downloads", "/downloads"), true);
+  assert.equal(isPathWithin("/downloads/complete/race.mp4", "/downloads"), true);
+  assert.equal(isPathWithin("/downloads/a/b/c.mp4", "/downloads"), true);
+
+  // A sibling directory that merely shares the same string prefix is the
+  // classic bug a naive startsWith(root) check would let through.
+  assert.equal(isPathWithin("/downloads-evil/passwd", "/downloads"), false);
+  assert.equal(isPathWithin("/etc/passwd", "/downloads"), false);
+
+  // path.join already collapses ".." before isPathWithin ever sees it in
+  // production, but it should still reject an escape if handed one raw.
+  assert.equal(isPathWithin("/downloads/../etc/passwd", "/downloads"), false);
+  assert.equal(isPathWithin("/downloads/../../etc/passwd", "/downloads"), false);
+});
 
 test("quality-aware copy: multi-part same-resolution files land normally, no review suffix", async () => {
   const { libraryRoot, sourceDir } = await makeScratch();

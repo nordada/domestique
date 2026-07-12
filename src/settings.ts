@@ -55,6 +55,18 @@ export interface Settings {
   statusPollIntervalMs: number;
   /** If true, keeps polling /api/status even while the browser tab/window isn't active. Defaults to false (pause when hidden) to avoid needlessly hitting Plex/Transmission while no one's looking. */
   statusPollWhenHidden: boolean;
+  /**
+   * Optional shared secret for /webhook/torrent-done. That route predates
+   * this field and has no other auth (it's meant to be called only by
+   * Transmission's own hook script, trusted implicitly on a LAN); this is
+   * the retrofit for anyone who exposes the app past their LAN (a reverse
+   * proxy, a Cloudflare Tunnel, etc). Null keeps the original open behavior
+   * so existing deployments aren't broken by an upgrade. When set, the
+   * webhook requires a matching `X-Webhook-Secret` header on every request,
+   * checked in constant time (see webui.ts's constantTimeEqual) so a
+   * timing attack can't narrow down the secret character by character.
+   */
+  webhookSecret: string | null;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -89,6 +101,7 @@ function seedFromEnv(libraryRoot: string): Settings {
     accentColor: null,
     statusPollIntervalMs: DEFAULT_STATUS_POLL_INTERVAL_MS,
     statusPollWhenHidden: false,
+    webhookSecret: normalizeWebhookSecret(process.env.WEBHOOK_SECRET),
   };
 }
 
@@ -114,6 +127,7 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     accentColor: normalizeAccentColor(raw.accentColor),
     statusPollIntervalMs: normalizeStatusPollIntervalMs(raw.statusPollIntervalMs),
     statusPollWhenHidden: raw.statusPollWhenHidden === true,
+    webhookSecret: normalizeWebhookSecret(raw.webhookSecret),
   };
 }
 
@@ -134,6 +148,12 @@ function normalizeAccentColor(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
   return HEX_COLOR_RE.test(trimmed) ? trimmed : null;
+}
+
+function normalizeWebhookSecret(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  return trimmed ? trimmed : null;
 }
 
 function normalizePlex(input: unknown, appLibraryRoot: string): PlexConfig | null {

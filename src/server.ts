@@ -24,11 +24,11 @@ import { loadConfig, saveConfig, DEFAULT_CONFIG_PATH } from "./config.js";
 import { loadSettings, DEFAULT_SETTINGS_PATH } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
-import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems } from "./fileops.js";
+import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems, isPathWithin } from "./fileops.js";
 import { refreshPlexFolder } from "./plex.js";
 import { sendDiscordNotification } from "./discord.js";
 import { recordActivity } from "./activity.js";
-import { webUiConfigFromEnv, handleWebUiRequest, type WebUiConfig } from "./webui.js";
+import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FAVICON_PATH = join(__dirname, "..", "public", "favicon.svg");
@@ -216,6 +216,22 @@ export function createApp(opts: ServerOptions) {
 
     if (req.method === "POST" && req.url === "/webhook/torrent-done") {
       try {
+        const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+        // This route has no other auth: it's meant to be called only by
+        // Transmission's own hook script, trusted implicitly on a LAN.
+        // webhookSecret is the retrofit for anyone exposing the app past
+        // their LAN; null (the default) keeps the original open behavior so
+        // existing deployments aren't broken. Checked before touching the
+        // body at all, so an unauthorized caller can't even reach the dir/
+        // name handling below.
+        if (settings.webhookSecret) {
+          const provided = req.headers["x-webhook-secret"];
+          if (typeof provided !== "string" || !constantTimeEqual(provided, settings.webhookSecret)) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "missing or incorrect X-Webhook-Secret header" }));
+            return;
+          }
+        }
         const body = await readBody(req);
         const payload = JSON.parse(body) as TorrentDonePayload;
         if (!payload.dir || !payload.name) {
@@ -223,7 +239,21 @@ export function createApp(opts: ServerOptions) {
           res.end(JSON.stringify({ error: "payload must include dir and name" }));
           return;
         }
-        if (loadSettings(opts.settingsPath, opts.libraryRoot).paused) {
+        // A legitimate call's dir/name always resolves under the downloads
+        // share (that's what TR_TORRENT_DIR is). Confining it here, at the
+        // one HTTP-facing entry point that accepts an attacker-suppliable
+        // dir/name, closes off reading (and copying into the library) any
+        // other path the container can see: config/settings.json's real
+        // secrets, LIBRARY_ROOT itself, etc, even if webhookSecret above is
+        // unset or leaks. Deliberately checked on the SAME joined path
+        // resolveSourceItems itself will stat, not just payload.dir alone,
+        // since payload.name could otherwise carry its own "../" escape.
+        if (!isPathWithin(join(payload.dir, payload.name), opts.downloadsPath)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "dir/name must resolve inside the downloads share" }));
+          return;
+        }
+        if (settings.paused) {
           console.log(`[webhook] paused - skipping "${payload.name}"`);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, paused: true, results: [] }));

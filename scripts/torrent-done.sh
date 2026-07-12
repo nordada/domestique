@@ -33,7 +33,14 @@ HASH_ESCAPED=$(json_escape "$TR_TORRENT_HASH")
 PAYLOAD=$(printf '{"dir":"%s","name":"%s","id":"%s","hash":"%s"}' \
   "$DIR_ESCAPED" "$NAME_ESCAPED" "$ID_ESCAPED" "$HASH_ESCAPED")
 
-curl -sS -m 300 -X POST "$ARCHIVER_URL" \
-  -H "Content-Type: application/json" \
+# Built with `set --` rather than a bash array, since this script runs
+# under plain POSIX sh (dash/ash/BusyBox on most container base images),
+# not bash.
+set -- -H "Content-Type: application/json"
+if [ -n "$WEBHOOK_SECRET" ]; then
+  set -- "$@" -H "X-Webhook-Secret: $WEBHOOK_SECRET"
+fi
+
+curl -sS -m 300 -X POST "$ARCHIVER_URL" "$@" \
   -d "$PAYLOAD" \
   >> "$SCRIPT_DIR/torrent-done.log" 2>&1 || true
