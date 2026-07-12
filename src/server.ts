@@ -253,6 +253,13 @@ export function createApp(opts: ServerOptions) {
         if (settings.webhookSecret) {
           const provided = req.headers["x-webhook-secret"];
           if (typeof provided !== "string" || !constantTimeEqual(provided, settings.webhookSecret)) {
+            // Never echo the provided value: a near-miss secret in the log
+            // is still a secret. Present-but-wrong vs missing is enough to
+            // tell "stale hook script that sends no header" apart from a
+            // mismatched torrent-done.env.
+            console.warn(
+              `[webhook] rejected torrent-done from ${req.socket.remoteAddress ?? "unknown address"}: ${typeof provided === "string" ? "incorrect" : "missing"} X-Webhook-Secret header`
+            );
             res.writeHead(401, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "missing or incorrect X-Webhook-Secret header" }));
             return;
@@ -261,6 +268,9 @@ export function createApp(opts: ServerOptions) {
         const body = await readBody(req);
         const payload = JSON.parse(body) as TorrentDonePayload;
         if (!payload.dir || !payload.name) {
+          console.warn(
+            `[webhook] rejected torrent-done from ${req.socket.remoteAddress ?? "unknown address"}: payload missing dir and/or name`
+          );
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "payload must include dir and name" }));
           return;
@@ -275,6 +285,13 @@ export function createApp(opts: ServerOptions) {
         // resolveSourceItems itself will stat, not just payload.dir alone,
         // since payload.name could otherwise carry its own "../" escape.
         if (!isPathWithin(join(payload.dir, payload.name), opts.downloadsPath)) {
+          // Logging the offending dir/name here is safe (it's the caller's
+          // own input, not a secret) and is exactly what's needed to spot a
+          // mount-path mismatch between Transmission's container and this
+          // one, which would silently reject every legitimate webhook.
+          console.warn(
+            `[webhook] rejected torrent-done from ${req.socket.remoteAddress ?? "unknown address"}: dir/name resolves outside the downloads share (dir="${payload.dir}", name="${payload.name}", downloads share is "${opts.downloadsPath}")`
+          );
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "dir/name must resolve inside the downloads share" }));
           return;
