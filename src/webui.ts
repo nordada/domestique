@@ -149,6 +149,29 @@ export function nextLockoutCooldownSeconds(baseSeconds: number, consecutiveLocko
   return Math.min(baseSeconds * 2 ** consecutiveLockouts, LOGIN_LOCKOUT_MAX_SECONDS);
 }
 
+// CSRF guard for the state-changing routes: a browser that has cached Basic
+// Auth credentials for this host will happily attach them to a request a
+// hostile page triggers, and simple POSTs don't require a CORS preflight the
+// server would never answer. Browsers always send Origin on cross-origin
+// mutating requests, so "Origin present and not our own host" is exactly the
+// cross-site case; requests with no Origin at all (curl, same-origin
+// navigations, Transmission's hook script) are untouched. The webhook route
+// is deliberately outside this guard: it's machine-to-machine, carries no
+// Origin, and is already secret-gated.
+const MUTATING_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
+
+function isCrossOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (typeof origin !== "string" || origin === "") return false;
+  try {
+    return new URL(origin).host !== req.headers.host;
+  } catch {
+    // Includes the literal "null" a sandboxed iframe or data: page sends -
+    // unattributable, so treated as cross-origin.
+    return true;
+  }
+}
+
 /**
  * Constant-time check of the decoded credentials from an HTTP Basic Auth
  * header. Username is only checked when WEBUI_USER is configured - leaving
@@ -247,6 +270,14 @@ export async function handleWebUiRequest(
 
   if (!opts.webui) {
     sendJson(res, 503, { error: "web UI disabled - set WEBUI_PASSWORD in .env to enable" });
+    return true;
+  }
+
+  // Checked before auth on purpose: the attack this stops is a request that
+  // WOULD pass auth (the victim's own browser attaching cached credentials),
+  // and rejecting early keeps forged requests out of the login lockout math.
+  if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req)) {
+    sendJson(res, 403, { error: "cross-origin requests are not allowed" });
     return true;
   }
 

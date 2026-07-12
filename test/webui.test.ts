@@ -800,3 +800,44 @@ test("buffered JSON bodies are capped: an oversized body gets a 413, on API rout
     await close();
   }
 });
+
+test("cross-origin mutating /api requests are rejected 403 even with valid credentials; same-origin and no-Origin pass", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const post = (origin?: string) =>
+      fetch(`${baseUrl}/api/match-test`, {
+        method: "POST",
+        headers: {
+          Authorization: authHeader("correct-password"),
+          ...(origin === undefined ? {} : { Origin: origin }),
+        },
+        body: JSON.stringify({ name: "Tour de France 2026 Stage 1" }),
+      });
+
+    // The CSRF case: a hostile page's request rides the browser's cached
+    // credentials, so valid auth must not be enough on its own.
+    assert.equal((await post("https://evil.example")).status, 403);
+    // "null" Origin (sandboxed iframe) is unattributable: also rejected.
+    assert.equal((await post("null")).status, 403);
+    // The app's own frontend sends its own host as the Origin.
+    assert.equal((await post(baseUrl)).status, 200);
+    // Non-browser clients (curl, scripts) send no Origin at all.
+    assert.equal((await post(undefined)).status, 200);
+
+    // Cross-origin GETs stay allowed (nothing state-changing to forge).
+    const get = await fetch(`${baseUrl}/api/activity`, {
+      headers: { Authorization: authHeader("correct-password"), Origin: "https://evil.example" },
+    });
+    assert.equal(get.status, 200);
+
+    // The machine-to-machine webhook is deliberately outside this guard.
+    const webhook = await fetch(`${baseUrl}/webhook/torrent-done`, {
+      method: "POST",
+      headers: { Origin: "https://evil.example" },
+      body: JSON.stringify({ dir: "/nonexistent", name: "x" }),
+    });
+    assert.notEqual(webhook.status, 403);
+  } finally {
+    await close();
+  }
+});
