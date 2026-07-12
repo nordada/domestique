@@ -210,7 +210,12 @@ export function createApp(opts: ServerOptions) {
         const svg = readFileSync(FAVICON_PATH, "utf-8");
         res.writeHead(200, { "Content-Type": "image/svg+xml" });
         res.end(svg);
-      } catch {
+      } catch (err) {
+        // Logged because "not found" here is usually a deploy problem, not
+        // a bad request: a real incident had two icon files land mode 600
+        // via rsync, unreadable once the container dropped to a non-root
+        // PUID user, and the silent 404 made it look like a UI bug.
+        console.warn(`[static] failed to read favicon: ${err}`);
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "favicon not found" }));
       }
@@ -222,7 +227,9 @@ export function createApp(opts: ServerOptions) {
         const svg = readFileSync(join(ICONS_DIR, req.url.slice("/icons/".length)), "utf-8");
         res.writeHead(200, { "Content-Type": "image/svg+xml" });
         res.end(svg);
-      } catch {
+      } catch (err) {
+        // See the favicon route above for why this logs.
+        console.warn(`[static] failed to read ${req.url}: ${err}`);
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "icon not found" }));
       }

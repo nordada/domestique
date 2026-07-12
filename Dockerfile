@@ -18,7 +18,11 @@ COPY --from=build /app/dist ./dist
 COPY config ./config
 COPY public ./public
 COPY docker-entrypoint.sh ./
-RUN chmod +x docker-entrypoint.sh
+# a+rX (not blanket 644): COPY preserves the build tree's permissions, and
+# an asset that happens to be 600 there would be unreadable once the
+# entrypoint drops to a non-root PUID user. Adds read for everyone without
+# touching executable bits.
+RUN chmod -R a+rX dist config public && chmod +x docker-entrypoint.sh
 
 EXPOSE 8420
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8420/health || exit 1

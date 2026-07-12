@@ -12,7 +12,14 @@
 # config) to pick up the changes.
 set -euo pipefail
 
+# --chmod=ugo+rX: rsync -a preserves source permissions, and a file that's
+# 600 on the dev machine (easy to end up with, e.g. anything copied out of
+# a download or another user's folder) would land unreadable by the
+# container's non-root PUID user on the server. Granting read (and
+# directory-traversal x) to everyone on transfer prevents that without
+# stripping any executable bits.
 rsync -av \
+  --chmod=ugo+rX \
   --exclude 'node_modules' \
   --exclude 'dist' \
   --exclude '.git' \
