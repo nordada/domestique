@@ -776,3 +776,27 @@ test("security headers are set on every response, with Cache-Control: no-store o
     await close();
   }
 });
+
+test("buffered JSON bodies are capped: an oversized body gets a 413, on API routes and the webhook alike", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const oversized = "x".repeat(1_100_000); // just past the 1 MB JSON cap
+
+    const api = await fetch(`${baseUrl}/api/events`, {
+      method: "PUT",
+      headers: { Authorization: authHeader("correct-password") },
+      body: oversized,
+    });
+    assert.equal(api.status, 413);
+    const apiBody = (await api.json()) as { error: string };
+    assert.match(apiBody.error, /byte limit/);
+
+    const webhook = await fetch(`${baseUrl}/webhook/torrent-done`, {
+      method: "POST",
+      body: oversized,
+    });
+    assert.equal(webhook.status, 413);
+  } finally {
+    await close();
+  }
+});

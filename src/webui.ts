@@ -43,6 +43,7 @@ import {
 } from "./transmission.js";
 import { checkIndexerLive } from "./indexer.js";
 import { sendDiscordNotification } from "./discord.js";
+import { readBody, readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
 import type { ServerOptions } from "./server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -178,25 +179,6 @@ function requireAuth(res: ServerResponse): void {
     "WWW-Authenticate": 'Basic realm="Domestique"',
   });
   res.end(JSON.stringify({ error: "authentication required" }));
-}
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
-}
-
-/** Binary-safe counterpart to readBody - string concatenation of raw chunks would corrupt a .torrent file's bencoded bytes. .torrent files are tiny (rarely more than a few hundred KB even for huge multi-file torrents), so buffering in memory is fine, unlike the video uploads in upload.ts which stream straight to disk. */
-function readBodyBuffer(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -405,7 +387,7 @@ export async function handleWebUiRequest(
         return true;
       }
 
-      const body = await readBodyBuffer(req);
+      const body = await readBodyBuffer(req, TORRENT_BODY_LIMIT_BYTES);
       try {
         const added = await addTorrentToTransmission(settings.transmission, body.toString("base64"));
         // torrent-add returning success already means Transmission accepted
@@ -583,6 +565,13 @@ export async function handleWebUiRequest(
       return true;
     }
   } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      // Connection: close tells a client mid-send to stop; its message
+      // carries no internals, so echoing it is fine.
+      res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+      res.end(JSON.stringify({ error: err.message }));
+      return true;
+    }
     // Detail stays server-side only: a raw String(err) can leak internal
     // filesystem paths (e.g. an ENOENT's full path) to the client, which
     // matters now that the app can be internet-exposed.

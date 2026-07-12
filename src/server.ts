@@ -29,6 +29,7 @@ import { refreshPlexFolder } from "./plex.js";
 import { sendDiscordNotification } from "./discord.js";
 import { recordActivity } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
+import { readBody, BodyTooLargeError } from "./body.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FAVICON_PATH = join(__dirname, "..", "public", "favicon.svg");
@@ -53,15 +54,6 @@ export interface TorrentDonePayload {
   name: string;
   id?: string;
   hash?: string;
-}
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
 }
 
 export async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOptions) {
@@ -290,6 +282,11 @@ export function createApp(opts: ServerOptions) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, results }));
       } catch (err) {
+        if (err instanceof BodyTooLargeError) {
+          res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+          return;
+        }
         console.error("[webhook] error handling torrent-done:", err);
         const discord = loadSettings(opts.settingsPath, opts.libraryRoot).discord;
         if (discord) {
