@@ -273,6 +273,7 @@ rejected while still locked out.
   7. [Optional: web UI](#7-optional-web-ui)
 - [Known limitations / assumptions](#known-limitations--assumptions-check-these-against-reality-as-you-go)
 - [Security posture](#security-posture)
+  - [Running as a non-root user](#running-as-a-non-root-user-recommended)
 - [Testing](#testing)
 - [Development](#development)
 - [License](#license)
@@ -762,11 +763,53 @@ guarantee, just the posture the code is built around:
   holding secrets in plaintext) is created with owner-only `0600`
   permissions, and existing looser files are tightened automatically on
   startup.
+- **Optional non-root container.** Set `PUID`/`PGID` and the process drops
+  root at startup, shrinking the blast radius of any compromise to what
+  that user can touch; see [Running as a non-root
+  user](#running-as-a-non-root-user-recommended).
 
 **If you expose this publicly**, put it behind an identity-aware proxy
 (e.g. Cloudflare Access / Zero Trust) rather than relying on the built-in
 password alone, and keep the origin reachable only through that proxy. The
 built-in password is a good second layer, not a substitute for one.
+
+### Running as a non-root user (recommended)
+
+By default the container runs as root, which keeps first-run setup
+friction-free but means a compromised app process would hold root inside
+the container, with your library mounted read-write. Set the
+linuxserver.io-style `PUID`/`PGID` environment variables to drop to an
+unprivileged user at startup instead:
+
+```
+PUID=99    # on Unraid: "nobody", the same user Transmission and most
+PGID=100   # containers already run as ("users" group)
+```
+
+On other platforms pick whatever UID/GID owns your media files (check with
+`ls -ln` on the library folder). Leaving both unset keeps the original
+run-as-root behavior, so upgrades don't change anything until you opt in.
+
+What happens at startup with `PUID` set: the entrypoint fixes ownership of
+the two bind-mounted config files (`events.json`, `settings.json`), which
+are tiny and must be writable by the app, then drops privileges before
+Node starts. The library and downloads mounts are deliberately never
+chowned automatically (they can be terabytes, and ownership there is your
+call), which leads to the one manual step:
+
+**Enabling this on an existing install**: everything the app created while
+it ran as root is root-owned, so the new user can't write alongside it.
+Run once on the host, with your real paths and ids:
+
+```
+chown -R 99:100 /mnt/user/media/bike-racing      # your LIBRARY_ROOT
+chown -R 99:100 /mnt/user/downloads/domestique   # hot-folder, if used
+```
+
+The main `/downloads` mount is read-only and needs no ownership change, as
+long as the files are readable by the chosen user (on a default Unraid
+share they are). A fresh install needs none of this: every file gets
+created by the right user from the start.
 
 ## Testing
 

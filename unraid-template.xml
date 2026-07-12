@@ -60,4 +60,8 @@
   <Config Name="WEBUI_PASSWORD" Target="WEBUI_PASSWORD" Default="" Mode="" Description="Set this to enable the web UI at /ui (events editor, match tester, upload, activity log). Fails CLOSED, not open: leaving this unset keeps /ui and /api/* returning 503, since that surface can read and overwrite your config." Type="Variable" Display="always" Required="false" Mask="true"></Config>
 
   <Config Name="WEBUI_USER" Target="WEBUI_USER" Default="" Mode="" Description="Optional: also require this exact username (HTTP Basic Auth) alongside WEBUI_PASSWORD. Leave unset to accept any username, checking only the password." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Run the app as this user id instead of root (99 = Unraid's 'nobody', the same user most containers including Transmission run as). The container fixes ownership of its two config files automatically; the Library Root (and hot-folder, if used) must be writable by this user - on a default Unraid share that's already true, otherwise run once from the terminal: chown -R 99:100 on those paths. Blank = run as root." Type="Variable" Display="always" Required="false" Mask="false">99</Config>
+
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group id to run as (100 = Unraid's 'users' group, paired with PUID 99 above). Blank = run as root." Type="Variable" Display="always" Required="false" Mask="false">100</Config>
 </Container>

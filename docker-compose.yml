@@ -58,6 +58,14 @@ services:
       # access over HTTP.
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
       WEBUI_USER: ${WEBUI_USER:-}
+      # Optional: run the app as this user/group instead of root
+      # (linuxserver.io-style PUID/PGID convention; on Unraid 99/100 is the
+      # usual nobody:users pair). Unset = run as root, the original
+      # behavior. BEFORE enabling on an existing install, read the README's
+      # "Running as a non-root user" section - the library (and hot-folder,
+      # if used) need a one-time chown or the app can't write to them.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
     volumes:
       # Transmission's completed-downloads share (read-only: we only copy from here).
       # Mounted at /downloads to match Transmission's own internal path.
