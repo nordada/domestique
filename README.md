@@ -272,6 +272,7 @@ rejected while still locked out.
   6. [Optional: Discord notifications](#6-optional-discord-notifications)
   7. [Optional: web UI](#7-optional-web-ui)
 - [Known limitations / assumptions](#known-limitations--assumptions-check-these-against-reality-as-you-go)
+- [Security posture](#security-posture)
 - [Testing](#testing)
 - [Development](#development)
 - [License](#license)
@@ -716,6 +717,42 @@ so tweaking it doesn't require a rebuild.
   practice this only matters if the *same* country/category/year gets two
   different broadcaster releases for a Nationals-type show - narrow enough
   that it's left as a known gap rather than adding more regex complexity.
+
+## Security posture
+
+Some deliberate design choices, since this can end up handling a torrent
+webhook and (optionally) sitting behind a public domain. None of this is a
+guarantee, just the posture the code is built around:
+
+- **No runtime dependencies.** The server is built entirely on Node's
+  standard library; the production image installs zero third-party
+  packages (`package.json` has an empty `dependencies`). There is almost
+  no supply-chain surface to compromise.
+- **Nothing shells out.** There is no `child_process` use anywhere, so
+  there is no command-injection surface, even though release names and
+  paths flow through the whole pipeline.
+- **Path confinement.** Both filesystem-facing entry points constrain
+  where they'll read and write before touching disk: the completion
+  webhook rejects any `dir`/`name` that resolves outside the downloads
+  share, and web UI uploads are reduced to a safe basename under a staging
+  folder. Neither can be walked out of its directory with `../`.
+- **Secrets stay server-side.** The Plex token, Transmission password,
+  Discord webhook URL, and the webhook shared secret are stored on the
+  server and never sent back to the browser; the Settings UI only learns
+  *whether* a secret is set, not its value. Credential checks (the web UI
+  password and the webhook secret) use constant-time comparison.
+- **Fails closed.** The web UI and its API respond `503` until a password
+  is configured, rather than being reachable unauthenticated, since they
+  can read and write config over HTTP.
+- **Auth hardening for exposure beyond a LAN.** An optional shared secret
+  gates the completion webhook (see [Webhook
+  security](#web-ui-tour)), and the web UI has an auto-expiring login
+  lockout after repeated failures (see [Login lockout](#web-ui-tour)).
+
+**If you expose this publicly**, put it behind an identity-aware proxy
+(e.g. Cloudflare Access / Zero Trust) rather than relying on the built-in
+password alone, and keep the origin reachable only through that proxy. The
+built-in password is a good second layer, not a substitute for one.
 
 ## Testing
 
