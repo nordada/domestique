@@ -309,10 +309,17 @@ export function createApp(opts: ServerOptions) {
 
   // Node's default requestTimeout (5 minutes) would kill a large web-UI
   // upload (src/upload.ts) partway through on anything less than a very
-  // fast connection. Disabling it is reasonable here since this is a
-  // password-gated LAN tool, not a public endpoint where slowloris-style
-  // abuse is a real concern.
+  // fast connection, so it stays disabled: any finite value generous enough
+  // for a multi-gigabyte upload over a slow link wouldn't meaningfully
+  // bound anything anyway. This does accept that a client can hold a body
+  // open indefinitely; for an internet-facing deployment the mitigation is
+  // upstream (Cloudflare Access or an equivalent auth proxy), not here.
+  // headersTimeout is set explicitly because its default is derived from
+  // requestTimeout, and disabling that must not also disable the header
+  // deadline: headers are tiny, so a client that can't finish them in 60
+  // seconds is a slowloris, not a slow uplink.
   server.requestTimeout = 0;
+  server.headersTimeout = 60000;
 
   return server;
 }
