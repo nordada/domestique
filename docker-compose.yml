@@ -26,6 +26,14 @@ services:
     build: .
     container_name: domestique
     restart: unless-stopped
+    # Unraid's Docker manager can't attach a template to compose-managed
+    # containers, so it reads these labels instead: without an icon it renders
+    # a "?" fallback that 404s in nginx and spams the Unraid syslog on every
+    # Dashboard refresh. Harmless on non-Unraid hosts. [IP]/[PORT:n] are
+    # Unraid placeholders it fills in when building the WebUI link.
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/nordada/domestique/main/public/icon.png"
+      net.unraid.docker.webui: "http://[IP]:[PORT:${PORT}]/ui"
     ports:
       - "${PORT}:${PORT}"
     environment:
