@@ -170,6 +170,16 @@ async function saveSeasonMeta(
  *   normal continuation of the same release - e.g. the next part of a
  *   multi-part download still trickling in - and copied under the clean,
  *   untagged filename as usual.
+ * - If this episode has no ".archiver-meta.json" entry at all (nothing was
+ *   ever copied in through Domestique for it - e.g. a file was placed in
+ *   the library some other way before Domestique managed this season) but
+ *   the plain filename is already occupied on disk, there's no tracked
+ *   "primary" broadcaster to compare against. Rather than assume this new
+ *   file is the same release and silently collide with (skip against) the
+ *   untracked one, a recognized broadcaster on the new file is enough to
+ *   file it as its own tagged alternate instead - see the real incident
+ *   this fixed, where NBC alternates for untracked episodes were getting
+ *   silently dropped as "destination already exists" instead of archived.
  */
 export async function copyIntoLibrary(
   sourceFile: string,
@@ -200,6 +210,10 @@ export async function copyIntoLibrary(
   }
 
   const primaryBroadcaster = existingBroadcasters[0];
+  // Only worth the extra stat when there's no meta to compare against and
+  // this file's own broadcaster is actually known - the one case where an
+  // on-disk collision needs to be told apart from "same tracked release".
+  const untrackedCollision = !existing && broadcaster != null && (await pathExists(destPath));
 
   if (existing && existing.resolution != null && resolution != null && resolution > existing.resolution) {
     const reviewName = insertVersionTag(destFilename, `REVIEW - possible ${resolution}p upgrade`);
@@ -216,6 +230,10 @@ export async function copyIntoLibrary(
     if (!existingBroadcasters.includes(broadcaster)) {
       warning = `Filed as an alternate version (${broadcaster}) for ${key} alongside the existing ${primaryBroadcaster} version, as "${altName}".`;
     }
+  } else if (untrackedCollision) {
+    const altName = insertVersionTag(destFilename, broadcaster!);
+    finalDestPath = join(destDirAbs, altName);
+    warning = `An untracked file already exists at the plain filename for ${key} (never copied through Domestique, so no version history was recorded for it). Filed this ${broadcaster} release alongside it as "${altName}" instead of treating it as a duplicate - review both files by hand.`;
   }
 
   // Checked against finalDestPath (not the original destPath) so a repeated

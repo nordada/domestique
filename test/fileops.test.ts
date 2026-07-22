@@ -339,3 +339,62 @@ test("alternate versions: unknown broadcaster on the new item never creates a ta
   );
   assert.equal(unknown.warning, undefined);
 });
+
+test("untracked collision: a file placed at the plain path outside Domestique doesn't swallow a later known-broadcaster alternate", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const destDirAbs = join(libraryRoot, destDir);
+
+  // Simulate a file that landed in the library some other way (manual copy,
+  // pre-Domestique backfill, etc.) - never went through copyIntoLibrary, so
+  // no .archiver-meta.json entry exists for this episode at all.
+  await fs.mkdir(destDirAbs, { recursive: true });
+  await fs.writeFile(join(destDirAbs, "TestShow - S2026E01 - Stage 1.mp4"), "pre-existing");
+
+  const alt = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "nbc.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    null,
+    "NBC"
+  );
+
+  assertCopied(alt);
+  assert.equal(
+    alt.destPath,
+    join(destDirAbs, "TestShow - S2026E01 - Stage 1 - NBC.mp4")
+  );
+  assert.match(alt.warning ?? "", /untracked file already exists/);
+  assert.match(alt.warning ?? "", /NBC/);
+
+  // The pre-existing file must be untouched, not overwritten.
+  const original = await fs.readFile(join(destDirAbs, "TestShow - S2026E01 - Stage 1.mp4"), "utf-8");
+  assert.equal(original, "pre-existing");
+
+  const meta = JSON.parse(await fs.readFile(join(destDirAbs, ".archiver-meta.json"), "utf-8"));
+  assert.deepEqual(meta.E01.broadcasters, ["NBC"]);
+});
+
+test("untracked collision: with no broadcaster known on the new item either, it's still skipped as a duplicate (nothing to distinguish it by)", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const destDirAbs = join(libraryRoot, destDir);
+
+  await fs.mkdir(destDirAbs, { recursive: true });
+  await fs.writeFile(join(destDirAbs, "TestShow - S2026E01 - Stage 1.mp4"), "pre-existing");
+
+  const result = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "plain.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    null,
+    null
+  );
+
+  assertSkipped(result);
+  assert.equal(result.reason, "destination already exists");
+});
