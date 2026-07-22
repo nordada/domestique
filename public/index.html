@@ -425,8 +425,8 @@
     Waits briefly after adding to confirm Transmission actually registered
     it; check Recent activity below for the result.
   </p>
-  <button class="primary" id="add-torrent-btn">Add .torrent file…</button>
-  <input type="file" id="add-torrent-input" class="hidden" accept=".torrent">
+  <button class="primary" id="add-torrent-btn">Add .torrent file(s)…</button>
+  <input type="file" id="add-torrent-input" class="hidden" accept=".torrent" multiple>
   <div id="add-torrent-status" class="status-msg"></div>
 </section>
 
@@ -1325,23 +1325,37 @@ async function uploadFolder(fileList) {
   }
 }
 
-async function addTorrentFile(file) {
+async function addTorrentFiles(fileList) {
+  const files = Array.from(fileList);
+  if (files.length === 0) return;
   const statusEl = document.getElementById("add-torrent-status");
-  statusEl.textContent = `Adding "${file.name}" to Transmission…`;
-  statusEl.className = "status-msg";
-  try {
-    const data = await api(`/api/transmission/add-torrent?name=${encodeURIComponent(file.name)}`, {
-      method: "POST",
-      body: file,
-    });
-    statusEl.textContent = data.confirmed
-      ? `✅ "${data.added.name}" added and confirmed by Transmission.`
-      : `⚠️ "${data.added.name}" was accepted but couldn't be confirmed - check Recent activity.`;
-    statusEl.className = `status-msg ${data.confirmed ? "ok" : "err"}`;
-  } catch (err) {
-    statusEl.textContent = `Failed: ${err.message}`;
-    statusEl.className = "status-msg err";
+  const results = [];
+  let anyIssue = false;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const progress = files.length > 1 ? ` (${i + 1}/${files.length})` : "";
+    statusEl.textContent = [...results, `Adding "${file.name}" to Transmission…${progress}`].join("\n");
+    statusEl.className = "status-msg";
+    try {
+      const data = await api(`/api/transmission/add-torrent?name=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        body: file,
+      });
+      if (!data.confirmed) anyIssue = true;
+      results.push(
+        data.confirmed
+          ? `✅ "${data.added.name}" added and confirmed by Transmission.`
+          : `⚠️ "${data.added.name}" was accepted but couldn't be confirmed - check Recent activity.`
+      );
+    } catch (err) {
+      anyIssue = true;
+      results.push(`❌ "${file.name}" failed: ${err.message}`);
+    }
   }
+
+  statusEl.textContent = results.join("\n");
+  statusEl.className = `status-msg ${anyIssue ? "err" : "ok"}`;
   await loadActivity();
 }
 
@@ -1399,7 +1413,7 @@ document.getElementById("save-settings-btn").addEventListener("click", saveSetti
 document.getElementById("s-accent-color").addEventListener("input", (e) => applyAccentColor(e.target.value.trim()));
 document.getElementById("add-torrent-btn").addEventListener("click", () => document.getElementById("add-torrent-input").click());
 document.getElementById("add-torrent-input").addEventListener("change", (e) => {
-  if (e.target.files.length > 0) addTorrentFile(e.target.files[0]);
+  if (e.target.files.length > 0) addTorrentFiles(e.target.files);
   e.target.value = "";
 });
 document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
