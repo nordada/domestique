@@ -8,3 +8,6 @@ scripts/deploy-to-tower.sh
 # Holds live secrets (Plex token, Discord webhook URL) once seeded/edited via
 # the web UI - never commit it, unlike config/events.json.
 config/settings.json
+# Runtime activity log, host-specific and constantly changing - not
+# something to track in git, unlike config/events.json.
+config/activity.json

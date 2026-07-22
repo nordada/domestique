@@ -40,6 +40,7 @@ services:
       LIBRARY_ROOT: ${LIBRARY_ROOT}
       CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
       SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH}
+      ACTIVITY_PATH: ${ACTIVITY_CONTAINER_PATH}
       PORT: "${PORT}"
       # Optional Plex/Discord/hot-folder integrations - safe to leave unset,
       # the app just disables each feature when its required vars aren't all
@@ -103,6 +104,13 @@ services:
       # (it's the actual mount point). Avoid it entirely with `touch
       # config/settings.json` before your first `docker compose up` here.
       - ./config/settings.json:${SETTINGS_CONTAINER_PATH}
+      # Recent-activity log (Home tab / Discord messages), bind-mounted so it
+      # survives container recreation and restarts - previously in-memory
+      # only, so a restart (e.g. a scheduled appdata-backup plugin stopping
+      # and starting all containers) silently wiped it. Same first-run
+      # gotcha as settings.json above: `touch config/activity.json` before
+      # your first `docker compose up` here.
+      - ./config/activity.json:${ACTIVITY_CONTAINER_PATH}
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.

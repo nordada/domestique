@@ -32,6 +32,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-webui-library-"));
   const configPath = join(configDir, "events.json");
   const settingsPath = join(configDir, "settings.json");
+  const activityPath = join(configDir, "activity.json");
   await fs.writeFile(
     configPath,
     JSON.stringify({
@@ -48,6 +49,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     libraryRoot,
     configPath,
     settingsPath,
+    activityPath,
     downloadsPath: "/nonexistent",
     webui,
   };
@@ -62,6 +64,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     baseUrl,
     configPath,
     settingsPath,
+    activityPath,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

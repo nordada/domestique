@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { updateStability, pollHotfolder, hotfolderConfigFromEnv, type HotfolderConfig } from "../src/hotfolder.js";
 import type { ServerOptions } from "../src/server.js";
 
@@ -147,7 +147,10 @@ async function makeScratch() {
 }
 
 function makeOpts(libraryRoot: string, configPath: string, settingsPath: string): ServerOptions {
-  return { port: 0, libraryRoot, configPath, settingsPath, webui: null };
+  // Scratch path in the same temp config dir - never the real DEFAULT_ACTIVITY_PATH,
+  // which would otherwise write into this repo's own config/activity.json.
+  const activityPath = join(dirname(configPath), "activity.json");
+  return { port: 0, libraryRoot, configPath, settingsPath, activityPath, downloadsPath: "/nonexistent", webui: null };
 }
 
 async function writeMinimalConfig(configPath: string) {

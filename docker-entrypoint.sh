@@ -11,17 +11,17 @@
 # don't change behavior on upgrade.
 #
 # What gets chowned automatically: only the config dir(s) holding
-# events.json/settings.json - tiny, so doing it every boot is cheap, and
-# settings.json MUST be owned by the app user (the app enforces owner-only
-# 0600 on it). The library and downloads mounts are deliberately never
-# touched: they can be terabytes, and ownership there is the host's
+# events.json/settings.json/activity.json - tiny, so doing it every boot is
+# cheap, and settings.json MUST be owned by the app user (the app enforces
+# owner-only 0600 on it). The library and downloads mounts are deliberately
+# never touched: they can be terabytes, and ownership there is the host's
 # business - see the README's "Running as a non-root user" section for the
 # one-time chown an existing install needs before switching PUID on.
 set -e
 
 if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}" ]; then
   PGID="${PGID:-$PUID}"
-  for f in "${CONFIG_PATH:-/app/config/events.json}" "${SETTINGS_PATH:-/app/config/settings.json}"; do
+  for f in "${CONFIG_PATH:-/app/config/events.json}" "${SETTINGS_PATH:-/app/config/settings.json}" "${ACTIVITY_PATH:-/app/config/activity.json}"; do
     chown -R "$PUID:$PGID" "$(dirname "$f")" 2>/dev/null || true
   done
   exec su-exec "$PUID:$PGID" "$@"

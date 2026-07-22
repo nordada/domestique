@@ -16,6 +16,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ensureSeeded } from "./fileseed.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ACTIVITY_PATH = join(__dirname, "..", "config", "activity.json");
+
 export interface ActivityEvent {
   timestamp: string;
   torrentName: string;
@@ -24,16 +32,60 @@ export interface ActivityEvent {
 }
 
 const MAX_EVENTS = 100;
-const events: ActivityEvent[] = [];
 
-/** Newest first. Capped at MAX_EVENTS, oldest evicted first. */
-export function recordActivity(event: ActivityEvent): void {
+// In-memory cache of whatever was last loaded from `path` below - avoids
+// re-reading the file on every single status poll, while still surviving a
+// container restart (a fresh process re-reads it once on first access).
+let events: ActivityEvent[] = [];
+let loadedFrom: string | null = null;
+
+function load(path: string): void {
+  if (loadedFrom === path) return;
+  loadedFrom = path;
+  // Same bind-mount-creates-an-empty-directory gotcha as config/settings.json
+  // (see fileseed.ts) applies here too, since this is bind-mounted the same
+  // way for persistence across container recreation, not just restarts.
+  ensureSeeded(path, () => "[]\n");
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    events = Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn(`[activity] failed to read persisted activity log at "${path}", starting empty: ${err}`);
+    events = [];
+  }
+}
+
+function persist(path: string): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(events, null, 2) + "\n", "utf-8");
+  } catch (err) {
+    // Activity logging is best-effort - never let a disk hiccup here fail
+    // the torrent-done/webui request that triggered it.
+    console.warn(`[activity] failed to persist activity log to "${path}": ${err}`);
+  }
+}
+
+/**
+ * Newest first. Capped at MAX_EVENTS, oldest evicted first. Persisted to
+ * disk (see DEFAULT_ACTIVITY_PATH / ACTIVITY_PATH) so the log survives a
+ * container restart - previously this was pure in-memory state and reset to
+ * empty on every restart, which made the Activity tab look confusingly
+ * sparse right after one (see the CA Appdata Backup/Restore incident this
+ * came up in).
+ */
+export function recordActivity(event: ActivityEvent, path: string = DEFAULT_ACTIVITY_PATH): void {
+  load(path);
   events.unshift(event);
   if (events.length > MAX_EVENTS) {
     events.length = MAX_EVENTS;
   }
+  persist(path);
 }
 
-export function getRecentActivity(): ActivityEvent[] {
+export function getRecentActivity(path: string = DEFAULT_ACTIVITY_PATH): ActivityEvent[] {
+  load(path);
   return events;
 }
+
+export { DEFAULT_ACTIVITY_PATH };

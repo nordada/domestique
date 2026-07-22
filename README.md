@@ -107,8 +107,10 @@ Transmission connection under Settings.
 
 **Recent activity:** the last ~100 completed-download events, whether they
 came from the Transmission webhook, the hot folder, or a manual upload.
-This list lives in memory only and resets if the container restarts; it's a
-log for your own peace of mind, not a database anything else depends on. A
+Persisted to `config/activity.json` (bind-mounted, same as `events.json`/
+`settings.json`) so it survives a container restart, not just process
+memory; it's a log for your own peace of mind, not a database anything else
+depends on. A
 ✅ line means a file was copied into the library, and a ⚠️ means something
 worth a look (an auto-created show, a possible resolution upgrade filed
 alongside an existing one, a failed Plex refresh); those get an orange
@@ -505,14 +507,15 @@ and these env vars are ignored on every later boot. Delete
 `config/settings.json` if you want `.env` to reseed it fresh.
 
 **Before your very first `docker compose up` here**, run `touch
-config/settings.json` (unlike `config/events.json`, this file isn't shipped
-in the repo). Skipping this is harmless on most setups, but if nothing
-exists at that path on the host yet, Docker creates an empty *directory*
-there instead of a file - a well-known bind-mount gotcha the app can't clean
-up on its own, since by then it's the container's actual mount point. If
-you hit this (crash-looping with an `EBUSY`-related error mentioning
-`settings.json`), stop the container, `rmdir config/settings.json` on the
-host, `touch` an empty file in its place, then start it again.
+config/settings.json config/activity.json` (unlike `config/events.json`,
+neither of these ships in the repo). Skipping this is harmless on most
+setups, but if nothing exists at that path on the host yet, Docker creates
+an empty *directory* there instead of a file - a well-known bind-mount
+gotcha the app can't clean up on its own, since by then it's the
+container's actual mount point. If you hit this (crash-looping with an
+`EBUSY`-related error mentioning `settings.json` or `activity.json`), stop
+the container, `rmdir` the affected path on the host, `touch` an empty file
+in its place, then start it again.
 
 By default Plex only notices new files on its own scan schedule. Set these
 in `.env` to have the archiver tell Plex to rescan just the one season
@@ -791,9 +794,9 @@ On other platforms pick whatever UID/GID owns your media files (check with
 run-as-root behavior, so upgrades don't change anything until you opt in.
 
 What happens at startup with `PUID` set: the entrypoint fixes ownership of
-the two bind-mounted config files (`events.json`, `settings.json`), which
-are tiny and must be writable by the app, then drops privileges before
-Node starts. The library and downloads mounts are deliberately never
+the bind-mounted config files (`events.json`, `settings.json`,
+`activity.json`), which are tiny and must be writable by the app, then
+drops privileges before Node starts. The library and downloads mounts are deliberately never
 chowned automatically (they can be terabytes, and ownership there is your
 call), which leads to the one manual step:
 

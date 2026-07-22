@@ -396,7 +396,7 @@ export async function handleWebUiRequest(
     }
 
     if (req.method === "GET" && url === "/api/activity") {
-      sendJson(res, 200, { events: getRecentActivity() });
+      sendJson(res, 200, { events: getRecentActivity(opts.activityPath) });
       return true;
     }
 
@@ -413,12 +413,15 @@ export async function handleWebUiRequest(
       const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
       if (!settings.transmission) {
         const message = "Transmission isn't configured - set its RPC URL in Settings before adding torrents.";
-        recordActivity({
-          timestamp: new Date().toISOString(),
-          torrentName: name,
-          lines: [`❌ ${message}`],
-          reviewWorthy: true,
-        });
+        recordActivity(
+          {
+            timestamp: new Date().toISOString(),
+            torrentName: name,
+            lines: [`❌ ${message}`],
+            reviewWorthy: true,
+          },
+          opts.activityPath
+        );
         sendJson(res, 400, { ok: false, error: message });
         return true;
       }
@@ -446,21 +449,27 @@ export async function handleWebUiRequest(
           lines.push("⚠️ Added, but could not confirm Transmission registered it after polling - check Transmission directly.");
         }
 
-        recordActivity({
-          timestamp: new Date().toISOString(),
-          torrentName: added.name,
-          lines,
-          reviewWorthy: added.duplicate || !confirmed || Boolean(confirmed?.error),
-        });
+        recordActivity(
+          {
+            timestamp: new Date().toISOString(),
+            torrentName: added.name,
+            lines,
+            reviewWorthy: added.duplicate || !confirmed || Boolean(confirmed?.error),
+          },
+          opts.activityPath
+        );
         sendJson(res, 200, { ok: true, added, confirmed: Boolean(confirmed), status: confirmed });
       } catch (err) {
         const message = `Failed to add torrent to Transmission: ${err}`;
-        recordActivity({
-          timestamp: new Date().toISOString(),
-          torrentName: name,
-          lines: [`❌ ${message}`],
-          reviewWorthy: true,
-        });
+        recordActivity(
+          {
+            timestamp: new Date().toISOString(),
+            torrentName: name,
+            lines: [`❌ ${message}`],
+            reviewWorthy: true,
+          },
+          opts.activityPath
+        );
         sendJson(res, 500, { ok: false, error: message });
       }
       return true;

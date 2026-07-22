@@ -27,7 +27,7 @@ import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems, isPathWithin } from "./fileops.js";
 import { refreshPlexFolder } from "./plex.js";
 import { sendDiscordNotification } from "./discord.js";
-import { recordActivity } from "./activity.js";
+import { recordActivity, DEFAULT_ACTIVITY_PATH } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
 import { readBody, BodyTooLargeError } from "./body.js";
 
@@ -44,6 +44,7 @@ export interface ServerOptions {
   libraryRoot: string;
   configPath: string;
   settingsPath: string;
+  activityPath: string;
   /** In-container path the downloads/seeding share is mounted at (see docker-compose.yml) - used only to check reachability for the header status gauge, not read from otherwise. */
   downloadsPath: string;
   webui: WebUiConfig | null;
@@ -160,12 +161,15 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
     }
   }
 
-  recordActivity({
-    timestamp: new Date().toISOString(),
-    torrentName: payload.name,
-    lines: summaryLines,
-    reviewWorthy,
-  });
+  recordActivity(
+    {
+      timestamp: new Date().toISOString(),
+      torrentName: payload.name,
+      lines: summaryLines,
+      reviewWorthy,
+    },
+    opts.activityPath
+  );
 
   return results;
 }
@@ -360,6 +364,7 @@ export function optionsFromEnv(): ServerOptions {
   const libraryRoot = process.env.LIBRARY_ROOT;
   const configPath = process.env.CONFIG_PATH || DEFAULT_CONFIG_PATH;
   const settingsPath = process.env.SETTINGS_PATH || DEFAULT_SETTINGS_PATH;
+  const activityPath = process.env.ACTIVITY_PATH || DEFAULT_ACTIVITY_PATH;
   // Fixed by convention (see docker-compose.yml's DOWNLOADS_DIR mount and
   // the README) rather than DOWNLOADS_DIR itself, which is only ever a host
   // path - DOWNLOADS_PATH lets this be overridden if that mount target
@@ -372,5 +377,5 @@ export function optionsFromEnv(): ServerOptions {
 
   const webui = webUiConfigFromEnv();
 
-  return { port, libraryRoot, configPath, settingsPath, downloadsPath, webui };
+  return { port, libraryRoot, configPath, settingsPath, activityPath, downloadsPath, webui };
 }
