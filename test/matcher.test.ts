@@ -82,3 +82,15 @@ test("auto-creates an unrecognized race with a stage number as stage-race, not o
   assert.equal(m.autoCreated, true);
   assert.equal(m.show.type, "stage-race");
 });
+
+test("auto-creates unrecognized non-race content with a generic episode number as stage-race, not one-day", () => {
+  // Regression test: real incident with "Tour de Celeb - Episode N" (not a
+  // bike race at all) - a one-day auto-create hardcodes E01 for every file,
+  // so episodes 1/3/4 all collapsed onto the file episode 2 had already
+  // claimed and were silently skipped as duplicates.
+  const config = freshConfig();
+  const p = parseName("Tour de Celeb - Episode 4");
+  const m = matchShow(p, config);
+  assert.equal(m.autoCreated, true);
+  assert.equal(m.show.type, "stage-race");
+});

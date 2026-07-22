@@ -106,6 +106,21 @@ test("normalizes gender/age plurals and merges split U23 tokens", () => {
   assert.ok(p.tokenSet.has("race"));
 });
 
+test("extracts a generic episode number for non-stage-race content, distinct from stageNum", () => {
+  const p = parseName("Tour de Celeb - Episode 4");
+  assert.equal(p.episodeNum, 4);
+  assert.equal(p.stageNum, null);
+  assert.ok(!p.tokens.includes("episode"));
+  assert.ok(!p.tokens.includes("4"));
+
+  const abbrev = parseName("Some.Show.Ep04.1080p");
+  assert.equal(abbrev.episodeNum, 4);
+
+  // A real stage race never sets episodeNum just because it has a number in it.
+  const stage = parseName(REAL_SOURCE_NAMES.tdfHighlights);
+  assert.equal(stage.episodeNum, null);
+});
+
 test("strips apostrophes so D'Italia / l'Ain normalize to single tokens", () => {
   const p = parseName("Giro D'Italia");
   assert.ok(p.tokenSet.has("ditalia"));

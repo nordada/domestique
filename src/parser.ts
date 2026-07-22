@@ -24,6 +24,8 @@ export interface ParsedName {
   yearWasExplicit: boolean;
   /** stage number, e.g. 4 for "Stage-04" */
   stageNum: number | null;
+  /** generic episode number, e.g. 4 for "Episode 4" or "Ep04" - for non-stage-race content (see parseName) */
+  episodeNum: number | null;
   /** part number within a multi-part file, e.g. 2 for "(Part-2-of-3)" */
   partNum: number | null;
   /** total part count, when known (present in "(Part-N-of-M)" style, absent in bare "PartN" style) */
@@ -118,6 +120,20 @@ export function parseName(rawInput: string): ParsedName {
   working = stageExtraction.working;
   const stageNum = stageExtraction.match ? parseInt(stageExtraction.match[1], 10) : null;
 
+  // Generic episode number for non-stage-race content: "Episode 4", "Episode-04",
+  // "Ep4" - kept separate from stageNum (a real bike race says "Stage", never
+  // "Episode") so auto-created stage-race shows never see this fire by
+  // accident, but a multi-episode show that isn't a stage race still gets a
+  // real per-file episode number instead of every file collapsing onto E01.
+  const episodeExtraction = extractAndRemove(working, /episode[-_. ]?0*(\d+)/i);
+  working = episodeExtraction.working;
+  let episodeNum = episodeExtraction.match ? parseInt(episodeExtraction.match[1], 10) : null;
+  if (episodeNum === null) {
+    const epAbbrevExtraction = extractAndRemove(working, /\bep[-_. ]?0*(\d+)\b/i);
+    working = epAbbrevExtraction.working;
+    episodeNum = epAbbrevExtraction.match ? parseInt(epAbbrevExtraction.match[1], 10) : null;
+  }
+
   // Part-with-total: "(Part-1-of-2)", "Part_1_of_2"
   const partOfExtraction = extractAndRemove(
     working,
@@ -180,6 +196,7 @@ export function parseName(rawInput: string): ParsedName {
     year,
     yearWasExplicit,
     stageNum,
+    episodeNum,
     partNum,
     partTotal,
     resolution,
@@ -206,6 +223,7 @@ export function mergeParsed(folder: ParsedName, file: ParsedName): ParsedName {
     year: file.yearWasExplicit ? file.year : folder.yearWasExplicit ? folder.year : file.year,
     yearWasExplicit: file.yearWasExplicit || folder.yearWasExplicit,
     stageNum: file.stageNum ?? folder.stageNum,
+    episodeNum: file.episodeNum ?? folder.episodeNum,
     partNum: file.partNum ?? folder.partNum,
     partTotal: file.partTotal ?? folder.partTotal,
     resolution: file.resolution ?? folder.resolution,

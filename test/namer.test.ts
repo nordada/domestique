@@ -50,6 +50,18 @@ test("no-year source file warns and defaults to the current year", async () => {
   assert.equal(plan.destFilename, `Tour de France - S${new Date().getFullYear()}E01 - Stage 1.mp4`);
 });
 
+test("auto-created non-race show with a generic episode number files distinct episodes, titled \"Episode N\"", async () => {
+  // Regression test for the real "Tour de Celeb" incident: episodes 1-4
+  // must land as their own distinct files, not all collapse onto E01.
+  const plan2 = await process(null, "Tour de Celeb - Episode 2");
+  const plan4 = await process(null, "Tour de Celeb - Episode 4");
+  const year = new Date().getFullYear();
+  assert.equal(plan2.destFilename, `Tour De Celeb - S${year}E02 - Episode 2.mp4`);
+  assert.equal(plan4.destFilename, `Tour De Celeb - S${year}E04 - Episode 4.mp4`);
+  assert.equal(plan2.episode, 2);
+  assert.equal(plan4.episode, 4);
+});
+
 test("Worlds Men Road Race hits fixed category E01", async () => {
   const plan = await process(null, REAL_SOURCE_NAMES.worldsMenRoadRaceUnderscore);
   assert.equal(plan.destDir, "World Championships/Season 2025");

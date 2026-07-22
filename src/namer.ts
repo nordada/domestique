@@ -149,26 +149,26 @@ export async function buildDestination(
           warning,
         };
       }
-      if (parsed.stageNum === null) {
+      if (parsed.stageNum === null && parsed.episodeNum === null) {
         return {
           destDir,
           destFilename: buildFilename(prefix, parsed.year, 1, null, parsed.partNum, parsed.partTotal, ext),
           episode: 1,
-          warning: `No stage number found in "${parsed.raw}" for stage-race show "${show.id}"; defaulted to E01 with no title.`,
+          warning: `No stage or episode number found in "${parsed.raw}" for stage-race show "${show.id}"; defaulted to E01 with no title.`,
         };
       }
+      // A real bike race always says "Stage"; a non-race multi-episode show
+      // auto-created under this same type (see matcher.ts) says "Episode"
+      // instead - stageNum wins if somehow both are present.
+      const num = parsed.stageNum ?? parsed.episodeNum!;
+      const label =
+        parsed.stageNum !== null
+          ? `Stage ${parsed.stageNum}${parsed.isHighlights ? " Highlights" : ""}`
+          : `Episode ${parsed.episodeNum}`;
       return {
         destDir,
-        destFilename: buildFilename(
-          prefix,
-          parsed.year,
-          parsed.stageNum,
-          `Stage ${parsed.stageNum}${parsed.isHighlights ? " Highlights" : ""}`,
-          parsed.partNum,
-          parsed.partTotal,
-          ext
-        ),
-        episode: parsed.stageNum,
+        destFilename: buildFilename(prefix, parsed.year, num, label, parsed.partNum, parsed.partTotal, ext),
+        episode: num,
         warning,
       };
     }
