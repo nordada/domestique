@@ -18,6 +18,11 @@ set -euo pipefail
 # container's non-root PUID user on the server. Granting read (and
 # directory-traversal x) to everyone on transfer prevents that without
 # stripping any executable bits.
+#
+# --exclude 'config/events.json': your server's copy is the live, user-edited
+# race list (grown via the web UI and auto-create, not the repo's shipped
+# starter default) - it should only ever be seeded once on first boot, same
+# as settings.json/activity.json, never overwritten by a code deploy.
 rsync -av \
   --chmod=ugo+rX \
   --exclude 'node_modules' \
@@ -25,4 +30,5 @@ rsync -av \
   --exclude '.git' \
   --exclude '.DS_Store' \
   --exclude '.claude' \
+  --exclude 'config/events.json' \
   ~/projects/domestique/ user@YOUR-SERVER-IP:/path/to/domestique/
