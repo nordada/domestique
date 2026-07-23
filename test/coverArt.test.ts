@@ -395,3 +395,48 @@ test("POST /api/cover-art/regenerate fetches Plex's ratingKey index once for the
     await new Promise<void>((resolve) => plexStub.close(() => resolve()));
   }
 });
+
+test("POST /api/cover-art/regenerate rejects a second concurrent request while one is already running", async () => {
+  // A real incident this guards against: overlapping regenerate-all runs
+  // (from impatient repeat clicks with no disable-while-running guard)
+  // piled up enough Plex traffic to make Plex itself unresponsive. A
+  // deliberately slow /all response keeps the first request in flight long
+  // enough to prove a second one lands while it's still running, not after.
+  const slowPlexStub = createServer((req, res) => {
+    const url = new URL(req.url ?? "", "http://internal");
+    if (url.pathname.endsWith("/all")) {
+      setTimeout(() => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ MediaContainer: { Metadata: [] } }));
+      }, 300);
+      return;
+    }
+    res.writeHead(200);
+    res.end();
+  });
+  await new Promise<void>((resolve) => slowPlexStub.listen(0, resolve));
+  const plexAddress = slowPlexStub.address();
+  if (plexAddress === null || typeof plexAddress === "string") throw new Error("expected a bound port");
+
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ plex: { url: `http://127.0.0.1:${plexAddress.port}`, sectionId: "35" }, plexToken: "fake-token" }),
+    });
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+
+    const first = fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+    await new Promise((r) => setTimeout(r, 50)); // let the first request actually start before firing the second
+    const second = await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+    assert.equal(second.status, 409);
+
+    const firstRes = await first;
+    assert.equal(firstRes.status, 200); // the original request completes normally, unaffected by the rejected second one
+  } finally {
+    await close();
+    await new Promise<void>((resolve) => slowPlexStub.close(() => resolve()));
+  }
+});

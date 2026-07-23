@@ -208,6 +208,21 @@ export async function refreshPlexForShows(
 }
 
 /**
+ * Guards against overlapping regenerate-all runs - a real incident this
+ * closes: the web UI's "Regenerate all posters" button had no
+ * disable-while-running guard, so impatient repeat clicks (or multiple
+ * open tabs) could fire several full regenerate-all requests concurrently.
+ * Each one independently looped every logo'd show and force-refreshed it
+ * in Plex, and the pile-up was enough to make Plex itself unresponsive to
+ * everything, including the trivial /identity liveness check the header
+ * status gauge uses. A second request while one is already in progress is
+ * now rejected outright (409) rather than starting another overlapping
+ * run - this is server-side defense in depth, independent of the client-
+ * side button-disable fix in public/index.html.
+ */
+let regenerateInProgress = false;
+
+/**
  * Regenerating writes new poster.jpg files to disk, but Plex won't pick
  * them up on its own until its next scheduled library scan - which can be
  * hours away, the same class of "silently stale until someone notices"
@@ -217,21 +232,30 @@ export async function refreshPlexForShows(
  * one ratingKey lookup for the whole run.
  */
 async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Promise<void> {
-  const config = loadConfig(opts.configPath);
-  const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
-  const results = await regenerateAllCoverArt(config, settings.coverArt, opts.libraryRoot);
-
-  if (settings.plex) {
-    const writtenShows = results
-      .filter((r) => r.result.status === "written")
-      .map((r) => config.shows.find((s) => s.id === r.id))
-      .filter((s): s is ShowConfig => Boolean(s));
-    if (writtenShows.length > 0) {
-      await refreshPlexForShows(settings.plex, writtenShows, opts.libraryRoot);
-    }
+  if (regenerateInProgress) {
+    sendJson(res, 409, { error: "a regenerate-all run is already in progress - wait for it to finish" });
+    return;
   }
+  regenerateInProgress = true;
+  try {
+    const config = loadConfig(opts.configPath);
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    const results = await regenerateAllCoverArt(config, settings.coverArt, opts.libraryRoot);
 
-  sendJson(res, 200, { ok: true, results });
+    if (settings.plex) {
+      const writtenShows = results
+        .filter((r) => r.result.status === "written")
+        .map((r) => config.shows.find((s) => s.id === r.id))
+        .filter((s): s is ShowConfig => Boolean(s));
+      if (writtenShows.length > 0) {
+        await refreshPlexForShows(settings.plex, writtenShows, opts.libraryRoot);
+      }
+    }
+
+    sendJson(res, 200, { ok: true, results });
+  } finally {
+    regenerateInProgress = false;
+  }
 }
 
 /**

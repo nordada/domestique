@@ -1587,8 +1587,16 @@ document.getElementById("s-accent-color").addEventListener("input", (e) => apply
 document.getElementById("s-coverart-bg1").addEventListener("input", updateCoverArtSwatches);
 document.getElementById("s-coverart-bg2").addEventListener("input", updateCoverArtSwatches);
 document.getElementById("s-coverart-regenerate-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("s-coverart-regenerate-btn");
   const statusEl = document.getElementById("coverart-regenerate-status");
-  statusEl.textContent = "Regenerating…";
+  // Disabled for the whole request, not just visually re-labeled - a real
+  // incident happened without this: impatient repeat clicks fired several
+  // full regenerate-all requests concurrently, which piled up enough Plex
+  // traffic to make Plex itself unresponsive. The server also rejects a
+  // second concurrent request outright now, but this is the first line of
+  // defense.
+  btn.disabled = true;
+  statusEl.textContent = "Regenerating… this can take a while for a lot of shows, please wait.";
   statusEl.className = "status-msg";
   try {
     const data = await api("/api/cover-art/regenerate", { method: "POST" });
@@ -1601,6 +1609,8 @@ document.getElementById("s-coverart-regenerate-btn").addEventListener("click", a
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;
     statusEl.className = "status-msg err";
+  } finally {
+    btn.disabled = false;
   }
 });
 document.getElementById("add-torrent-btn").addEventListener("click", () => document.getElementById("add-torrent-input").click());
