@@ -224,7 +224,6 @@ test("saveSettings defaults coverArt to enabled with the built-in colors, and ro
     backgroundColor: "#14213d",
     backgroundColor2: null,
     logoScale: 0.72,
-    fallbackTextColor: "#ffffff",
   });
 
   const saved = saveSettings(
@@ -234,7 +233,6 @@ test("saveSettings defaults coverArt to enabled with the built-in colors, and ro
         backgroundColor: "#ABCDEF",
         backgroundColor2: "#123456",
         logoScale: 0.9,
-        fallbackTextColor: "#000000",
       },
     },
     "/library",
@@ -245,7 +243,6 @@ test("saveSettings defaults coverArt to enabled with the built-in colors, and ro
     backgroundColor: "#ABCDEF",
     backgroundColor2: "#123456",
     logoScale: 0.9,
-    fallbackTextColor: "#000000",
   });
 });
 
@@ -259,7 +256,6 @@ test("saveSettings falls back invalid coverArt colors to defaults, clamps logoSc
         backgroundColor: "not-a-hex",
         backgroundColor2: "also-not-a-hex",
         logoScale: 5,
-        fallbackTextColor: "#zzz",
       },
     },
     "/library",
@@ -268,7 +264,6 @@ test("saveSettings falls back invalid coverArt colors to defaults, clamps logoSc
   assert.equal(saved.backgroundColor, "#14213d");
   assert.equal(saved.backgroundColor2, null);
   assert.equal(saved.logoScale, 1.0);
-  assert.equal(saved.fallbackTextColor, "#ffffff");
 
   assert.equal(
     saveSettings({ coverArt: { logoScale: 0.01 } }, "/library", settingsPath).coverArt.logoScale,

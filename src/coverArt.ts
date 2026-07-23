@@ -203,29 +203,6 @@ export interface CoverArtResult {
   error?: string;
 }
 
-function escapeXml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-/** Naive greedy word-wrap - sharp has no font-layout API, so text always goes through a hand-wrapped SVG buffer. */
-function wrapTitle(title: string, maxCharsPerLine: number, maxLines: number): string[] {
-  const words = title.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > maxCharsPerLine && current) {
-      lines.push(current);
-      current = word;
-      if (lines.length === maxLines) break;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current && lines.length < maxLines) lines.push(current);
-  return lines;
-}
-
 function backgroundSvg(width: number, height: number, colorFrom: string, colorTo: string | null): string {
   if (!colorTo) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="${colorFrom}"/></svg>`;
@@ -239,26 +216,13 @@ function backgroundSvg(width: number, height: number, colorFrom: string, colorTo
   </svg>`;
 }
 
-function fallbackTextSvg(width: number, height: number, title: string, textColor: string): string {
-  const maxLines = 4;
-  const lines = wrapTitle(title, 14, maxLines);
-  const fontSize = lines.length > 2 ? 64 : 84;
-  const lineHeight = fontSize * 1.2;
-  const startY = height / 2 - ((lines.length - 1) * lineHeight) / 2;
-  const tspans = lines
-    .map((line, i) => `<tspan x="${width / 2}" y="${startY + i * lineHeight}">${escapeXml(line)}</tspan>`)
-    .join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-    <text font-family="sans-serif" font-weight="700" font-size="${fontSize}" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${tspans}</text>
-  </svg>`;
-}
-
 /**
- * Generates a static Plex poster for a show from its uploaded logo (or a
- * typography fallback when none is set), written to the show-root folder
- * (one level above any "Season NNNN" folder) so it's reused across every
- * season/year rather than regenerated per-year - the logo represents the
- * race brand, not one edition of it.
+ * Generates a static Plex poster for a show from its uploaded logo, written
+ * to the show-root folder (one level above any "Season NNNN" folder) so
+ * it's reused across every season/year rather than regenerated per-year -
+ * the logo represents the race brand, not one edition of it. A show with no
+ * uploaded logo is a deliberate no-op (skipped, not a generic text
+ * placeholder) - cover art is purely opt-in per show via the Events tab.
  */
 export async function generateCoverArt(
   show: ShowConfig,
@@ -268,22 +232,24 @@ export async function generateCoverArt(
 ): Promise<CoverArtResult> {
   const showRootFolder = join(libraryRoot, show.folderName);
   const posterPath = join(showRootFolder, "poster.jpg");
+  const logo = logoPath(libraryRoot, show.id);
 
+  if (!existsSync(logo)) {
+    return { status: "skipped", posterPath };
+  }
   if (!opts.force && existsSync(posterPath)) {
     return { status: "skipped", posterPath };
   }
 
   try {
     const bgSvg = backgroundSvg(POSTER_WIDTH, POSTER_HEIGHT, coverArt.backgroundColor, coverArt.backgroundColor2);
-    const overlayInput = existsSync(logoPath(libraryRoot, show.id))
-      ? await sharp(logoPath(libraryRoot, show.id))
-          .resize({
-            width: Math.round(Math.min(POSTER_WIDTH, POSTER_HEIGHT) * coverArt.logoScale),
-            height: Math.round(Math.min(POSTER_WIDTH, POSTER_HEIGHT) * coverArt.logoScale),
-            fit: "inside",
-          })
-          .toBuffer()
-      : Buffer.from(fallbackTextSvg(POSTER_WIDTH, POSTER_HEIGHT, show.folderName, coverArt.fallbackTextColor));
+    const overlayInput = await sharp(logo)
+      .resize({
+        width: Math.round(Math.min(POSTER_WIDTH, POSTER_HEIGHT) * coverArt.logoScale),
+        height: Math.round(Math.min(POSTER_WIDTH, POSTER_HEIGHT) * coverArt.logoScale),
+        fit: "inside",
+      })
+      .toBuffer();
 
     const jpegBuffer = await sharp(Buffer.from(bgSvg))
       .composite([{ input: overlayInput, gravity: "center" }])

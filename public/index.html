@@ -569,11 +569,12 @@
 
   <h3>Cover art</h3>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Generates a Plex poster (poster.jpg) for each show from its uploaded
+    Generates a Plex poster (poster.jpg) for a show once it has an uploaded
     logo (see the Events tab), since most niche races aren't recognized by
-    Plex's own metadata agents. These colors are independent of the accent
-    color above - that's this web UI's own theme; this art is what shows up
-    inside Plex.
+    Plex's own metadata agents. Purely opt-in per show - a show with no
+    logo is left alone entirely, no placeholder poster is generated for it.
+    These colors are independent of the accent color above - that's this
+    web UI's own theme; this art is what shows up inside Plex.
   </p>
   <label class="clear-toggle" style="margin-top:-0.4rem;">
     <input type="checkbox" id="s-coverart-enabled">
@@ -591,9 +592,6 @@
   </div>
   <label><span>Logo size (fraction of the poster it's scaled to fit within, 0.2-1.0)</span>
     <input type="number" id="s-coverart-logo-scale" placeholder="0.72" min="0.2" max="1" step="0.05" style="max-width:10rem;">
-  </label>
-  <label><span>Fallback text color (used for shows with no logo uploaded)</span>
-    <input type="text" id="s-coverart-fallback-text" placeholder="#ffffff" style="max-width:12rem;">
   </label>
   <div class="actions">
     <button id="s-coverart-regenerate-btn">Regenerate all posters</button>
@@ -1049,7 +1047,6 @@ async function loadSettingsPanel() {
     document.getElementById("s-coverart-bg1").value = s.coverArt.backgroundColor;
     document.getElementById("s-coverart-bg2").value = s.coverArt.backgroundColor2 || "";
     document.getElementById("s-coverart-logo-scale").value = s.coverArt.logoScale;
-    document.getElementById("s-coverart-fallback-text").value = s.coverArt.fallbackTextColor;
     updateCoverArtSwatches();
     document.getElementById("s-webhook-secret").placeholder = s.webhookSecretSet ? "already set, leave blank to keep" : "not set";
     document.getElementById("s-lockout-threshold").value = s.loginLockoutThreshold;
@@ -1093,7 +1090,6 @@ async function saveSettingsPanel() {
       backgroundColor: document.getElementById("s-coverart-bg1").value.trim(),
       backgroundColor2: document.getElementById("s-coverart-bg2").value.trim(),
       logoScale: parseFloat(document.getElementById("s-coverart-logo-scale").value) || undefined,
-      fallbackTextColor: document.getElementById("s-coverart-fallback-text").value.trim(),
     },
     loginLockoutThreshold: parseInt(document.getElementById("s-lockout-threshold").value, 10) || 5,
     loginLockoutSeconds: parseInt(document.getElementById("s-lockout-seconds").value, 10) || 60,

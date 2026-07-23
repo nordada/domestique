@@ -45,7 +45,9 @@ export interface IndexerSettings {
  * Domestique's own web-UI theme, this art is displayed inside Plex, a
  * completely different surface. Non-nullable (unlike the optional
  * plex/discord/etc integrations) since this is a built-in feature with
- * sane defaults, not an opt-in external connection.
+ * sane defaults, not an opt-in external connection. Purely per-show opt-in:
+ * a show with no uploaded logo never gets a poster, so there's no fallback
+ * text color to configure here.
  */
 export interface CoverArtSettings {
   enabled: boolean;
@@ -55,8 +57,6 @@ export interface CoverArtSettings {
   backgroundColor2: string | null;
   /** 0.2-1.0, fraction of the poster's shorter dimension an uploaded logo is scaled to fit within. */
   logoScale: number;
-  /** 6-digit hex used for the show-title text rendered when a show has no uploaded logo. */
-  fallbackTextColor: string;
 }
 
 export interface Settings {
@@ -277,7 +277,6 @@ function normalizeIndexer(input: unknown): IndexerSettings | null {
 }
 
 const DEFAULT_COVER_ART_BACKGROUND = "#14213d";
-const DEFAULT_COVER_ART_FALLBACK_TEXT = "#ffffff";
 const DEFAULT_COVER_ART_LOGO_SCALE = 0.72;
 const MIN_COVER_ART_LOGO_SCALE = 0.2;
 const MAX_COVER_ART_LOGO_SCALE = 1.0;
@@ -295,7 +294,6 @@ function normalizeCoverArt(input: unknown): CoverArtSettings {
     backgroundColor: normalizeHexColor(raw.backgroundColor, DEFAULT_COVER_ART_BACKGROUND),
     backgroundColor2: isHexColor(raw.backgroundColor2) ? (raw.backgroundColor2 as string).trim() : null,
     logoScale: normalizeCoverArtLogoScale(raw.logoScale),
-    fallbackTextColor: normalizeHexColor(raw.fallbackTextColor, DEFAULT_COVER_ART_FALLBACK_TEXT),
   };
 }
 

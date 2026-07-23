@@ -14,7 +14,6 @@ const DEFAULT_COVER_ART: CoverArtSettings = {
   backgroundColor: "#14213d",
   backgroundColor2: null,
   logoScale: 0.72,
-  fallbackTextColor: "#ffffff",
 };
 
 const TDF: ShowConfig = {
@@ -32,12 +31,25 @@ async function tinyPng(color = "#ff0000"): Promise<Buffer> {
   return sharp({ create: { width: 40, height: 40, channels: 3, background: color } }).png().toBuffer();
 }
 
-test("generateCoverArt writes a 1000x1500 JPEG using the fallback title text when no logo is uploaded", async () => {
+async function stageLogo(libraryRoot: string, showId: string, color?: string): Promise<void> {
+  const logoDir = join(libraryRoot, ".cover-art", "logos");
+  await fs.mkdir(logoDir, { recursive: true });
+  await fs.writeFile(join(logoDir, `${showId}.png`), await tinyPng(color));
+}
+
+test("generateCoverArt is a no-op for a show with no uploaded logo - no placeholder poster is generated", async () => {
   const libraryRoot = await makeScratchLibrary();
   const result = await generateCoverArt(TDF, DEFAULT_COVER_ART, libraryRoot);
-  assert.equal(result.status, "written");
-  assert.ok(result.posterPath);
+  assert.equal(result.status, "skipped");
+  await assert.rejects(fs.stat(join(libraryRoot, "Tour de France", "poster.jpg")));
+});
 
+test("generateCoverArt writes a 1000x1500 JPEG compositing the uploaded logo once one exists on disk", async () => {
+  const libraryRoot = await makeScratchLibrary();
+  await stageLogo(libraryRoot, TDF.id);
+
+  const result = await generateCoverArt(TDF, DEFAULT_COVER_ART, libraryRoot);
+  assert.equal(result.status, "written");
   const meta = await sharp(result.posterPath!).metadata();
   assert.equal(meta.width, 1000);
   assert.equal(meta.height, 1500);
@@ -48,21 +60,10 @@ test("generateCoverArt writes a 1000x1500 JPEG using the fallback title text whe
   assert.deepEqual(files.sort(), ["poster.jpg"]);
 });
 
-test("generateCoverArt composites an uploaded logo instead of the fallback text when one exists on disk", async () => {
-  const libraryRoot = await makeScratchLibrary();
-  const logoDir = join(libraryRoot, ".cover-art", "logos");
-  await fs.mkdir(logoDir, { recursive: true });
-  await fs.writeFile(join(logoDir, `${TDF.id}.png`), await tinyPng());
-
-  const result = await generateCoverArt(TDF, DEFAULT_COVER_ART, libraryRoot);
-  assert.equal(result.status, "written");
-  const meta = await sharp(result.posterPath!).metadata();
-  assert.equal(meta.width, 1000);
-  assert.equal(meta.height, 1500);
-});
-
 test("generateCoverArt skips an already-existing poster unless force is set", async () => {
   const libraryRoot = await makeScratchLibrary();
+  await stageLogo(libraryRoot, TDF.id);
+
   const first = await generateCoverArt(TDF, DEFAULT_COVER_ART, libraryRoot);
   assert.equal(first.status, "written");
   const firstStat = await fs.stat(first.posterPath!);
@@ -77,14 +78,17 @@ test("generateCoverArt skips an already-existing poster unless force is set", as
   assert.ok(forcedStat.mtimeMs >= firstStat.mtimeMs);
 });
 
-test("regenerateAllCoverArt force-regenerates a poster for every configured show", async () => {
+test("regenerateAllCoverArt only writes a poster for shows with an uploaded logo, force or not", async () => {
   const libraryRoot = await makeScratchLibrary();
   const giro: ShowConfig = { id: "giro", folderName: "Giro D'Italia", matchKeywords: ["giro"], type: "stage-race" };
+  await stageLogo(libraryRoot, TDF.id); // only tdf has a logo - giro does not
+
   const results = await regenerateAllCoverArt({ shows: [TDF, giro] }, DEFAULT_COVER_ART, libraryRoot);
   assert.equal(results.length, 2);
-  assert.ok(results.every((r) => r.result.status === "written"));
-  assert.ok(await fs.stat(join(libraryRoot, "Tour de France", "poster.jpg")));
-  assert.ok(await fs.stat(join(libraryRoot, "Giro D'Italia", "poster.jpg")));
+  assert.equal(results.find((r) => r.id === "tdf")?.result.status, "written");
+  assert.equal(results.find((r) => r.id === "giro")?.result.status, "skipped");
+  await assert.doesNotReject(fs.stat(join(libraryRoot, "Tour de France", "poster.jpg")));
+  await assert.rejects(fs.stat(join(libraryRoot, "Giro D'Italia", "poster.jpg")));
 });
 
 async function makeScratchServer(webui: { password: string; username?: string } | null) {
@@ -206,12 +210,22 @@ test("GET /api/cover-art/logo 404s when no logo has been set for a real show", a
   }
 });
 
-test("POST /api/cover-art/regenerate force-regenerates posters for every configured show", async () => {
+test("POST /api/cover-art/regenerate skips a show with no logo, and force-regenerates one that has one", async () => {
   const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
   try {
+    const auth = authHeader("correct-password");
+
+    // No logo uploaded yet - regenerate should be a no-op for "tdf".
+    const beforeRes = await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+    const beforeBody = (await beforeRes.json()) as { results: Array<{ id: string; result: { status: string } }> };
+    assert.equal(beforeBody.results[0].result.status, "skipped");
+    await assert.rejects(fs.stat(join(libraryRoot, "Tour de France", "poster.jpg")));
+
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+
     const res = await fetch(`${baseUrl}/api/cover-art/regenerate`, {
       method: "POST",
-      headers: { Authorization: authHeader("correct-password") },
+      headers: { Authorization: auth },
     });
     assert.equal(res.status, 200);
     const body = (await res.json()) as { ok: boolean; results: Array<{ id: string; result: { status: string } }> };

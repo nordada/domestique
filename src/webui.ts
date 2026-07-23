@@ -575,7 +575,6 @@ export async function handleWebUiRequest(
           backgroundColor?: string;
           backgroundColor2?: string;
           logoScale?: number;
-          fallbackTextColor?: string;
         };
         accentColor?: string;
         statusPollIntervalMs?: number;

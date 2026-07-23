@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import { createApp, type ServerOptions } from "../src/server.js";
 import { sanitizeName } from "../src/upload.js";
 
@@ -84,10 +85,30 @@ test("POST /api/upload/file archives a single-file upload and cleans up the stag
   }
 });
 
-test("a successful archive generates the show's cover-art poster once, and a later archive for the same show does not rewrite it", async () => {
+test("an archive for a show with no uploaded logo does not generate a cover-art poster", async () => {
+  const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    await fetch(`${baseUrl}/api/upload/file?name=${encodeURIComponent("TDF-2026-Stage05-1080p.mp4")}`, {
+      method: "POST",
+      headers: { Authorization: authHeader("correct-password") },
+      body: "fake video bytes",
+    });
+    await assert.rejects(fs.stat(join(libraryRoot, "Tour de France", "poster.jpg")));
+  } finally {
+    await close();
+  }
+});
+
+test("a successful archive generates the show's cover-art poster once it has a logo, and a later archive for the same show does not rewrite it", async () => {
   const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const auth = authHeader("correct-password");
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, {
+      method: "POST",
+      headers: { Authorization: auth },
+      body: await sharp({ create: { width: 20, height: 20, channels: 3, background: "#ff0000" } }).png().toBuffer(),
+    });
+
     await fetch(`${baseUrl}/api/upload/file?name=${encodeURIComponent("TDF-2026-Stage05-1080p.mp4")}`, {
       method: "POST",
       headers: { Authorization: auth },
