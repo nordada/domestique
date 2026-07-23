@@ -528,6 +528,18 @@
     <button id="add-category-btn" type="button">Add category</button>
   </div>
 
+  <div id="logo-section" class="hidden">
+    <span>Logo (used to generate this show's Plex poster)</span>
+    <div class="row" style="align-items:center;">
+      <img id="f-logo-preview" class="hidden" style="max-width:100px; max-height:100px; border-radius:6px; border:1px solid var(--border); object-fit:contain; background:#fff;">
+      <button type="button" id="f-logo-upload-btn">Upload logo…</button>
+      <button type="button" id="f-logo-remove-btn" class="hidden">Remove logo</button>
+    </div>
+    <input type="file" id="f-logo-input" class="hidden" accept="image/*">
+    <div class="status-msg" id="f-logo-status"></div>
+  </div>
+  <p id="f-logo-hint" class="hidden" style="font-size:0.85rem; opacity:0.75;">Save this event first, then reopen it to add a logo.</p>
+
   <div class="actions">
     <button class="primary" id="save-event-btn">Save</button>
     <button id="cancel-event-btn">Cancel</button>
@@ -554,6 +566,39 @@
       <span id="accent-color-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border); background:var(--accent);"></span>
     </div>
   </label>
+
+  <h3>Cover art</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Generates a Plex poster (poster.jpg) for each show from its uploaded
+    logo (see the Events tab), since most niche races aren't recognized by
+    Plex's own metadata agents. These colors are independent of the accent
+    color above - that's this web UI's own theme; this art is what shows up
+    inside Plex.
+  </p>
+  <label class="clear-toggle" style="margin-top:-0.4rem;">
+    <input type="checkbox" id="s-coverart-enabled">
+    Enabled
+  </label>
+  <div class="row" style="align-items:center;">
+    <label style="flex:1;"><span>Background color</span>
+      <input type="text" id="s-coverart-bg1" placeholder="#14213d">
+    </label>
+    <span id="coverart-bg1-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
+    <label style="flex:1;"><span>Gradient end color (optional - blank uses a solid fill)</span>
+      <input type="text" id="s-coverart-bg2" placeholder="">
+    </label>
+    <span id="coverart-bg2-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
+  </div>
+  <label><span>Logo size (fraction of the poster it's scaled to fit within, 0.2-1.0)</span>
+    <input type="number" id="s-coverart-logo-scale" placeholder="0.72" min="0.2" max="1" step="0.05" style="max-width:10rem;">
+  </label>
+  <label><span>Fallback text color (used for shows with no logo uploaded)</span>
+    <input type="text" id="s-coverart-fallback-text" placeholder="#ffffff" style="max-width:12rem;">
+  </label>
+  <div class="actions">
+    <button id="s-coverart-regenerate-btn">Regenerate all posters</button>
+  </div>
+  <div class="status-msg" id="coverart-regenerate-status"></div>
 
   <h3>Status polling</h3>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
@@ -769,6 +814,16 @@ function applyAccentColor(color) {
   }
   const swatch = document.getElementById("accent-color-swatch");
   if (swatch) swatch.style.background = "var(--accent)";
+}
+
+// Unlike applyAccentColor, these never touch document.documentElement or
+// localStorage - this art is displayed inside Plex, not this web UI, so
+// there's nothing of Domestique's own theme to update, just a preview swatch.
+function updateCoverArtSwatches() {
+  const bg1 = document.getElementById("s-coverart-bg1").value.trim();
+  const bg2 = document.getElementById("s-coverart-bg2").value.trim();
+  document.getElementById("coverart-bg1-swatch").style.background = HEX_COLOR_RE.test(bg1) ? bg1 : "transparent";
+  document.getElementById("coverart-bg2-swatch").style.background = HEX_COLOR_RE.test(bg2) ? bg2 : "transparent";
 }
 
 // The status panel's gauges and pause/theme controls wrap onto their own
@@ -990,6 +1045,12 @@ async function loadSettingsPanel() {
     document.getElementById("s-transmission-password").placeholder = s.transmission.passwordSet ? "already set - leave blank to keep" : "not set";
     document.getElementById("s-indexer-url").value = s.indexer.url;
     document.getElementById("s-indexer-check-interval").value = Math.round(s.indexer.checkIntervalMs / 1000);
+    document.getElementById("s-coverart-enabled").checked = s.coverArt.enabled;
+    document.getElementById("s-coverart-bg1").value = s.coverArt.backgroundColor;
+    document.getElementById("s-coverart-bg2").value = s.coverArt.backgroundColor2 || "";
+    document.getElementById("s-coverart-logo-scale").value = s.coverArt.logoScale;
+    document.getElementById("s-coverart-fallback-text").value = s.coverArt.fallbackTextColor;
+    updateCoverArtSwatches();
     document.getElementById("s-webhook-secret").placeholder = s.webhookSecretSet ? "already set, leave blank to keep" : "not set";
     document.getElementById("s-lockout-threshold").value = s.loginLockoutThreshold;
     document.getElementById("s-lockout-seconds").value = s.loginLockoutSeconds;
@@ -1026,6 +1087,13 @@ async function saveSettingsPanel() {
     indexer: {
       url: document.getElementById("s-indexer-url").value.trim(),
       checkIntervalMs: (parseInt(document.getElementById("s-indexer-check-interval").value, 10) || 300) * 1000,
+    },
+    coverArt: {
+      enabled: document.getElementById("s-coverart-enabled").checked,
+      backgroundColor: document.getElementById("s-coverart-bg1").value.trim(),
+      backgroundColor2: document.getElementById("s-coverart-bg2").value.trim(),
+      logoScale: parseFloat(document.getElementById("s-coverart-logo-scale").value) || undefined,
+      fallbackTextColor: document.getElementById("s-coverart-fallback-text").value.trim(),
     },
     loginLockoutThreshold: parseInt(document.getElementById("s-lockout-threshold").value, 10) || 5,
     loginLockoutSeconds: parseInt(document.getElementById("s-lockout-seconds").value, 10) || 60,
@@ -1152,6 +1220,14 @@ function updateCategoriesVisibility() {
   document.getElementById("categories-section").classList.toggle("hidden", !isFixed);
 }
 
+function updateLogoPreview(showId) {
+  const img = document.getElementById("f-logo-preview");
+  const removeBtn = document.getElementById("f-logo-remove-btn");
+  img.onload = () => { img.classList.remove("hidden"); removeBtn.classList.remove("hidden"); };
+  img.onerror = () => { img.classList.add("hidden"); removeBtn.classList.add("hidden"); };
+  img.src = `/api/cover-art/logo?showId=${encodeURIComponent(showId)}&t=${Date.now()}`;
+}
+
 function openForm(index) {
   editingIndex = index;
   const event = index === null ? null : events[index];
@@ -1164,6 +1240,15 @@ function openForm(index) {
   document.getElementById("f-isHighlights").value = event && event.isHighlights ? "true" : "false";
   renderCategories(event && event.categories ? event.categories : []);
   updateCategoriesVisibility();
+  document.getElementById("f-logo-status").textContent = "";
+  document.getElementById("logo-section").classList.toggle("hidden", !event);
+  document.getElementById("f-logo-hint").classList.toggle("hidden", !!event);
+  if (event) {
+    updateLogoPreview(event.id);
+  } else {
+    document.getElementById("f-logo-preview").classList.add("hidden");
+    document.getElementById("f-logo-remove-btn").classList.add("hidden");
+  }
   document.getElementById("form-status").textContent = "";
   document.getElementById("form-section").classList.remove("hidden");
   document.getElementById("form-section").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1388,6 +1473,37 @@ document.getElementById("add-category-btn").addEventListener("click", () => {
   editor.insertAdjacentHTML("beforeend", categoryRowHtml({ episode: editor.children.length + 1, title: "", include: [], exclude: [] }));
   editor.lastElementChild.querySelector("[data-remove-cat]").addEventListener("click", (e) => e.target.closest(".cat-row").remove());
 });
+document.getElementById("f-logo-upload-btn").addEventListener("click", () => document.getElementById("f-logo-input").click());
+document.getElementById("f-logo-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || editingIndex === null) return;
+  const statusEl = document.getElementById("f-logo-status");
+  statusEl.textContent = "Uploading…";
+  statusEl.className = "status-msg";
+  try {
+    await api(`/api/cover-art/logo?showId=${encodeURIComponent(events[editingIndex].id)}`, { method: "POST", body: file });
+    statusEl.textContent = "Logo uploaded.";
+    statusEl.className = "status-msg ok";
+    updateLogoPreview(events[editingIndex].id);
+  } catch (err) {
+    statusEl.textContent = `Upload failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+});
+document.getElementById("f-logo-remove-btn").addEventListener("click", async () => {
+  if (editingIndex === null) return;
+  const statusEl = document.getElementById("f-logo-status");
+  try {
+    await api(`/api/cover-art/logo?showId=${encodeURIComponent(events[editingIndex].id)}`, { method: "DELETE" });
+    statusEl.textContent = "Logo removed.";
+    statusEl.className = "status-msg ok";
+    updateLogoPreview(events[editingIndex].id);
+  } catch (err) {
+    statusEl.textContent = `Failed to remove: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+});
 document.getElementById("match-btn").addEventListener("click", runMatchTest);
 document.getElementById("match-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runMatchTest(); });
 document.getElementById("add-from-match-btn").addEventListener("click", () => {
@@ -1411,6 +1527,25 @@ document.querySelectorAll(".theme-btn").forEach((btn) => {
 });
 document.getElementById("save-settings-btn").addEventListener("click", saveSettingsPanel);
 document.getElementById("s-accent-color").addEventListener("input", (e) => applyAccentColor(e.target.value.trim()));
+document.getElementById("s-coverart-bg1").addEventListener("input", updateCoverArtSwatches);
+document.getElementById("s-coverart-bg2").addEventListener("input", updateCoverArtSwatches);
+document.getElementById("s-coverart-regenerate-btn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("coverart-regenerate-status");
+  statusEl.textContent = "Regenerating…";
+  statusEl.className = "status-msg";
+  try {
+    const data = await api("/api/cover-art/regenerate", { method: "POST" });
+    const written = data.results.filter((r) => r.result.status === "written").length;
+    const errors = data.results.filter((r) => r.result.status === "error").length;
+    statusEl.textContent = errors > 0
+      ? `Regenerated ${written} poster(s), ${errors} failed - check the server log.`
+      : `Regenerated ${written} poster(s).`;
+    statusEl.className = errors > 0 ? "status-msg err" : "status-msg ok";
+  } catch (err) {
+    statusEl.textContent = `Failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+});
 document.getElementById("add-torrent-btn").addEventListener("click", () => document.getElementById("add-torrent-input").click());
 document.getElementById("add-torrent-input").addEventListener("change", (e) => {
   if (e.target.files.length > 0) addTorrentFiles(e.target.files);
