@@ -34,6 +34,7 @@ import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
 import { getRecentActivity, recordActivity } from "./activity.js";
 import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
+import { handleCoverArtRequest } from "./coverArt.js";
 import { checkPlexLive, plexLibraryUrl } from "./plex.js";
 import {
   getTransmissionTorrentSummary,
@@ -241,6 +242,8 @@ function maskSettings(settings: Settings) {
       url: settings.indexer?.url ?? "",
       checkIntervalMs: settings.indexer?.checkIntervalMs ?? DEFAULT_INDEXER_CHECK_INTERVAL_MS,
     },
+    // No secrets in this section, so the whole object is returned as-is.
+    coverArt: settings.coverArt,
     paused: settings.paused,
     accentColor: settings.accentColor ?? "",
     statusPollIntervalMs: settings.statusPollIntervalMs,
@@ -323,6 +326,12 @@ export async function handleWebUiRequest(
 
   if (url.startsWith("/api/upload/")) {
     if (await handleUploadRequest(req, res, opts, processTorrentDone)) {
+      return true;
+    }
+  }
+
+  if (url.startsWith("/api/cover-art/")) {
+    if (await handleCoverArtRequest(req, res, opts)) {
       return true;
     }
   }
@@ -561,6 +570,13 @@ export async function handleWebUiRequest(
         transmission?: { url?: string; username?: string };
         transmissionPassword?: string;
         indexer?: { url?: string; checkIntervalMs?: number };
+        coverArt?: {
+          enabled?: boolean;
+          backgroundColor?: string;
+          backgroundColor2?: string;
+          logoScale?: number;
+          fallbackTextColor?: string;
+        };
         accentColor?: string;
         statusPollIntervalMs?: number;
         statusPollWhenHidden?: boolean;
@@ -592,6 +608,7 @@ export async function handleWebUiRequest(
             hotfolder: payload.hotfolder,
             transmission: { ...payload.transmission, password: transmissionPassword },
             indexer: payload.indexer,
+            coverArt: payload.coverArt,
             paused: current.paused,
             accentColor: payload.accentColor,
             statusPollIntervalMs: payload.statusPollIntervalMs,

@@ -1,0 +1,315 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import sharp from "sharp";
+import { loadConfig, type ShowConfig, type ShowsConfigFile } from "./config.js";
+import { loadSettings, type CoverArtSettings } from "./settings.js";
+import { readBodyBuffer, BodyTooLargeError } from "./body.js";
+import { sanitizeName } from "./upload.js";
+import type { ServerOptions } from "./server.js";
+
+// A hidden folder under LIBRARY_ROOT, same "invisible to Plex, already
+// RW-mounted, already sized for large media" reasoning upload.ts documents
+// for .uploads-tmp - no new Docker volume or config/ bind mount needed.
+const LOGO_SUBDIR = ".cover-art/logos";
+
+// Logos are small compared to the video/torrent uploads elsewhere in this
+// app, so a much tighter cap than TORRENT_BODY_LIMIT_BYTES is appropriate.
+const LOGO_BODY_LIMIT_BYTES = 8_000_000;
+const LOGO_MAX_DIMENSION = 1200;
+
+// Plex's standard 2:3 poster/show-art aspect ratio.
+const POSTER_WIDTH = 1000;
+const POSTER_HEIGHT = 1500;
+
+function logoPath(libraryRoot: string, showId: string): string {
+  return join(libraryRoot, LOGO_SUBDIR, `${showId}.png`);
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+/**
+ * Resolves the showId query param to a real config entry - this is the
+ * actual authorization boundary for the logo routes, since it means a
+ * caller can only ever read/write a filename that already corresponds to a
+ * real, existing show id, not an arbitrary attacker-chosen name.
+ */
+function requireShow(url: URL, res: ServerResponse, config: ShowsConfigFile): ShowConfig | null {
+  const raw = url.searchParams.get("showId");
+  if (!raw) {
+    sendJson(res, 400, { error: "showId query param is required" });
+    return null;
+  }
+  let showId: string;
+  try {
+    showId = sanitizeName(raw);
+  } catch (err) {
+    sendJson(res, 400, { error: String(err) });
+    return null;
+  }
+  const show = config.shows.find((s) => s.id === showId);
+  if (!show) {
+    sendJson(res, 400, { error: `unknown show id: ${showId}` });
+    return null;
+  }
+  return show;
+}
+
+async function handleLogoUpload(req: IncomingMessage, res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const show = requireShow(url, res, config);
+  if (!show) return;
+
+  let raw: Buffer;
+  try {
+    raw = await readBodyBuffer(req, LOGO_BODY_LIMIT_BYTES);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
+    throw err;
+  }
+
+  // Normalizing to PNG (with alpha preserved) on ingest doubles as real
+  // image-content validation - sharp throws on non-image/corrupt bytes
+  // rather than trusting the Content-Type header or file extension. Also
+  // caps dimensions so a huge upload can't balloon disk usage or slow every
+  // future poster composite.
+  let normalized: Buffer;
+  try {
+    normalized = await sharp(raw)
+      .resize({ width: LOGO_MAX_DIMENSION, height: LOGO_MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
+      .png()
+      .toBuffer();
+  } catch {
+    sendJson(res, 400, { error: "not a valid image" });
+    return;
+  }
+
+  const dir = join(opts.libraryRoot, LOGO_SUBDIR);
+  await mkdir(dir, { recursive: true });
+  const finalPath = logoPath(opts.libraryRoot, show.id);
+  const tmpPath = `${finalPath}.tmp`;
+  await writeFile(tmpPath, normalized);
+  await rename(tmpPath, finalPath);
+
+  sendJson(res, 200, { ok: true });
+}
+
+async function handleLogoGet(res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const show = requireShow(url, res, config);
+  if (!show) return;
+
+  try {
+    const buffer = await readFile(logoPath(opts.libraryRoot, show.id));
+    res.writeHead(200, { "Content-Type": "image/png" });
+    res.end(buffer);
+  } catch {
+    sendJson(res, 404, { error: "no logo set for this show" });
+  }
+}
+
+async function handleLogoDelete(res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const show = requireShow(url, res, config);
+  if (!show) return;
+
+  await rm(logoPath(opts.libraryRoot, show.id), { force: true });
+  sendJson(res, 200, { ok: true });
+}
+
+async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+  const results = await regenerateAllCoverArt(config, settings.coverArt, opts.libraryRoot);
+  sendJson(res, 200, { ok: true, results });
+}
+
+/**
+ * Handles any /api/cover-art/* request. Returns false for anything that
+ * isn't one of these routes, matching handleUploadRequest's "return true if
+ * handled" contract. Errors are caught here (not left to propagate) since
+ * this is dispatched before webui.ts's own outer try/catch.
+ */
+export async function handleCoverArtRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  opts: ServerOptions
+): Promise<boolean> {
+  const url = new URL(req.url ?? "", "http://internal");
+
+  if (url.pathname !== "/api/cover-art/logo" && url.pathname !== "/api/cover-art/regenerate") {
+    return false;
+  }
+
+  try {
+    if (url.pathname === "/api/cover-art/logo") {
+      if (req.method === "POST") {
+        await handleLogoUpload(req, res, opts, url);
+        return true;
+      }
+      if (req.method === "GET") {
+        await handleLogoGet(res, opts, url);
+        return true;
+      }
+      if (req.method === "DELETE") {
+        await handleLogoDelete(res, opts, url);
+        return true;
+      }
+      return false;
+    }
+
+    if (url.pathname === "/api/cover-art/regenerate" && req.method === "POST") {
+      await handleRegenerateAll(res, opts);
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error(`[cover-art] unexpected error handling ${req.method} ${url.pathname}:`, err);
+    sendJson(res, 500, { error: "internal error" });
+    return true;
+  }
+}
+
+export interface CoverArtResult {
+  status: "written" | "skipped" | "error";
+  posterPath?: string;
+  error?: string;
+}
+
+function escapeXml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** Naive greedy word-wrap - sharp has no font-layout API, so text always goes through a hand-wrapped SVG buffer. */
+function wrapTitle(title: string, maxCharsPerLine: number, maxLines: number): string[] {
+  const words = title.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxCharsPerLine && current) {
+      lines.push(current);
+      current = word;
+      if (lines.length === maxLines) break;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines;
+}
+
+function backgroundSvg(width: number, height: number, colorFrom: string, colorTo: string | null): string {
+  if (!colorTo) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="${colorFrom}"/></svg>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${colorFrom}"/>
+      <stop offset="100%" stop-color="${colorTo}"/>
+    </linearGradient></defs>
+    <rect width="${width}" height="${height}" fill="url(#g)"/>
+  </svg>`;
+}
+
+function fallbackTextSvg(width: number, height: number, title: string, textColor: string): string {
+  const maxLines = 4;
+  const lines = wrapTitle(title, 14, maxLines);
+  const fontSize = lines.length > 2 ? 64 : 84;
+  const lineHeight = fontSize * 1.2;
+  const startY = height / 2 - ((lines.length - 1) * lineHeight) / 2;
+  const tspans = lines
+    .map((line, i) => `<tspan x="${width / 2}" y="${startY + i * lineHeight}">${escapeXml(line)}</tspan>`)
+    .join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    <text font-family="sans-serif" font-weight="700" font-size="${fontSize}" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${tspans}</text>
+  </svg>`;
+}
+
+/**
+ * Generates a static Plex poster for a show from its uploaded logo (or a
+ * typography fallback when none is set), written to the show-root folder
+ * (one level above any "Season NNNN" folder) so it's reused across every
+ * season/year rather than regenerated per-year - the logo represents the
+ * race brand, not one edition of it.
+ */
+export async function generateCoverArt(
+  show: ShowConfig,
+  coverArt: CoverArtSettings,
+  libraryRoot: string,
+  opts: { force?: boolean } = {}
+): Promise<CoverArtResult> {
+  const showRootFolder = join(libraryRoot, show.folderName);
+  const posterPath = join(showRootFolder, "poster.jpg");
+
+  if (!opts.force && existsSync(posterPath)) {
+    return { status: "skipped", posterPath };
+  }
+
+  try {
+    const bgSvg = backgroundSvg(POSTER_WIDTH, POSTER_HEIGHT, coverArt.backgroundColor, coverArt.backgroundColor2);
+    const overlayInput = existsSync(logoPath(libraryRoot, show.id))
+      ? await sharp(logoPath(libraryRoot, show.id))
+          .resize({
+            width: Math.round(Math.min(POSTER_WIDTH, POSTER_HEIGHT) * coverArt.logoScale),
+            height: Math.round(Math.min(POSTER_WIDTH, POSTER_HEIGHT) * coverArt.logoScale),
+            fit: "inside",
+          })
+          .toBuffer()
+      : Buffer.from(fallbackTextSvg(POSTER_WIDTH, POSTER_HEIGHT, show.folderName, coverArt.fallbackTextColor));
+
+    const jpegBuffer = await sharp(Buffer.from(bgSvg))
+      .composite([{ input: overlayInput, gravity: "center" }])
+      .jpeg({ quality: 90 })
+      .toBuffer();
+
+    await mkdir(showRootFolder, { recursive: true });
+    const tmpPath = `${posterPath}.tmp`;
+    await writeFile(tmpPath, jpegBuffer);
+    await rename(tmpPath, posterPath);
+
+    return { status: "written", posterPath };
+  } catch (err) {
+    return { status: "error", error: String(err) };
+  }
+}
+
+/** Force-regenerates every show's poster - the manual re-trigger after a logo or Settings-tab color change. */
+export async function regenerateAllCoverArt(
+  config: ShowsConfigFile,
+  coverArt: CoverArtSettings,
+  libraryRoot: string
+): Promise<Array<{ id: string; result: CoverArtResult }>> {
+  const results: Array<{ id: string; result: CoverArtResult }> = [];
+  for (const show of config.shows) {
+    results.push({ id: show.id, result: await generateCoverArt(show, coverArt, libraryRoot, { force: true }) });
+  }
+  return results;
+}

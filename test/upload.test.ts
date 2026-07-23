@@ -84,6 +84,32 @@ test("POST /api/upload/file archives a single-file upload and cleans up the stag
   }
 });
 
+test("a successful archive generates the show's cover-art poster once, and a later archive for the same show does not rewrite it", async () => {
+  const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+    await fetch(`${baseUrl}/api/upload/file?name=${encodeURIComponent("TDF-2026-Stage05-1080p.mp4")}`, {
+      method: "POST",
+      headers: { Authorization: auth },
+      body: "fake video bytes",
+    });
+
+    const posterPath = join(libraryRoot, "Tour de France", "poster.jpg");
+    const firstStat = await fs.stat(posterPath); // throws if the pipeline hook didn't generate it
+
+    await fetch(`${baseUrl}/api/upload/file?name=${encodeURIComponent("TDF-2026-Stage06-1080p.mp4")}`, {
+      method: "POST",
+      headers: { Authorization: auth },
+      body: "more fake video bytes",
+    });
+
+    const secondStat = await fs.stat(posterPath);
+    assert.equal(secondStat.mtimeMs, firstStat.mtimeMs); // untouched by the second archive - one-time generation, not per-episode
+  } finally {
+    await close();
+  }
+});
+
 test("folder upload: folder-start, two folder-file uploads, then folder-finalize groups parts and cleans up", async () => {
   const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
   try {

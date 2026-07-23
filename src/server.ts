@@ -17,7 +17,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfig, DEFAULT_CONFIG_PATH } from "./config.js";
@@ -26,6 +26,7 @@ import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems, isPathWithin } from "./fileops.js";
 import { refreshPlexFolder } from "./plex.js";
+import { generateCoverArt } from "./coverArt.js";
 import { sendDiscordNotification } from "./discord.js";
 import { recordActivity, DEFAULT_ACTIVITY_PATH } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
@@ -69,6 +70,7 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
   const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
   let configDirty = false;
   const changedFolders = new Set<string>();
+  const touchedShowIds = new Set<string>();
   const summaryLines: string[] = [];
   let reviewWorthy = false;
 
@@ -118,6 +120,7 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 
     if (outcome.status === "copied") {
       changedFolders.add(join(opts.libraryRoot, plan.destDir));
+      touchedShowIds.add(match.show.id);
       summaryLines.push(`✅ ${plan.destDir}/${plan.destFilename}`);
     } else {
       summaryLines.push(`⏭️ skipped "${item.sourceFile}": ${outcome.reason}`);
@@ -137,6 +140,32 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
 
   if (configDirty) {
     saveConfig(config, opts.configPath);
+  }
+
+  if (settings.coverArt.enabled) {
+    for (const showId of touchedShowIds) {
+      const show = config.shows.find((s) => s.id === showId);
+      if (!show) continue;
+      const showRootFolder = join(opts.libraryRoot, show.folderName);
+      const posterPath = join(showRootFolder, "poster.jpg");
+      // A static poster only needs generating once per show, the first time
+      // any episode is archived - not re-checked on every event, or a
+      // multi-stage race would re-render on every single stage. Settings
+      // Tab's "regenerate all posters" (see coverArt.ts) forces a redo after
+      // a logo or color change.
+      if (existsSync(posterPath)) continue;
+      try {
+        const result = await generateCoverArt(show, settings.coverArt, opts.libraryRoot);
+        if (result.status === "written") {
+          changedFolders.add(showRootFolder);
+          summaryLines.push(`🖼️ generated cover art for "${show.id}"`);
+        }
+      } catch (err) {
+        console.warn(`[cover-art] failed to generate poster for "${show.id}": ${err}`);
+        reviewWorthy = true;
+        summaryLines.push(`⚠️ cover art generation failed for "${show.id}": ${err}`);
+      }
+    }
   }
 
   if (settings.plex && changedFolders.size > 0) {

@@ -248,6 +248,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       hotfolder: { dir: "", pollIntervalMs: 60000, stablePolls: 3, acknowledgeNoSeedback: false },
       transmission: { url: "", username: "", passwordSet: false },
       indexer: { url: "", checkIntervalMs: 300000 },
+      coverArt: { enabled: true, backgroundColor: "#14213d", backgroundColor2: null, logoScale: 0.72, fallbackTextColor: "#ffffff" },
       paused: false,
       accentColor: "",
       statusPollIntervalMs: 20000,
@@ -269,6 +270,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
         transmission: { url: "http://tower:9091/transmission/rpc", username: "admin" },
         transmissionPassword: "secret-password",
         indexer: { url: "https://indexer.example", checkIntervalMs: 60000 },
+        coverArt: { enabled: false, backgroundColor: "#112233", backgroundColor2: "#445566", logoScale: 0.5, fallbackTextColor: "#eeeeee" },
         accentColor: "#22c55e",
         webhookSecret: "shh-its-a-secret",
       }),
@@ -284,6 +286,13 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
     assert.equal(putBody.transmission.url, "http://tower:9091/transmission/rpc");
     assert.equal(putBody.indexer.url, "https://indexer.example");
     assert.equal(putBody.indexer.checkIntervalMs, 60000);
+    assert.deepEqual(putBody.coverArt, {
+      enabled: false,
+      backgroundColor: "#112233",
+      backgroundColor2: "#445566",
+      logoScale: 0.5,
+      fallbackTextColor: "#eeeeee",
+    });
     assert.equal(putBody.accentColor, "#22c55e");
     assert.equal(putBody.webhookSecretSet, true);
     assert.ok(!("token" in putBody.plex));
