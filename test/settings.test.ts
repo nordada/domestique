@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSettings, saveSettings, setPaused } from "../src/settings.js";
+import { loadSettings, saveSettings, setPaused, resolveCoverArtSettings } from "../src/settings.js";
 
 async function makeScratchDir() {
   return fs.mkdtemp(join(tmpdir(), "domestique-settings-"));
@@ -273,6 +273,39 @@ test("saveSettings falls back invalid coverArt colors to defaults, clamps logoSc
     saveSettings({ coverArt: { logoScale: "not-a-number" } }, "/library", settingsPath).coverArt.logoScale,
     0.72
   );
+});
+
+test("resolveCoverArtSettings falls back to the global value with no override present", () => {
+  const global = { enabled: true, backgroundColor: "#111111", backgroundColor2: "#222222", logoScale: 0.6 };
+  assert.deepEqual(resolveCoverArtSettings(global, undefined), global);
+  assert.deepEqual(resolveCoverArtSettings(global, null), global);
+});
+
+test("resolveCoverArtSettings merges a per-event override on top of the global, field by field", () => {
+  const global = { enabled: true, backgroundColor: "#111111", backgroundColor2: "#222222", logoScale: 0.6 };
+
+  // Only backgroundColor overridden - backgroundColor2/logoScale inherit from global.
+  assert.deepEqual(resolveCoverArtSettings(global, { backgroundColor: "#abcdef" }), {
+    enabled: true,
+    backgroundColor: "#abcdef",
+    backgroundColor2: "#222222",
+    logoScale: 0.6,
+  });
+
+  // Explicit blank backgroundColor2 in the override means solid fill for this show,
+  // overriding even a global gradient - same convention the global setting itself uses.
+  assert.equal(resolveCoverArtSettings(global, { backgroundColor2: "" }).backgroundColor2, null);
+
+  // logoScale overridden and clamped to the same [0.2, 1.0] range as the global setting.
+  assert.equal(resolveCoverArtSettings(global, { logoScale: 5 }).logoScale, 1.0);
+
+  // enabled is never influenced by the override - always the global value.
+  assert.equal(resolveCoverArtSettings(global, { enabled: false }).enabled, true);
+});
+
+test("resolveCoverArtSettings falls back to the global (not the factory default) for an invalid override field", () => {
+  const global = { enabled: true, backgroundColor: "#111111", backgroundColor2: null, logoScale: 0.6 };
+  assert.equal(resolveCoverArtSettings(global, { backgroundColor: "not-a-hex" }).backgroundColor, "#111111");
 });
 
 test("saveSettings clamps statusPollIntervalMs to [5s, 10min] and falls back to the 20s default for garbage input", async () => {

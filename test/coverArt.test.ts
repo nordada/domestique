@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
 import sharp from "sharp";
 import { createApp, type ServerOptions } from "../src/server.js";
 import { generateCoverArt, regenerateAllCoverArt } from "../src/coverArt.js";
@@ -89,6 +90,21 @@ test("regenerateAllCoverArt only writes a poster for shows with an uploaded logo
   assert.equal(results.find((r) => r.id === "giro")?.result.status, "skipped");
   await assert.doesNotReject(fs.stat(join(libraryRoot, "Tour de France", "poster.jpg")));
   await assert.rejects(fs.stat(join(libraryRoot, "Giro D'Italia", "poster.jpg")));
+});
+
+test("regenerateAllCoverArt applies a show's per-event coverArt override instead of the global colors", async () => {
+  const libraryRoot = await makeScratchLibrary();
+  await stageLogo(libraryRoot, TDF.id);
+  const tdfWithOverride: ShowConfig = { ...TDF, coverArt: { backgroundColor: "#00ff00", logoScale: 1.0 } };
+
+  const results = await regenerateAllCoverArt({ shows: [tdfWithOverride] }, DEFAULT_COVER_ART, libraryRoot);
+  assert.equal(results[0].result.status, "written");
+
+  // The corner pixels are pure background (the logo only covers the center),
+  // so a green corner confirms the override's color won, not the global navy.
+  const { data } = await sharp(results[0].result.posterPath!).raw().toBuffer({ resolveWithObject: true });
+  const [r, g, b] = [data[0], data[1], data[2]];
+  assert.ok(g > r && g > b, `expected a green-dominant corner pixel, got rgb(${r},${g},${b})`);
 });
 
 async function makeScratchServer(webui: { password: string; username?: string } | null) {
@@ -186,7 +202,11 @@ test("POST /api/cover-art/logo rejects an unknown showId, oversized body, and no
     });
     assert.equal(notAnImageRes.status, 400);
 
-    const oversized = Buffer.alloc(9_000_000, 1);
+    // Just over the 8 MB cap, not far over it - minimizes the amount of
+    // still-unsent data in flight when the server aborts the connection,
+    // which otherwise raced an EPIPE on the client write often enough in
+    // practice to make this test genuinely flaky at a much larger overage.
+    const oversized = Buffer.alloc(8_050_000, 1);
     const oversizedRes = await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, {
       method: "POST",
       headers: { Authorization: auth },
@@ -236,5 +256,41 @@ test("POST /api/cover-art/regenerate skips a show with no logo, and force-regene
     await fs.stat(join(libraryRoot, "Tour de France", "poster.jpg"));
   } finally {
     await close();
+  }
+});
+
+test("POST /api/cover-art/regenerate triggers a Plex partial-scan refresh for each show that actually got a new poster", async () => {
+  const refreshedPaths: string[] = [];
+  const plexStub = createServer((req, res) => {
+    const url = new URL(req.url ?? "", "http://internal");
+    refreshedPaths.push(url.searchParams.get("path") ?? "");
+    res.writeHead(200);
+    res.end();
+  });
+  await new Promise<void>((resolve) => plexStub.listen(0, resolve));
+  const plexAddress = plexStub.address();
+  if (plexAddress === null || typeof plexAddress === "string") throw new Error("expected a bound port");
+
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ plex: { url: `http://127.0.0.1:${plexAddress.port}`, sectionId: "35" }, plexToken: "fake-token" }),
+    });
+
+    // A show with no logo shouldn't trigger a refresh at all - nothing was written for it.
+    await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+    assert.equal(refreshedPaths.length, 0);
+
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+    await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+
+    assert.equal(refreshedPaths.length, 1);
+    assert.match(refreshedPaths[0], /Tour de France$/);
+  } finally {
+    await close();
+    await new Promise<void>((resolve) => plexStub.close(() => resolve()));
   }
 });

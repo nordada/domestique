@@ -540,6 +540,28 @@
   </div>
   <p id="f-logo-hint" class="hidden" style="font-size:0.85rem; opacity:0.75;">Save this event first, then reopen it to add a logo.</p>
 
+  <div id="f-coverart-override-section">
+    <label class="clear-toggle">
+      <input type="checkbox" id="f-coverart-override-enabled">
+      Customize cover art for this event (otherwise uses the Cover art defaults in Settings)
+    </label>
+    <div id="f-coverart-override-fields" class="hidden">
+      <div class="row" style="align-items:center;">
+        <label style="flex:1;"><span>Background color</span>
+          <input type="text" id="f-coverart-bg1" placeholder="#14213d">
+        </label>
+        <span id="f-coverart-bg1-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
+        <label style="flex:1;"><span>Gradient end color (optional - blank uses a solid fill)</span>
+          <input type="text" id="f-coverart-bg2" placeholder="">
+        </label>
+        <span id="f-coverart-bg2-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
+      </div>
+      <label><span>Logo size (fraction of the poster it's scaled to fit within, 0.2-1.0)</span>
+        <input type="number" id="f-coverart-logo-scale" min="0.2" max="1" step="0.05" style="max-width:10rem;">
+      </label>
+    </div>
+  </div>
+
   <div class="actions">
     <button class="primary" id="save-event-btn">Save</button>
     <button id="cancel-event-btn">Cancel</button>
@@ -1224,6 +1246,13 @@ function updateLogoPreview(showId) {
   img.src = `/api/cover-art/logo?showId=${encodeURIComponent(showId)}&t=${Date.now()}`;
 }
 
+function updateEventCoverArtSwatches() {
+  const bg1 = document.getElementById("f-coverart-bg1").value.trim();
+  const bg2 = document.getElementById("f-coverart-bg2").value.trim();
+  document.getElementById("f-coverart-bg1-swatch").style.background = HEX_COLOR_RE.test(bg1) ? bg1 : "transparent";
+  document.getElementById("f-coverart-bg2-swatch").style.background = HEX_COLOR_RE.test(bg2) ? bg2 : "transparent";
+}
+
 function openForm(index) {
   editingIndex = index;
   const event = index === null ? null : events[index];
@@ -1236,6 +1265,13 @@ function openForm(index) {
   document.getElementById("f-isHighlights").value = event && event.isHighlights ? "true" : "false";
   renderCategories(event && event.categories ? event.categories : []);
   updateCategoriesVisibility();
+  const override = event && event.coverArt;
+  document.getElementById("f-coverart-override-enabled").checked = !!override;
+  document.getElementById("f-coverart-override-fields").classList.toggle("hidden", !override);
+  document.getElementById("f-coverart-bg1").value = override && override.backgroundColor ? override.backgroundColor : "";
+  document.getElementById("f-coverart-bg2").value = override && override.backgroundColor2 ? override.backgroundColor2 : "";
+  document.getElementById("f-coverart-logo-scale").value = override && override.logoScale != null ? override.logoScale : "";
+  updateEventCoverArtSwatches();
   document.getElementById("f-logo-status").textContent = "";
   document.getElementById("logo-section").classList.toggle("hidden", !event);
   document.getElementById("f-logo-hint").classList.toggle("hidden", !!event);
@@ -1275,6 +1311,13 @@ async function saveEvent() {
   if (filenamePrefix) event.filenamePrefix = filenamePrefix;
   if (isHighlights) event.isHighlights = true;
   if (type === "multi-category-fixed") event.categories = readCategoriesFromForm();
+  if (document.getElementById("f-coverart-override-enabled").checked) {
+    event.coverArt = {
+      backgroundColor: document.getElementById("f-coverart-bg1").value.trim(),
+      backgroundColor2: document.getElementById("f-coverart-bg2").value.trim(),
+      logoScale: parseFloat(document.getElementById("f-coverart-logo-scale").value) || undefined,
+    };
+  }
 
   const next = [...events];
   if (editingIndex === null) {
@@ -1464,6 +1507,24 @@ document.getElementById("events-search").addEventListener("input", renderEvents)
 document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
 document.getElementById("save-event-btn").addEventListener("click", saveEvent);
 document.getElementById("f-type").addEventListener("change", updateCategoriesVisibility);
+document.getElementById("f-coverart-override-enabled").addEventListener("change", async (e) => {
+  document.getElementById("f-coverart-override-fields").classList.toggle("hidden", !e.target.checked);
+  if (e.target.checked && !document.getElementById("f-coverart-bg1").value) {
+    // First time this event's override is turned on - prefill with the
+    // current global defaults as a starting point to tweak, rather than
+    // blank fields (which would resolve to the app's factory colors, not
+    // what Settings actually has, if the user saves without touching them).
+    try {
+      const s = await api("/api/settings");
+      document.getElementById("f-coverart-bg1").value = s.coverArt.backgroundColor;
+      document.getElementById("f-coverart-bg2").value = s.coverArt.backgroundColor2 || "";
+      document.getElementById("f-coverart-logo-scale").value = s.coverArt.logoScale;
+      updateEventCoverArtSwatches();
+    } catch {}
+  }
+});
+document.getElementById("f-coverart-bg1").addEventListener("input", updateEventCoverArtSwatches);
+document.getElementById("f-coverart-bg2").addEventListener("input", updateEventCoverArtSwatches);
 document.getElementById("add-category-btn").addEventListener("click", () => {
   const editor = document.getElementById("categories-editor");
   editor.insertAdjacentHTML("beforeend", categoryRowHtml({ episode: editor.children.length + 1, title: "", include: [], exclude: [] }));

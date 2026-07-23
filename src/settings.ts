@@ -297,6 +297,35 @@ function normalizeCoverArt(input: unknown): CoverArtSettings {
   };
 }
 
+/**
+ * Merges a show's optional per-event cover-art override (ShowConfig.coverArt
+ * in config.ts) on top of the global Settings.coverArt. Each override field
+ * is validated independently and falls back to the *global* value (not the
+ * hardcoded factory default) when absent or invalid - a typo'd per-event
+ * hex color shouldn't silently revert the whole show to the app default,
+ * just to whatever Settings already has. `enabled` is deliberately
+ * global-only: whether a show gets cover art at all is already governed by
+ * whether it has an uploaded logo, so there's no separate per-show toggle.
+ */
+export function resolveCoverArtSettings(global: CoverArtSettings, override: unknown): CoverArtSettings {
+  if (!override || typeof override !== "object") return global;
+  const raw = override as Record<string, unknown>;
+  return {
+    enabled: global.enabled,
+    backgroundColor: isHexColor(raw.backgroundColor) ? (raw.backgroundColor as string).trim() : global.backgroundColor,
+    backgroundColor2:
+      raw.backgroundColor2 === undefined
+        ? global.backgroundColor2
+        : isHexColor(raw.backgroundColor2)
+          ? (raw.backgroundColor2 as string).trim()
+          : null,
+    logoScale:
+      typeof raw.logoScale === "number" && Number.isFinite(raw.logoScale)
+        ? Math.min(MAX_COVER_ART_LOGO_SCALE, Math.max(MIN_COVER_ART_LOGO_SCALE, raw.logoScale))
+        : global.logoScale,
+  };
+}
+
 function normalizePositiveInt(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? parseInt(value, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;

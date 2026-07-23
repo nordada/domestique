@@ -21,7 +21,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfig, DEFAULT_CONFIG_PATH } from "./config.js";
-import { loadSettings, DEFAULT_SETTINGS_PATH } from "./settings.js";
+import { loadSettings, resolveCoverArtSettings, DEFAULT_SETTINGS_PATH } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems, isPathWithin } from "./fileops.js";
@@ -155,7 +155,8 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
       // a logo or color change.
       if (existsSync(posterPath)) continue;
       try {
-        const result = await generateCoverArt(show, settings.coverArt, opts.libraryRoot);
+        const effective = resolveCoverArtSettings(settings.coverArt, show.coverArt);
+        const result = await generateCoverArt(show, effective, opts.libraryRoot);
         if (result.status === "written") {
           changedFolders.add(showRootFolder);
           summaryLines.push(`🖼️ generated cover art for "${show.id}"`);

@@ -22,9 +22,10 @@ import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import sharp from "sharp";
 import { loadConfig, type ShowConfig, type ShowsConfigFile } from "./config.js";
-import { loadSettings, type CoverArtSettings } from "./settings.js";
+import { loadSettings, resolveCoverArtSettings, type CoverArtSettings } from "./settings.js";
 import { readBodyBuffer, BodyTooLargeError } from "./body.js";
 import { sanitizeName } from "./upload.js";
+import { refreshPlexFolder } from "./plex.js";
 import type { ServerOptions } from "./server.js";
 
 // A hidden folder under LIBRARY_ROOT, same "invisible to Plex, already
@@ -143,10 +144,32 @@ async function handleLogoDelete(res: ServerResponse, opts: ServerOptions, url: U
   sendJson(res, 200, { ok: true });
 }
 
+/**
+ * Regenerating writes new poster.jpg files to disk, but Plex won't pick
+ * them up on its own until its next scheduled library scan - which can be
+ * hours away, the same class of "silently stale until someone notices"
+ * problem a missing partial-scan refresh caused before (see server.ts's
+ * handleTorrentDone). So each show that actually got a new poster this run
+ * gets an explicit partial-scan refresh, same as a fresh archive does.
+ */
 async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Promise<void> {
   const config = loadConfig(opts.configPath);
   const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
   const results = await regenerateAllCoverArt(config, settings.coverArt, opts.libraryRoot);
+
+  if (settings.plex) {
+    for (const { id, result } of results) {
+      if (result.status !== "written") continue;
+      const show = config.shows.find((s) => s.id === id);
+      if (!show) continue;
+      try {
+        await refreshPlexFolder(settings.plex, opts.libraryRoot, join(opts.libraryRoot, show.folderName));
+      } catch (err) {
+        console.warn(`[cover-art] Plex refresh failed for "${id}" after regenerate: ${err}`);
+      }
+    }
+  }
+
   sendJson(res, 200, { ok: true, results });
 }
 
@@ -267,7 +290,7 @@ export async function generateCoverArt(
   }
 }
 
-/** Force-regenerates every show's poster - the manual re-trigger after a logo or Settings-tab color change. */
+/** Force-regenerates every show's poster - the manual re-trigger after a logo or Settings-tab/per-event color change. */
 export async function regenerateAllCoverArt(
   config: ShowsConfigFile,
   coverArt: CoverArtSettings,
@@ -275,7 +298,8 @@ export async function regenerateAllCoverArt(
 ): Promise<Array<{ id: string; result: CoverArtResult }>> {
   const results: Array<{ id: string; result: CoverArtResult }> = [];
   for (const show of config.shows) {
-    results.push({ id: show.id, result: await generateCoverArt(show, coverArt, libraryRoot, { force: true }) });
+    const effective = resolveCoverArtSettings(coverArt, show.coverArt);
+    results.push({ id: show.id, result: await generateCoverArt(show, effective, libraryRoot, { force: true }) });
   }
   return results;
 }

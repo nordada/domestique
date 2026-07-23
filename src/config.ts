@@ -38,6 +38,13 @@ export interface CategoryDef {
   exclude?: string[];
 }
 
+/** Per-event override of Settings.coverArt - any field left unset falls back to the global setting. */
+export interface ShowCoverArtOverride {
+  backgroundColor?: string;
+  backgroundColor2?: string;
+  logoScale?: number;
+}
+
 export interface ShowConfig {
   id: string;
   /** Plex show folder name, under the library root */
@@ -53,6 +60,8 @@ export interface ShowConfig {
   categories?: CategoryDef[];
   /** set on entries created automatically for unrecognized races */
   autoCreated?: boolean;
+  /** optional per-event cover-art customization; omitted entirely means "use Settings.coverArt as-is" */
+  coverArt?: ShowCoverArtOverride;
 }
 
 export interface ShowsConfigFile {
