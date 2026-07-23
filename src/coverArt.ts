@@ -25,7 +25,7 @@ import { loadConfig, type ShowConfig, type ShowsConfigFile } from "./config.js";
 import { loadSettings, resolveCoverArtSettings, type CoverArtSettings } from "./settings.js";
 import { readBodyBuffer, BodyTooLargeError } from "./body.js";
 import { sanitizeName } from "./upload.js";
-import { refreshPlexFolder } from "./plex.js";
+import { refreshPlexFolder, findShowRatingKey, forceRefreshItem, type PlexConfig } from "./plex.js";
 import type { ServerOptions } from "./server.js";
 
 // A hidden folder under LIBRARY_ROOT, same "invisible to Plex, already
@@ -145,12 +145,43 @@ async function handleLogoDelete(res: ServerResponse, opts: ServerOptions, url: U
 }
 
 /**
+ * Tells Plex to actually look at a show's freshly (re)generated poster.
+ * A passive path-scoped scan (refreshPlexFolder) reliably detects new
+ * episode files, but real-world testing found it does NOT reliably
+ * re-examine local media assets for a show Plex already considers fully
+ * matched - "Scan Library" left a new poster invisible in Plex's poster
+ * picker, while Plex's own per-item "Refresh Metadata" picked it up
+ * immediately. So this looks up the show's Plex ratingKey by matching its
+ * root folder location and forces a per-item refresh, falling back to the
+ * passive folder refresh if the item can't be found yet (e.g. a brand-new
+ * show Plex hasn't indexed at all).
+ */
+export async function refreshPlexForShow(plex: PlexConfig, show: ShowConfig, libraryRoot: string): Promise<void> {
+  const showRootFolder = join(libraryRoot, show.folderName);
+  // A lookup failure (network blip, malformed response, Plex briefly
+  // unreachable) shouldn't lose the refresh entirely - fall back to the
+  // passive folder scan the same as a genuine "not found yet" result, but
+  // logged distinctly since it's a different situation worth noticing.
+  let ratingKey: string | null = null;
+  try {
+    ratingKey = await findShowRatingKey(plex, libraryRoot, showRootFolder);
+  } catch (err) {
+    console.warn(`[plex] ratingKey lookup failed for "${show.id}", falling back to a passive folder refresh: ${err}`);
+  }
+  if (ratingKey) {
+    await forceRefreshItem(plex, ratingKey);
+  } else {
+    await refreshPlexFolder(plex, libraryRoot, showRootFolder);
+  }
+}
+
+/**
  * Regenerating writes new poster.jpg files to disk, but Plex won't pick
  * them up on its own until its next scheduled library scan - which can be
  * hours away, the same class of "silently stale until someone notices"
  * problem a missing partial-scan refresh caused before (see server.ts's
  * handleTorrentDone). So each show that actually got a new poster this run
- * gets an explicit partial-scan refresh, same as a fresh archive does.
+ * gets an explicit refresh via refreshPlexForShow above.
  */
 async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Promise<void> {
   const config = loadConfig(opts.configPath);
@@ -163,7 +194,7 @@ async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Pr
       const show = config.shows.find((s) => s.id === id);
       if (!show) continue;
       try {
-        await refreshPlexFolder(settings.plex, opts.libraryRoot, join(opts.libraryRoot, show.folderName));
+        await refreshPlexForShow(settings.plex, show, opts.libraryRoot);
       } catch (err) {
         console.warn(`[cover-art] Plex refresh failed for "${id}" after regenerate: ${err}`);
       }

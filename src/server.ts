@@ -26,7 +26,7 @@ import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems, isPathWithin } from "./fileops.js";
 import { refreshPlexFolder } from "./plex.js";
-import { generateCoverArt } from "./coverArt.js";
+import { generateCoverArt, refreshPlexForShow } from "./coverArt.js";
 import { sendDiscordNotification } from "./discord.js";
 import { recordActivity, DEFAULT_ACTIVITY_PATH } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
@@ -158,8 +158,16 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
         const effective = resolveCoverArtSettings(settings.coverArt, show.coverArt);
         const result = await generateCoverArt(show, effective, opts.libraryRoot);
         if (result.status === "written") {
-          changedFolders.add(showRootFolder);
           summaryLines.push(`🖼️ generated cover art for "${show.id}"`);
+          if (settings.plex) {
+            try {
+              await refreshPlexForShow(settings.plex, show, opts.libraryRoot);
+            } catch (err) {
+              console.warn(`[plex] failed to refresh "${show.id}" after cover art generation: ${err}`);
+              reviewWorthy = true;
+              summaryLines.push(`⚠️ Plex refresh failed for "${show.id}" after cover art generation: ${err}`);
+            }
+          }
         }
       } catch (err) {
         console.warn(`[cover-art] failed to generate poster for "${show.id}": ${err}`);

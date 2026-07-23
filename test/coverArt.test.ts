@@ -259,14 +259,40 @@ test("POST /api/cover-art/regenerate skips a show with no logo, and force-regene
   }
 });
 
-test("POST /api/cover-art/regenerate triggers a Plex partial-scan refresh for each show that actually got a new poster", async () => {
-  const refreshedPaths: string[] = [];
-  const plexStub = createServer((req, res) => {
+/**
+ * Simulates enough of Plex's real API for refreshPlexForShow's two paths:
+ * `/library/sections/{id}/all?type=2` (the ratingKey lookup, returns
+ * `knownShows` as Metadata with a Location) and both refresh endpoints
+ * (`/refresh?path=` passive, `/library/metadata/{key}/refresh` forced).
+ */
+function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
+  const passiveRefreshPaths: string[] = [];
+  const forceRefreshRatingKeys: string[] = [];
+  const server = createServer((req, res) => {
     const url = new URL(req.url ?? "", "http://internal");
-    refreshedPaths.push(url.searchParams.get("path") ?? "");
+    if (url.pathname.endsWith("/all")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        MediaContainer: { Metadata: knownShows.map((s) => ({ ratingKey: s.ratingKey, Location: [{ path: s.path }] })) },
+      }));
+      return;
+    }
+    const metadataRefreshMatch = url.pathname.match(/\/library\/metadata\/([^/]+)\/refresh$/);
+    if (metadataRefreshMatch) {
+      forceRefreshRatingKeys.push(metadataRefreshMatch[1]);
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    passiveRefreshPaths.push(url.searchParams.get("path") ?? "");
     res.writeHead(200);
     res.end();
   });
+  return { server, passiveRefreshPaths, forceRefreshRatingKeys };
+}
+
+test("POST /api/cover-art/regenerate falls back to a passive folder refresh when Plex doesn't know the show yet", async () => {
+  const { server: plexStub, passiveRefreshPaths, forceRefreshRatingKeys } = makePlexStub([]); // Plex has no matching show - simulates a brand-new show
   await new Promise<void>((resolve) => plexStub.listen(0, resolve));
   const plexAddress = plexStub.address();
   if (plexAddress === null || typeof plexAddress === "string") throw new Error("expected a bound port");
@@ -282,13 +308,48 @@ test("POST /api/cover-art/regenerate triggers a Plex partial-scan refresh for ea
 
     // A show with no logo shouldn't trigger a refresh at all - nothing was written for it.
     await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
-    assert.equal(refreshedPaths.length, 0);
+    assert.equal(passiveRefreshPaths.length, 0);
+    assert.equal(forceRefreshRatingKeys.length, 0);
 
     await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
     await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
 
-    assert.equal(refreshedPaths.length, 1);
-    assert.match(refreshedPaths[0], /Tour de France$/);
+    assert.equal(passiveRefreshPaths.length, 1);
+    assert.match(passiveRefreshPaths[0], /Tour de France$/);
+    assert.equal(forceRefreshRatingKeys.length, 0);
+  } finally {
+    await close();
+    await new Promise<void>((resolve) => plexStub.close(() => resolve()));
+  }
+});
+
+test("POST /api/cover-art/regenerate forces a per-item Plex refresh (not a passive scan) for a show Plex already knows about", async () => {
+  const { server: plexStub, passiveRefreshPaths, forceRefreshRatingKeys } = makePlexStub([
+    { ratingKey: "999", path: "/media/library/Tour de France" },
+  ]);
+  await new Promise<void>((resolve) => plexStub.listen(0, resolve));
+  const plexAddress = plexStub.address();
+  if (plexAddress === null || typeof plexAddress === "string") throw new Error("expected a bound port");
+
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+    // libraryRoot is translated to Plex's "/media/library" view, matching this stub's known show path exactly.
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plex: { url: `http://127.0.0.1:${plexAddress.port}`, sectionId: "35", libraryRoot: "/media/library" },
+        plexToken: "fake-token",
+      }),
+    });
+
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+    await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+
+    assert.equal(forceRefreshRatingKeys.length, 1);
+    assert.equal(forceRefreshRatingKeys[0], "999");
+    assert.equal(passiveRefreshPaths.length, 0); // the force refresh replaces the passive one entirely, not both
   } finally {
     await close();
     await new Promise<void>((resolve) => plexStub.close(() => resolve()));

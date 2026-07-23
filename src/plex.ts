@@ -111,3 +111,60 @@ export async function refreshPlexFolder(
     throw new Error(`Plex refresh returned ${res.status} ${res.statusText}`);
   }
 }
+
+interface PlexShowMetadata {
+  ratingKey?: string;
+  Location?: Array<{ path?: string }>;
+}
+
+/**
+ * Finds a show's Plex ratingKey by matching its root folder location
+ * against every show in the configured library section. Needed because a
+ * passive path-scoped scan (refreshPlexFolder) reliably detects new
+ * episode files but does NOT reliably re-examine local media assets (like
+ * a newly added poster.jpg) for a show Plex already considers fully
+ * matched - confirmed via a real test where "Scan Library" left a fresh
+ * poster invisible in Plex's poster picker, while Plex's own per-item
+ * "Refresh Metadata" picked it up immediately. forceRefreshItem below is
+ * the equivalent of that "Refresh Metadata" action, and needs this
+ * ratingKey lookup first since Domestique only knows the show by its local
+ * folder path, not Plex's internal id for it. Returns null (not a thrown
+ * error) if no show's Location matches - e.g. Plex hasn't indexed this
+ * show at all yet - so the caller can fall back to the passive refresh.
+ */
+export async function findShowRatingKey(
+  plex: PlexConfig,
+  libraryRoot: string,
+  localFolder: string
+): Promise<string | null> {
+  const plexPath = translatePath(localFolder, libraryRoot, plex.libraryRoot);
+
+  const url = new URL(`${plex.url}/library/sections/${plex.sectionId}/all`);
+  url.searchParams.set("type", "2"); // shows
+  url.searchParams.set("X-Plex-Token", plex.token);
+
+  const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    throw new Error(`Plex section listing returned ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { MediaContainer?: { Metadata?: PlexShowMetadata[] } };
+  const items = data.MediaContainer?.Metadata ?? [];
+  const match = items.find((item) => item.Location?.some((loc) => loc.path === plexPath));
+  return match?.ratingKey ?? null;
+}
+
+/**
+ * Forces Plex to re-run its full agent chain (including Local Media
+ * Assets) against one already-known item - the API equivalent of Plex's
+ * own "Refresh Metadata" context-menu action, and the mechanism that
+ * actually picks up a newly-added local poster for a show Plex already
+ * considers complete.
+ */
+export async function forceRefreshItem(plex: PlexConfig, ratingKey: string): Promise<void> {
+  const url = new URL(`${plex.url}/library/metadata/${ratingKey}/refresh`);
+  url.searchParams.set("X-Plex-Token", plex.token);
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    throw new Error(`Plex item refresh returned ${res.status} ${res.statusText}`);
+  }
+}
