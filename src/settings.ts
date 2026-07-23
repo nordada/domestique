@@ -39,6 +39,26 @@ export interface IndexerSettings {
   checkIntervalMs: number;
 }
 
+/**
+ * Controls for the generated Plex poster (poster.jpg) each show gets from
+ * its uploaded logo. Deliberately separate from accentColor above: that's
+ * Domestique's own web-UI theme, this art is displayed inside Plex, a
+ * completely different surface. Non-nullable (unlike the optional
+ * plex/discord/etc integrations) since this is a built-in feature with
+ * sane defaults, not an opt-in external connection.
+ */
+export interface CoverArtSettings {
+  enabled: boolean;
+  /** 6-digit hex background fill (or gradient start when backgroundColor2 is set). */
+  backgroundColor: string;
+  /** Optional 6-digit hex gradient end (top-to-bottom); null = a flat solid-color background. */
+  backgroundColor2: string | null;
+  /** 0.2-1.0, fraction of the poster's shorter dimension an uploaded logo is scaled to fit within. */
+  logoScale: number;
+  /** 6-digit hex used for the show-title text rendered when a show has no uploaded logo. */
+  fallbackTextColor: string;
+}
+
 export interface Settings {
   plex: PlexConfig | null;
   discord: DiscordConfig | null;
@@ -47,6 +67,7 @@ export interface Settings {
   transmission: TransmissionConfig | null;
   /** Optional external race indexer site - the header gauge links straight to it, illuminates once it's set, and glows green/red by its own throttled reachability heartbeat (IndexerSettings.checkIntervalMs). */
   indexer: IndexerSettings | null;
+  coverArt: CoverArtSettings;
   /** Global pause of automatic processing (Transmission webhook + hot-folder poller). Manual paths (web UI upload, match tester) are unaffected. */
   paused: boolean;
   /** Web UI accent color override (6-digit hex, e.g. "#3b82f6") - primary buttons and the "on" status icons. Null uses the built-in default blue. */
@@ -109,6 +130,7 @@ function seedFromEnv(libraryRoot: string): Settings {
     // entirely.
     transmission: null,
     indexer: null,
+    coverArt: normalizeCoverArt(undefined),
     paused: false,
     accentColor: null,
     statusPollIntervalMs: DEFAULT_STATUS_POLL_INTERVAL_MS,
@@ -137,6 +159,7 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     hotfolder: normalizeHotfolder(raw.hotfolder),
     transmission: normalizeTransmission(raw.transmission),
     indexer: normalizeIndexer(raw.indexer),
+    coverArt: normalizeCoverArt(raw.coverArt),
     paused: raw.paused === true,
     accentColor: normalizeAccentColor(raw.accentColor),
     statusPollIntervalMs: normalizeStatusPollIntervalMs(raw.statusPollIntervalMs),
@@ -160,10 +183,17 @@ function normalizeStatusPollIntervalMs(input: unknown): number {
 
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && HEX_COLOR_RE.test(value.trim());
+}
+
+/** Shared by accentColor and the coverArt color fields - falls back when input isn't a valid 6-digit hex string. */
+function normalizeHexColor(input: unknown, fallback: string): string {
+  return isHexColor(input) ? input.trim() : fallback;
+}
+
 function normalizeAccentColor(input: unknown): string | null {
-  if (typeof input !== "string") return null;
-  const trimmed = input.trim();
-  return HEX_COLOR_RE.test(trimmed) ? trimmed : null;
+  return isHexColor(input) ? input.trim() : null;
 }
 
 function normalizeWebhookSecret(input: unknown): string | null {
@@ -244,6 +274,29 @@ function normalizeIndexer(input: unknown): IndexerSettings | null {
   const { url, checkIntervalMs } = input as Record<string, unknown>;
   if (typeof url !== "string" || !url.trim()) return null;
   return { url: url.trim(), checkIntervalMs: normalizeIndexerCheckIntervalMs(checkIntervalMs) };
+}
+
+const DEFAULT_COVER_ART_BACKGROUND = "#14213d";
+const DEFAULT_COVER_ART_FALLBACK_TEXT = "#ffffff";
+const DEFAULT_COVER_ART_LOGO_SCALE = 0.72;
+const MIN_COVER_ART_LOGO_SCALE = 0.2;
+const MAX_COVER_ART_LOGO_SCALE = 1.0;
+
+function normalizeCoverArtLogoScale(input: unknown): number {
+  const parsed = typeof input === "number" ? input : typeof input === "string" ? parseFloat(input) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_COVER_ART_LOGO_SCALE;
+  return Math.min(MAX_COVER_ART_LOGO_SCALE, Math.max(MIN_COVER_ART_LOGO_SCALE, parsed));
+}
+
+function normalizeCoverArt(input: unknown): CoverArtSettings {
+  const raw = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  return {
+    enabled: raw.enabled !== false,
+    backgroundColor: normalizeHexColor(raw.backgroundColor, DEFAULT_COVER_ART_BACKGROUND),
+    backgroundColor2: isHexColor(raw.backgroundColor2) ? (raw.backgroundColor2 as string).trim() : null,
+    logoScale: normalizeCoverArtLogoScale(raw.logoScale),
+    fallbackTextColor: normalizeHexColor(raw.fallbackTextColor, DEFAULT_COVER_ART_FALLBACK_TEXT),
+  };
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {

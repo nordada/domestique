@@ -215,6 +215,71 @@ test("saveSettings accepts a valid 6-digit hex accentColor, normalizes case, and
   assert.equal(saveSettings({}, "/library", settingsPath).accentColor, null);
 });
 
+test("saveSettings defaults coverArt to enabled with the built-in colors, and round-trips valid overrides", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  assert.deepEqual(saveSettings({}, "/library", settingsPath).coverArt, {
+    enabled: true,
+    backgroundColor: "#14213d",
+    backgroundColor2: null,
+    logoScale: 0.72,
+    fallbackTextColor: "#ffffff",
+  });
+
+  const saved = saveSettings(
+    {
+      coverArt: {
+        enabled: false,
+        backgroundColor: "#ABCDEF",
+        backgroundColor2: "#123456",
+        logoScale: 0.9,
+        fallbackTextColor: "#000000",
+      },
+    },
+    "/library",
+    settingsPath
+  ).coverArt;
+  assert.deepEqual(saved, {
+    enabled: false,
+    backgroundColor: "#ABCDEF",
+    backgroundColor2: "#123456",
+    logoScale: 0.9,
+    fallbackTextColor: "#000000",
+  });
+});
+
+test("saveSettings falls back invalid coverArt colors to defaults, clamps logoScale, and treats an invalid backgroundColor2 as null (solid fill)", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  const saved = saveSettings(
+    {
+      coverArt: {
+        backgroundColor: "not-a-hex",
+        backgroundColor2: "also-not-a-hex",
+        logoScale: 5,
+        fallbackTextColor: "#zzz",
+      },
+    },
+    "/library",
+    settingsPath
+  ).coverArt;
+  assert.equal(saved.backgroundColor, "#14213d");
+  assert.equal(saved.backgroundColor2, null);
+  assert.equal(saved.logoScale, 1.0);
+  assert.equal(saved.fallbackTextColor, "#ffffff");
+
+  assert.equal(
+    saveSettings({ coverArt: { logoScale: 0.01 } }, "/library", settingsPath).coverArt.logoScale,
+    0.2
+  );
+  assert.equal(
+    saveSettings({ coverArt: { logoScale: "not-a-number" } }, "/library", settingsPath).coverArt.logoScale,
+    0.72
+  );
+});
+
 test("saveSettings clamps statusPollIntervalMs to [5s, 10min] and falls back to the 20s default for garbage input", async () => {
   const scratch = await makeScratchDir();
   const settingsPath = join(scratch, "settings.json");
