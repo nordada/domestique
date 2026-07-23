@@ -26,7 +26,7 @@ import { matchShow } from "./matcher.js";
 import { buildDestination } from "./namer.js";
 import { copyIntoLibrary, resolveDynamicEpisode, resolveSourceItems, isPathWithin } from "./fileops.js";
 import { refreshPlexFolder } from "./plex.js";
-import { generateCoverArt, refreshPlexForShow } from "./coverArt.js";
+import { generateCoverArt, refreshPlexForShows } from "./coverArt.js";
 import { sendDiscordNotification } from "./discord.js";
 import { recordActivity, DEFAULT_ACTIVITY_PATH } from "./activity.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
@@ -143,6 +143,7 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
   }
 
   if (settings.coverArt.enabled) {
+    const freshlyGeneratedShows: typeof config.shows = [];
     for (const showId of touchedShowIds) {
       const show = config.shows.find((s) => s.id === showId);
       if (!show) continue;
@@ -159,20 +160,24 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
         const result = await generateCoverArt(show, effective, opts.libraryRoot);
         if (result.status === "written") {
           summaryLines.push(`🖼️ generated cover art for "${show.id}"`);
-          if (settings.plex) {
-            try {
-              await refreshPlexForShow(settings.plex, show, opts.libraryRoot);
-            } catch (err) {
-              console.warn(`[plex] failed to refresh "${show.id}" after cover art generation: ${err}`);
-              reviewWorthy = true;
-              summaryLines.push(`⚠️ Plex refresh failed for "${show.id}" after cover art generation: ${err}`);
-            }
-          }
+          freshlyGeneratedShows.push(show);
         }
       } catch (err) {
         console.warn(`[cover-art] failed to generate poster for "${show.id}": ${err}`);
         reviewWorthy = true;
         summaryLines.push(`⚠️ cover art generation failed for "${show.id}": ${err}`);
+      }
+    }
+    // Batched into one ratingKey lookup for every show touched this run,
+    // rather than one lookup per show - a webhook rarely touches more than
+    // one show, but this keeps the same shape as regenerate-all's batching
+    // and avoids re-adding the earlier per-show version's slowdown if that
+    // ever changes.
+    if (settings.plex && freshlyGeneratedShows.length > 0) {
+      const failures = await refreshPlexForShows(settings.plex, freshlyGeneratedShows, opts.libraryRoot);
+      for (const { show, error } of failures) {
+        reviewWorthy = true;
+        summaryLines.push(`⚠️ Plex refresh failed for "${show.id}" after cover art generation: ${error}`);
       }
     }
   }

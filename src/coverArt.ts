@@ -25,7 +25,14 @@ import { loadConfig, type ShowConfig, type ShowsConfigFile } from "./config.js";
 import { loadSettings, resolveCoverArtSettings, type CoverArtSettings } from "./settings.js";
 import { readBodyBuffer, BodyTooLargeError } from "./body.js";
 import { sanitizeName } from "./upload.js";
-import { refreshPlexFolder, findShowRatingKey, forceRefreshItem, type PlexConfig } from "./plex.js";
+import {
+  refreshPlexFolder,
+  fetchShowRatingKeyIndex,
+  lookupShowRatingKey,
+  forceRefreshItem,
+  type PlexConfig,
+  type PlexShowRatingKeyIndex,
+} from "./plex.js";
 import type { ServerOptions } from "./server.js";
 
 // A hidden folder under LIBRARY_ROOT, same "invisible to Plex, already
@@ -144,30 +151,14 @@ async function handleLogoDelete(res: ServerResponse, opts: ServerOptions, url: U
   sendJson(res, 200, { ok: true });
 }
 
-/**
- * Tells Plex to actually look at a show's freshly (re)generated poster.
- * A passive path-scoped scan (refreshPlexFolder) reliably detects new
- * episode files, but real-world testing found it does NOT reliably
- * re-examine local media assets for a show Plex already considers fully
- * matched - "Scan Library" left a new poster invisible in Plex's poster
- * picker, while Plex's own per-item "Refresh Metadata" picked it up
- * immediately. So this looks up the show's Plex ratingKey by matching its
- * root folder location and forces a per-item refresh, falling back to the
- * passive folder refresh if the item can't be found yet (e.g. a brand-new
- * show Plex hasn't indexed at all).
- */
-export async function refreshPlexForShow(plex: PlexConfig, show: ShowConfig, libraryRoot: string): Promise<void> {
+async function refreshOnePlexShow(
+  plex: PlexConfig,
+  show: ShowConfig,
+  libraryRoot: string,
+  index: PlexShowRatingKeyIndex | null
+): Promise<void> {
   const showRootFolder = join(libraryRoot, show.folderName);
-  // A lookup failure (network blip, malformed response, Plex briefly
-  // unreachable) shouldn't lose the refresh entirely - fall back to the
-  // passive folder scan the same as a genuine "not found yet" result, but
-  // logged distinctly since it's a different situation worth noticing.
-  let ratingKey: string | null = null;
-  try {
-    ratingKey = await findShowRatingKey(plex, libraryRoot, showRootFolder);
-  } catch (err) {
-    console.warn(`[plex] ratingKey lookup failed for "${show.id}", falling back to a passive folder refresh: ${err}`);
-  }
+  const ratingKey = index ? lookupShowRatingKey(index, plex, libraryRoot, showRootFolder) : null;
   if (ratingKey) {
     await forceRefreshItem(plex, ratingKey);
   } else {
@@ -176,12 +167,54 @@ export async function refreshPlexForShow(plex: PlexConfig, show: ShowConfig, lib
 }
 
 /**
+ * Tells Plex to actually look at each show's freshly (re)generated poster.
+ * A passive path-scoped scan (refreshPlexFolder) reliably detects new
+ * episode files, but real-world testing found it does NOT reliably
+ * re-examine local media assets for a show Plex already considers fully
+ * matched - "Scan Library" left a new poster invisible in Plex's poster
+ * picker, while Plex's own per-item "Refresh Metadata" picked it up
+ * immediately. So this looks up each show's Plex ratingKey and forces a
+ * per-item refresh, falling back to the passive folder refresh for any
+ * show Plex hasn't indexed at all yet (e.g. brand-new).
+ *
+ * Fetches the ratingKey index ONCE for the whole batch, not once per show -
+ * an earlier version looked a show up individually inside this same loop,
+ * which meant regenerating a few dozen posters re-fetched Plex's entire
+ * section listing a few dozen times in one request, slow enough in
+ * practice to look hung.
+ */
+export async function refreshPlexForShows(
+  plex: PlexConfig,
+  shows: ShowConfig[],
+  libraryRoot: string
+): Promise<Array<{ show: ShowConfig; error: unknown }>> {
+  let index: PlexShowRatingKeyIndex | null = null;
+  try {
+    index = await fetchShowRatingKeyIndex(plex);
+  } catch (err) {
+    console.warn(`[plex] ratingKey index fetch failed, falling back to passive folder refreshes: ${err}`);
+  }
+
+  const failures: Array<{ show: ShowConfig; error: unknown }> = [];
+  for (const show of shows) {
+    try {
+      await refreshOnePlexShow(plex, show, libraryRoot, index);
+    } catch (err) {
+      console.warn(`[plex] refresh failed for "${show.id}": ${err}`);
+      failures.push({ show, error: err });
+    }
+  }
+  return failures;
+}
+
+/**
  * Regenerating writes new poster.jpg files to disk, but Plex won't pick
  * them up on its own until its next scheduled library scan - which can be
  * hours away, the same class of "silently stale until someone notices"
  * problem a missing partial-scan refresh caused before (see server.ts's
- * handleTorrentDone). So each show that actually got a new poster this run
- * gets an explicit refresh via refreshPlexForShow above.
+ * handleTorrentDone). So every show that actually got a new poster this
+ * run gets an explicit refresh via refreshPlexForShows above, batched into
+ * one ratingKey lookup for the whole run.
  */
 async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Promise<void> {
   const config = loadConfig(opts.configPath);
@@ -189,15 +222,12 @@ async function handleRegenerateAll(res: ServerResponse, opts: ServerOptions): Pr
   const results = await regenerateAllCoverArt(config, settings.coverArt, opts.libraryRoot);
 
   if (settings.plex) {
-    for (const { id, result } of results) {
-      if (result.status !== "written") continue;
-      const show = config.shows.find((s) => s.id === id);
-      if (!show) continue;
-      try {
-        await refreshPlexForShow(settings.plex, show, opts.libraryRoot);
-      } catch (err) {
-        console.warn(`[cover-art] Plex refresh failed for "${id}" after regenerate: ${err}`);
-      }
+    const writtenShows = results
+      .filter((r) => r.result.status === "written")
+      .map((r) => config.shows.find((s) => s.id === r.id))
+      .filter((s): s is ShowConfig => Boolean(s));
+    if (writtenShows.length > 0) {
+      await refreshPlexForShows(settings.plex, writtenShows, opts.libraryRoot);
     }
   }
 

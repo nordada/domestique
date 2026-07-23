@@ -86,6 +86,19 @@ function translatePath(localPath: string, from: string, to: string): string {
 }
 
 /**
+ * Applied to every Plex request below except checkPlexLive (which sets its
+ * own, shorter one). None of these calls wait for Plex to actually finish a
+ * scan/refresh - Plex acknowledges and returns quickly, doing the real work
+ * in the background - so a slow/hung response here means something's
+ * actually wrong (Plex overloaded, unreachable, a stalled connection), not
+ * legitimate work in progress. Without this, a single hung request had no
+ * way to fail - it would just block forever, and with several Plex calls
+ * potentially happening in a row (a whole regenerate-all batch), one bad
+ * request could make the entire operation look permanently stuck.
+ */
+const PLEX_REQUEST_TIMEOUT_MS = 10000;
+
+/**
  * Triggers a partial Plex library scan limited to a single folder (e.g. a
  * season folder) via Plex's `/library/sections/{id}/refresh?path=...`
  * endpoint - much faster than a full section scan, and touches only the
@@ -106,7 +119,7 @@ export async function refreshPlexFolder(
   url.searchParams.set("path", plexPath);
   url.searchParams.set("X-Plex-Token", plex.token);
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Plex refresh returned ${res.status} ${res.statusText}`);
   }
@@ -117,40 +130,61 @@ interface PlexShowMetadata {
   Location?: Array<{ path?: string }>;
 }
 
-/**
- * Finds a show's Plex ratingKey by matching its root folder location
- * against every show in the configured library section. Needed because a
- * passive path-scoped scan (refreshPlexFolder) reliably detects new
- * episode files but does NOT reliably re-examine local media assets (like
- * a newly added poster.jpg) for a show Plex already considers fully
- * matched - confirmed via a real test where "Scan Library" left a fresh
- * poster invisible in Plex's poster picker, while Plex's own per-item
- * "Refresh Metadata" picked it up immediately. forceRefreshItem below is
- * the equivalent of that "Refresh Metadata" action, and needs this
- * ratingKey lookup first since Domestique only knows the show by its local
- * folder path, not Plex's internal id for it. Returns null (not a thrown
- * error) if no show's Location matches - e.g. Plex hasn't indexed this
- * show at all yet - so the caller can fall back to the passive refresh.
- */
-export async function findShowRatingKey(
-  plex: PlexConfig,
-  libraryRoot: string,
-  localFolder: string
-): Promise<string | null> {
-  const plexPath = translatePath(localFolder, libraryRoot, plex.libraryRoot);
+/** Plex-side show root folder path -> ratingKey, for every show in the configured library section. */
+export type PlexShowRatingKeyIndex = Map<string, string>;
 
+/**
+ * Fetches every show's ratingKey+root-folder-location in the configured
+ * library section in one request. Needed because a passive path-scoped
+ * scan (refreshPlexFolder) reliably detects new episode files but does NOT
+ * reliably re-examine local media assets (like a newly added poster.jpg)
+ * for a show Plex already considers fully matched - confirmed via a real
+ * test where "Scan Library" left a fresh poster invisible in Plex's poster
+ * picker, while Plex's own per-item "Refresh Metadata" picked it up
+ * immediately. forceRefreshItem below is the equivalent of that "Refresh
+ * Metadata" action, and needs a ratingKey first since Domestique only
+ * knows a show by its local folder path, not Plex's internal id for it.
+ *
+ * Deliberately a single batch fetch + an in-memory index, not a per-show
+ * lookup call: an earlier version called this per show being refreshed,
+ * which meant regenerating N posters re-fetched Plex's entire section
+ * listing N times - fine for one show, but with a few dozen logo'd shows
+ * this became slow enough to look hung. Callers fetch this once per batch
+ * and look up each show's ratingKey from it via lookupShowRatingKey.
+ */
+export async function fetchShowRatingKeyIndex(plex: PlexConfig): Promise<PlexShowRatingKeyIndex> {
   const url = new URL(`${plex.url}/library/sections/${plex.sectionId}/all`);
   url.searchParams.set("type", "2"); // shows
   url.searchParams.set("X-Plex-Token", plex.token);
 
-  const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+  const res = await fetch(url.toString(), {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new Error(`Plex section listing returned ${res.status} ${res.statusText}`);
   }
   const data = (await res.json()) as { MediaContainer?: { Metadata?: PlexShowMetadata[] } };
   const items = data.MediaContainer?.Metadata ?? [];
-  const match = items.find((item) => item.Location?.some((loc) => loc.path === plexPath));
-  return match?.ratingKey ?? null;
+  const index: PlexShowRatingKeyIndex = new Map();
+  for (const item of items) {
+    if (!item.ratingKey) continue;
+    for (const loc of item.Location ?? []) {
+      if (loc.path) index.set(loc.path, item.ratingKey);
+    }
+  }
+  return index;
+}
+
+/** Pure lookup against an already-fetched index - no network call. Returns null if this show isn't in Plex's index yet (e.g. a brand-new show), so the caller can fall back to the passive refresh. */
+export function lookupShowRatingKey(
+  index: PlexShowRatingKeyIndex,
+  plex: PlexConfig,
+  libraryRoot: string,
+  localFolder: string
+): string | null {
+  const plexPath = translatePath(localFolder, libraryRoot, plex.libraryRoot);
+  return index.get(plexPath) ?? null;
 }
 
 /**
@@ -163,7 +197,7 @@ export async function findShowRatingKey(
 export async function forceRefreshItem(plex: PlexConfig, ratingKey: string): Promise<void> {
   const url = new URL(`${plex.url}/library/metadata/${ratingKey}/refresh`);
   url.searchParams.set("X-Plex-Token", plex.token);
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Plex item refresh returned ${res.status} ${res.statusText}`);
   }

@@ -107,13 +107,13 @@ test("regenerateAllCoverArt applies a show's per-event coverArt override instead
   assert.ok(g > r && g > b, `expected a green-dominant corner pixel, got rgb(${r},${g},${b})`);
 });
 
-async function makeScratchServer(webui: { password: string; username?: string } | null) {
+async function makeScratchServer(webui: { password: string; username?: string } | null, shows: ShowConfig[] = [TDF]) {
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-coverart-config-"));
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-coverart-lib-"));
   const configPath = join(configDir, "events.json");
   await fs.writeFile(
     configPath,
-    JSON.stringify({ shows: [TDF] }) + "\n",
+    JSON.stringify({ shows }) + "\n",
     "utf-8"
   );
 
@@ -268,9 +268,11 @@ test("POST /api/cover-art/regenerate skips a show with no logo, and force-regene
 function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
   const passiveRefreshPaths: string[] = [];
   const forceRefreshRatingKeys: string[] = [];
+  let allRequestCount = 0;
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "", "http://internal");
     if (url.pathname.endsWith("/all")) {
+      allRequestCount++;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         MediaContainer: { Metadata: knownShows.map((s) => ({ ratingKey: s.ratingKey, Location: [{ path: s.path }] })) },
@@ -288,7 +290,7 @@ function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
     res.writeHead(200);
     res.end();
   });
-  return { server, passiveRefreshPaths, forceRefreshRatingKeys };
+  return { server, passiveRefreshPaths, forceRefreshRatingKeys, getAllRequestCount: () => allRequestCount };
 }
 
 test("POST /api/cover-art/regenerate falls back to a passive folder refresh when Plex doesn't know the show yet", async () => {
@@ -350,6 +352,44 @@ test("POST /api/cover-art/regenerate forces a per-item Plex refresh (not a passi
     assert.equal(forceRefreshRatingKeys.length, 1);
     assert.equal(forceRefreshRatingKeys[0], "999");
     assert.equal(passiveRefreshPaths.length, 0); // the force refresh replaces the passive one entirely, not both
+  } finally {
+    await close();
+    await new Promise<void>((resolve) => plexStub.close(() => resolve()));
+  }
+});
+
+test("POST /api/cover-art/regenerate fetches Plex's ratingKey index once for the whole batch, not once per show", async () => {
+  const giro: ShowConfig = { id: "giro", folderName: "Giro D'Italia", matchKeywords: ["giro"], type: "stage-race" };
+  const { server: plexStub, forceRefreshRatingKeys, getAllRequestCount } = makePlexStub([
+    { ratingKey: "111", path: "/media/library/Tour de France" },
+    { ratingKey: "222", path: "/media/library/Giro D'Italia" },
+  ]);
+  await new Promise<void>((resolve) => plexStub.listen(0, resolve));
+  const plexAddress = plexStub.address();
+  if (plexAddress === null || typeof plexAddress === "string") throw new Error("expected a bound port");
+
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" }, [TDF, giro]);
+  try {
+    const auth = authHeader("correct-password");
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plex: { url: `http://127.0.0.1:${plexAddress.port}`, sectionId: "35", libraryRoot: "/media/library" },
+        plexToken: "fake-token",
+      }),
+    });
+
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=giro`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+    await fetch(`${baseUrl}/api/cover-art/regenerate`, { method: "POST", headers: { Authorization: auth } });
+
+    // The whole point of the fix: two shows refreshed, but only one fetch of
+    // Plex's section listing - an earlier version fetched it once per show,
+    // which made regenerating a real library's worth of logo'd shows slow
+    // enough in practice to look hung.
+    assert.equal(getAllRequestCount(), 1);
+    assert.equal(forceRefreshRatingKeys.sort().join(","), "111,222");
   } finally {
     await close();
     await new Promise<void>((resolve) => plexStub.close(() => resolve()));
