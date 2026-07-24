@@ -35,6 +35,7 @@ import { parseName } from "./parser.js";
 import { getRecentActivity, recordActivity, markActivityRead } from "./activity.js";
 import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
 import { handleCoverArtRequest } from "./coverArt.js";
+import { syncSortTitlesToPlex } from "./sortTitles.js";
 import { checkPlexLive, plexLibraryUrl } from "./plex.js";
 import {
   getTransmissionTorrentSummary,
@@ -565,6 +566,22 @@ export async function handleWebUiRequest(
       }
       const saved = setPaused(paused, opts.libraryRoot, opts.settingsPath);
       sendJson(res, 200, { ok: true, paused: saved.paused });
+      return true;
+    }
+
+    if (req.method === "POST" && url === "/api/sort-titles/sync") {
+      const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+      if (!settings.plex) {
+        sendJson(res, 400, { error: "Plex isn't configured - set it up in Settings first" });
+        return true;
+      }
+      const config = loadConfig(opts.configPath);
+      try {
+        const results = await syncSortTitlesToPlex(config, settings.plex, opts.libraryRoot);
+        sendJson(res, 200, { ok: true, results });
+      } catch (err) {
+        sendJson(res, 502, { error: `Plex sync failed: ${err}` });
+      }
       return true;
     }
 

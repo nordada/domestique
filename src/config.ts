@@ -62,6 +62,14 @@ export interface ShowConfig {
   autoCreated?: boolean;
   /** optional per-event cover-art customization; omitted entirely means "use Settings.coverArt as-is" */
   coverArt?: ShowCoverArtOverride;
+  /**
+   * Optional per-show ordering number, used to push a locked "sort title"
+   * to Plex (see src/sortTitles.ts) so a curated set of shows - e.g. this
+   * season's WorldTour calendar - can be browsed in chronological order in
+   * Plex instead of alphabetically, without hand-editing each show's sort
+   * title in Plex itself. Shows with no sortOrder are left untouched.
+   */
+  sortOrder?: number;
 }
 
 export interface ShowsConfigFile {

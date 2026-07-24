@@ -535,13 +535,17 @@
 <section id="events-section">
   <div class="toolbar">
     <h2 style="margin:0">Events (<span id="events-count">0</span>)</h2>
-    <button class="primary" id="add-event-btn">Add event</button>
+    <div class="row" style="flex:0 0 auto; gap:0.5rem;">
+      <button id="sync-sort-titles-btn" title="Push each event's Sort order (below) to Plex as a locked sort title">Sync sort order to Plex</button>
+      <button class="primary" id="add-event-btn">Add event</button>
+    </div>
   </div>
+  <div class="status-msg" id="sync-sort-titles-status"></div>
   <input type="text" id="events-search" placeholder="Filter by id, folder name, or keyword…" style="margin-bottom:0.75rem;">
   <div class="events-table-scroll">
     <table>
       <thead>
-        <tr><th></th><th></th><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
+        <tr><th></th><th></th><th>Sort</th><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
       </thead>
       <tbody id="events-tbody"></tbody>
     </table>
@@ -578,6 +582,9 @@
       </select>
     </label>
   </div>
+  <label><span>Sort order (optional - a number used to push a locked, zero-padded sort title to Plex, e.g. "01 Tour Down Under", so a curated set of events can be browsed chronologically instead of alphabetically. Leave blank to leave Plex's sort title alone.)</span>
+    <input type="number" id="f-sort-order" placeholder="" min="1" step="1" style="max-width:10rem;">
+  </label>
 
   <div id="categories-section" class="hidden">
     <span>Categories (fixed episode order)</span>
@@ -1317,6 +1324,7 @@ function eventsTableRow(event, index) {
   return `<tr>
     <td><button type="button" class="event-color-dot" data-color-edit="${index}" title="${esc(colorTitle)}" style="background:${overrideColor ? esc(overrideColor) : "transparent"};"></button></td>
     <td><img class="logo-thumb" src="/api/cover-art/logo?showId=${esc(event.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"></td>
+    <td>${event.sortOrder != null ? esc(String(event.sortOrder)) : ""}</td>
     <td><code>${esc(event.id)}</code></td>
     <td>${esc(event.folderName)}</td>
     <td>${esc(event.type)}</td>
@@ -1350,7 +1358,7 @@ function renderEvents() {
     .filter(({ event }) => matches(event));
   tbody.innerHTML = rows.length
     ? rows.map(({ event, index }) => eventsTableRow(event, index)).join("")
-    : `<tr><td colspan="7" style="opacity:0.6;">No events match "${esc(query)}".</td></tr>`;
+    : `<tr><td colspan="9" style="opacity:0.6;">No events match "${esc(query)}".</td></tr>`;
   tbody.querySelectorAll("[data-edit]").forEach((btn) => {
     btn.addEventListener("click", () => openForm(parseInt(btn.dataset.edit, 10)));
   });
@@ -1421,6 +1429,7 @@ function openForm(index) {
   document.getElementById("f-matchKeywords").value = event ? event.matchKeywords.join("\n") : "";
   document.getElementById("f-type").value = event ? event.type : "one-day";
   document.getElementById("f-isHighlights").value = event && event.isHighlights ? "true" : "false";
+  document.getElementById("f-sort-order").value = event && event.sortOrder != null ? event.sortOrder : "";
   renderCategories(event && event.categories ? event.categories : []);
   updateCategoriesVisibility();
   const override = event && event.coverArt;
@@ -1474,6 +1483,8 @@ async function saveEvent() {
   const event = { id, folderName, matchKeywords, type };
   if (filenamePrefix) event.filenamePrefix = filenamePrefix;
   if (isHighlights) event.isHighlights = true;
+  const sortOrderRaw = document.getElementById("f-sort-order").value.trim();
+  if (sortOrderRaw) event.sortOrder = parseInt(sortOrderRaw, 10);
   if (type === "multi-category-fixed") event.categories = readCategoriesFromForm();
   if (document.getElementById("f-coverart-override-enabled").checked) {
     event.coverArt = {
@@ -1725,6 +1736,34 @@ async function loadFullActivityLog() {
 }
 
 document.getElementById("add-event-btn").addEventListener("click", () => openForm(null));
+document.getElementById("sync-sort-titles-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("sync-sort-titles-btn");
+  const statusEl = document.getElementById("sync-sort-titles-status");
+  btn.disabled = true;
+  statusEl.textContent = "Syncing…";
+  statusEl.className = "status-msg";
+  try {
+    const data = await api("/api/sort-titles/sync", { method: "POST" });
+    const synced = data.results.filter((r) => r.status === "synced").length;
+    const skipped = data.results.filter((r) => r.status === "skipped").length;
+    const errors = data.results.filter((r) => r.status === "error").length;
+    if (data.results.length === 0) {
+      statusEl.textContent = "No events have a Sort order set yet - nothing to sync.";
+      statusEl.className = "status-msg";
+    } else {
+      const parts = [`Synced ${synced}`];
+      if (skipped > 0) parts.push(`${skipped} not yet in Plex (archive an episode first)`);
+      if (errors > 0) parts.push(`${errors} failed - check the server log`);
+      statusEl.textContent = parts.join(", ") + ".";
+      statusEl.className = errors > 0 ? "status-msg err" : "status-msg ok";
+    }
+  } catch (err) {
+    statusEl.textContent = `Failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  } finally {
+    btn.disabled = false;
+  }
+});
 document.getElementById("events-search").addEventListener("input", renderEvents);
 document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
 document.getElementById("save-event-btn").addEventListener("click", saveEvent);

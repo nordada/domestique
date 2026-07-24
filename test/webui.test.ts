@@ -528,6 +528,64 @@ test("PUT /api/paused toggles the global pause flag, reflected in /api/status, a
   }
 });
 
+test("POST /api/sort-titles/sync requires Plex to be configured, then pushes a locked sort title for the seeded show once it is", async () => {
+  const sortTitleUpdates: Array<{ id: string; titleSortValue: string }> = [];
+  const plexStub = createHttpServer((req, res) => {
+    const url = new URL(req.url ?? "", "http://internal");
+    if (req.method === "GET" && url.pathname.endsWith("/all")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        MediaContainer: { Metadata: [{ ratingKey: "999", Location: [{ path: "/library/Tour de France" }] }] },
+      }));
+      return;
+    }
+    if (req.method === "PUT" && url.pathname.endsWith("/all")) {
+      sortTitleUpdates.push({ id: url.searchParams.get("id") ?? "", titleSortValue: url.searchParams.get("titleSort.value") ?? "" });
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => plexStub.listen(0, resolve));
+  const plexAddress = plexStub.address();
+  if (plexAddress === null || typeof plexAddress === "string") throw new Error("expected a bound port");
+
+  const { baseUrl, configPath, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+
+    const beforePlexRes = await fetch(`${baseUrl}/api/sort-titles/sync`, { method: "POST", headers: { Authorization: auth } });
+    assert.equal(beforePlexRes.status, 400);
+
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plex: { url: `http://127.0.0.1:${plexAddress.port}`, sectionId: "35", libraryRoot: "/library" },
+        plexToken: "fake-token",
+      }),
+    });
+
+    // Give the seeded "tdf" show a sortOrder directly on disk, matching how
+    // saving it from the Events tab would persist the same field.
+    const config = JSON.parse(await fs.readFile(configPath, "utf-8"));
+    config.shows[0].sortOrder = 1;
+    await fs.writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    const syncRes = await fetch(`${baseUrl}/api/sort-titles/sync`, { method: "POST", headers: { Authorization: auth } });
+    assert.equal(syncRes.status, 200);
+    const body = (await syncRes.json()) as { ok: boolean; results: Array<{ id: string; status: string }> };
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.results, [{ id: "tdf", status: "synced" }]);
+    assert.deepEqual(sortTitleUpdates, [{ id: "999", titleSortValue: "01 Tour de France" }]);
+  } finally {
+    await close();
+    await new Promise<void>((resolve) => plexStub.close(() => resolve()));
+  }
+});
+
 test("POST /webhook/torrent-done is skipped without side effects while paused", async () => {
   const { baseUrl, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
   try {

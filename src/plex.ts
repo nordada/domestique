@@ -202,3 +202,29 @@ export async function forceRefreshItem(plex: PlexConfig, ratingKey: string): Pro
     throw new Error(`Plex item refresh returned ${res.status} ${res.statusText}`);
   }
 }
+
+/**
+ * Locks a show's Plex "sort title" field to an explicit value - the API
+ * equivalent of opening the show in Plex, editing its "Sort Title" field
+ * by hand, and clicking the lock icon so a later metadata refresh doesn't
+ * revert it. Domestique never reads this field back; it's a one-way push
+ * used to let a curated numeric ordering (see ShowConfig.sortOrder and
+ * src/sortTitles.ts's formatSortTitle) drive Plex's own alphabetical
+ * show-list sort, since Plex has no separate "custom manual order"
+ * concept for a whole library. Uses the same field-edit endpoint Plex's
+ * own web UI and third-party tools (e.g. the PlexAPI Python library) use
+ * for locking individual metadata fields on an item.
+ */
+export async function setShowSortTitle(plex: PlexConfig, ratingKey: string, sortTitle: string): Promise<void> {
+  const url = new URL(`${plex.url}/library/sections/${plex.sectionId}/all`);
+  url.searchParams.set("type", "2"); // shows
+  url.searchParams.set("id", ratingKey);
+  url.searchParams.set("titleSort.value", sortTitle);
+  url.searchParams.set("titleSort.locked", "1");
+  url.searchParams.set("X-Plex-Token", plex.token);
+
+  const res = await fetch(url.toString(), { method: "PUT", signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT_MS) });
+  if (!res.ok) {
+    throw new Error(`Plex sort-title update returned ${res.status} ${res.statusText}`);
+  }
+}
