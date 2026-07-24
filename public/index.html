@@ -586,6 +586,7 @@
       <img id="f-logo-preview" class="hidden" style="max-width:100px; max-height:100px; border-radius:6px; border:1px solid var(--border); object-fit:contain; background:#fff;">
       <button type="button" id="f-logo-upload-btn">Upload logo…</button>
       <button type="button" id="f-logo-wiki-search-btn">Search Wikipedia…</button>
+      <button type="button" id="f-logo-url-btn">Add from URL…</button>
       <button type="button" id="f-logo-remove-btn" class="hidden">Remove logo</button>
     </div>
     <input type="file" id="f-logo-input" class="hidden" accept="image/*">
@@ -596,6 +597,12 @@
       </div>
       <p id="f-logo-wiki-broadened-note" class="hidden" style="font-size:0.8rem; opacity:0.7; margin:0.4rem 0 0;">No file titled with a match for this search - showing Commons' broader results instead, which can be less precise.</p>
       <div class="wiki-results" id="f-logo-wiki-results"></div>
+    </div>
+    <div id="f-logo-url-panel" class="hidden">
+      <div class="row" style="align-items:center; margin-top:0.5rem;">
+        <input type="text" id="f-logo-url-input" placeholder="https://example.com/logo.png">
+        <button type="button" id="f-logo-url-go-btn">Use this URL</button>
+      </div>
     </div>
     <div class="status-msg" id="f-logo-status"></div>
   </div>
@@ -1417,6 +1424,8 @@ function openForm(index) {
   document.getElementById("f-logo-wiki-query").value = "";
   document.getElementById("f-logo-wiki-results").innerHTML = "";
   document.getElementById("f-logo-wiki-broadened-note").classList.add("hidden");
+  document.getElementById("f-logo-url-panel").classList.add("hidden");
+  document.getElementById("f-logo-url-input").value = "";
   if (event) {
     updateLogoPreview(event.id);
   } else {
@@ -1773,6 +1782,43 @@ document.getElementById("f-logo-wiki-search-btn").addEventListener("click", () =
     queryInput.value = `${events[editingIndex].folderName} logo`;
     queryInput.focus();
   }
+  if (wasHidden) document.getElementById("f-logo-url-panel").classList.add("hidden");
+});
+document.getElementById("f-logo-url-btn").addEventListener("click", () => {
+  const panel = document.getElementById("f-logo-url-panel");
+  const wasHidden = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden");
+  if (wasHidden) {
+    document.getElementById("f-logo-wiki-search-panel").classList.add("hidden");
+    document.getElementById("f-logo-url-input").focus();
+  }
+});
+async function useLogoFromUrl() {
+  const urlInput = document.getElementById("f-logo-url-input");
+  const value = urlInput.value.trim();
+  const statusEl = document.getElementById("f-logo-status");
+  if (!value || editingIndex === null) return;
+  statusEl.textContent = "Fetching…";
+  statusEl.className = "status-msg";
+  try {
+    await api(`/api/cover-art/logo/from-external-url?showId=${encodeURIComponent(events[editingIndex].id)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: value }),
+    });
+    statusEl.textContent = "Logo set from URL.";
+    statusEl.className = "status-msg ok";
+    updateLogoPreview(events[editingIndex].id);
+    document.getElementById("f-logo-url-panel").classList.add("hidden");
+    urlInput.value = "";
+  } catch (err) {
+    statusEl.textContent = `Failed to set logo: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+document.getElementById("f-logo-url-go-btn").addEventListener("click", useLogoFromUrl);
+document.getElementById("f-logo-url-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); useLogoFromUrl(); }
 });
 async function runWikiLogoSearch() {
   const query = document.getElementById("f-logo-wiki-query").value.trim();
