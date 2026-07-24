@@ -14,64 +14,138 @@ async function withStub(handler: RequestListener) {
   };
 }
 
-// title-scoped attempt always fires first (see searchCommonsLogos's doc
-// comment) - the stub inspects gsrsearch to tell which attempt it's
-// answering, since most tests only care about one or the other.
-function stubResponseFor(page: { titleScoped: unknown; broad: unknown }): RequestListener {
+/**
+ * searchCommonsLogos tries four tiers in order (Wikipedia title-scoped,
+ * Wikipedia broad, Commons title-scoped, Commons broad) - both apiUrl and
+ * wikipediaApiUrl are pointed at this same stub in every test below, and
+ * this distinguishes which tier a given request belongs to by its actual
+ * query params: piprop only appears on Wikipedia requests (vs. Commons'
+ * iiprop), and intitle: only appears in a title-scoped gsrsearch value -
+ * exactly the shape the real four separate HTTP calls take, not an
+ * artificial stand-in for them.
+ */
+function stubResponseFor(page: {
+  wikipediaTitle: unknown;
+  wikipediaBroad: unknown;
+  commonsTitle: unknown;
+  commonsBroad: unknown;
+}): RequestListener {
   return (req, res) => {
     const url = new URL(req.url ?? "", "http://internal");
-    const gsrsearch = url.searchParams.get("gsrsearch") ?? "";
-    const isTitleScoped = gsrsearch.includes("intitle:");
+    const isWikipedia = url.searchParams.has("piprop");
+    const isTitleScoped = (url.searchParams.get("gsrsearch") ?? "").includes("intitle:");
+    const body = isWikipedia
+      ? isTitleScoped
+        ? page.wikipediaTitle
+        : page.wikipediaBroad
+      : isTitleScoped
+        ? page.commonsTitle
+        : page.commonsBroad;
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(isTitleScoped ? page.titleScoped : page.broad));
+    res.end(JSON.stringify(body));
   };
 }
 
-test("searchCommonsLogos parses a realistic Commons API response into flat results, with broadened:false when the title-scoped attempt already found something", async () => {
+const EMPTY = { query: {} };
+
+test("searchCommonsLogos prefers a title-scoped Wikipedia article's page image, with broadened:false", async () => {
   const stub = await withStub(
     stubResponseFor({
-      titleScoped: {
+      wikipediaTitle: {
         query: {
           pages: {
-            "111": {
-              title: "File:Tour de France logo.svg",
-              imageinfo: [{ url: "https://upload.wikimedia.org/x/TdF.svg", thumburl: "https://upload.wikimedia.org/x/thumb/TdF.png" }],
+            "1": {
+              title: "Tour de France",
+              thumbnail: { source: "https://upload.wikimedia.org/wikipedia/commons/thumb/x/TdF-thumb.png" },
+              original: { source: "https://upload.wikimedia.org/wikipedia/commons/x/TdF-logo.svg" },
             },
-            "222": {
-              title: "File:Tour de France 2023 logo.png",
-              imageinfo: [{ url: "https://upload.wikimedia.org/x/TdF2023.png" }], // no thumburl - falls back to the full url
-            },
-            "333": { title: "File:Something with no imageinfo" }, // dropped - no usable url
+            "2": { title: "2024 Tour de France" }, // dropped - no page image at all
           },
         },
       },
-      broad: { query: {} }, // should never be reached - the title-scoped attempt already succeeded
+      // None of these should ever be reached - tier 1 already succeeded.
+      wikipediaBroad: EMPTY,
+      commonsTitle: EMPTY,
+      commonsBroad: EMPTY,
     })
   );
   try {
-    const { results, broadened } = await searchCommonsLogos("tour de france logo", { apiUrl: stub.url });
+    const { results, broadened } = await searchCommonsLogos("Tour de France", { apiUrl: stub.url, wikipediaApiUrl: stub.url });
     assert.equal(broadened, false);
-    assert.equal(results.length, 2);
+    assert.equal(results.length, 1);
     assert.deepEqual(results[0], {
-      title: "File:Tour de France logo.svg",
-      fileUrl: "https://upload.wikimedia.org/x/TdF.svg",
-      thumbUrl: "https://upload.wikimedia.org/x/thumb/TdF.png",
-    });
-    assert.deepEqual(results[1], {
-      title: "File:Tour de France 2023 logo.png",
-      fileUrl: "https://upload.wikimedia.org/x/TdF2023.png",
-      thumbUrl: "https://upload.wikimedia.org/x/TdF2023.png", // fell back to fileUrl
+      title: "Tour de France",
+      fileUrl: "https://upload.wikimedia.org/wikipedia/commons/x/TdF-logo.svg",
+      thumbUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/x/TdF-thumb.png",
     });
   } finally {
     await stub.close();
   }
 });
 
-test("searchCommonsLogos falls back to the broader search when the title-scoped attempt finds nothing, and flags broadened:true", async () => {
+test("searchCommonsLogos falls back to broad Wikipedia search when the title-scoped attempt has no image-bearing article, still broadened:true", async () => {
   const stub = await withStub(
     stubResponseFor({
-      titleScoped: { query: {} }, // no title match, e.g. no dedicated logo file exists
-      broad: {
+      wikipediaTitle: { query: { pages: { "1": { title: "Some Race" } } } }, // matched, but no page image
+      wikipediaBroad: {
+        query: {
+          pages: {
+            "2": {
+              title: "Some Race (broad match)",
+              original: { source: "https://upload.wikimedia.org/wikipedia/commons/x/broad.jpg" },
+            },
+          },
+        },
+      },
+      commonsTitle: EMPTY, // should never be reached
+      commonsBroad: EMPTY,
+    })
+  );
+  try {
+    const { results, broadened } = await searchCommonsLogos("Some Race", { apiUrl: stub.url, wikipediaApiUrl: stub.url });
+    assert.equal(broadened, true);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, "Some Race (broad match)");
+  } finally {
+    await stub.close();
+  }
+});
+
+test("searchCommonsLogos falls back to Commons title-scoped search when neither Wikipedia tier finds an image", async () => {
+  const stub = await withStub(
+    stubResponseFor({
+      wikipediaTitle: EMPTY,
+      wikipediaBroad: EMPTY,
+      commonsTitle: {
+        query: {
+          pages: {
+            "111": {
+              title: "File:Some Race logo.svg",
+              imageinfo: [{ url: "https://upload.wikimedia.org/x/logo.svg", thumburl: "https://upload.wikimedia.org/x/thumb-logo.png" }],
+            },
+          },
+        },
+      },
+      commonsBroad: EMPTY, // should never be reached
+    })
+  );
+  try {
+    const { results, broadened } = await searchCommonsLogos("Some Race", { apiUrl: stub.url, wikipediaApiUrl: stub.url });
+    assert.equal(broadened, true);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, "File:Some Race logo.svg");
+  } finally {
+    await stub.close();
+  }
+});
+
+test("searchCommonsLogos falls back all the way to Commons' broad search when nothing else finds anything", async () => {
+  const stub = await withStub(
+    stubResponseFor({
+      wikipediaTitle: EMPTY,
+      wikipediaBroad: EMPTY,
+      commonsTitle: EMPTY,
+      commonsBroad: {
         query: {
           pages: {
             "444": {
@@ -84,10 +158,35 @@ test("searchCommonsLogos falls back to the broader search when the title-scoped 
     })
   );
   try {
-    const { results, broadened } = await searchCommonsLogos("obscure race logo", { apiUrl: stub.url });
+    const { results, broadened } = await searchCommonsLogos("obscure race", { apiUrl: stub.url, wikipediaApiUrl: stub.url });
     assert.equal(broadened, true);
     assert.equal(results.length, 1);
-    assert.equal(results[0].title, "File:Some loosely related file.jpg");
+    assert.deepEqual(results[0], {
+      title: "File:Some loosely related file.jpg",
+      fileUrl: "https://upload.wikimedia.org/x/loose.jpg",
+      thumbUrl: "https://upload.wikimedia.org/x/loose.jpg", // no thumburl - falls back to fileUrl
+    });
+  } finally {
+    await stub.close();
+  }
+});
+
+test("searchCommonsLogos caps returned results at `limit` even when the raw Wikipedia fetch found more", async () => {
+  const manyPages: Record<string, unknown> = {};
+  for (let i = 0; i < 5; i++) {
+    manyPages[String(i)] = { title: `Race Edition ${i}`, original: { source: `https://upload.wikimedia.org/x/${i}.jpg` } };
+  }
+  const stub = await withStub(
+    stubResponseFor({
+      wikipediaTitle: { query: { pages: manyPages } },
+      wikipediaBroad: EMPTY,
+      commonsTitle: EMPTY,
+      commonsBroad: EMPTY,
+    })
+  );
+  try {
+    const { results } = await searchCommonsLogos("Race", { apiUrl: stub.url, wikipediaApiUrl: stub.url, limit: 2 });
+    assert.equal(results.length, 2);
   } finally {
     await stub.close();
   }
@@ -99,19 +198,19 @@ test("searchCommonsLogos throws on a non-ok response", async () => {
     res.end();
   });
   try {
-    await assert.rejects(searchCommonsLogos("x", { apiUrl: stub.url }), /503/);
+    await assert.rejects(searchCommonsLogos("x", { apiUrl: stub.url, wikipediaApiUrl: stub.url }), /503/);
   } finally {
     await stub.close();
   }
 });
 
-test("searchCommonsLogos returns an empty result set (broadened:true) when neither attempt finds anything", async () => {
+test("searchCommonsLogos returns an empty result set (broadened:true) when nothing at all matches", async () => {
   const stub = await withStub((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ query: {} }));
+    res.end(JSON.stringify(EMPTY));
   });
   try {
-    const { results, broadened } = await searchCommonsLogos("something with no results", { apiUrl: stub.url });
+    const { results, broadened } = await searchCommonsLogos("something with no results", { apiUrl: stub.url, wikipediaApiUrl: stub.url });
     assert.deepEqual(results, []);
     assert.equal(broadened, true);
   } finally {

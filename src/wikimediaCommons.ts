@@ -17,6 +17,7 @@
  */
 
 const COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php";
+const WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php";
 const COMMONS_UPLOAD_HOST = "upload.wikimedia.org";
 // Wikimedia's API etiquette asks for a descriptive User-Agent identifying
 // the calling application, rather than a generic/default one.
@@ -39,16 +40,72 @@ interface CommonsSearchPage {
   imageinfo?: Array<{ url?: string; thumburl?: string }>;
 }
 
+interface WikipediaSearchPage {
+  title?: string;
+  thumbnail?: { source?: string };
+  original?: { source?: string };
+}
+
 export interface CommonsSearchResponse {
   results: CommonsSearchResult[];
   /**
-   * Whether the "title" (precise) attempt found nothing and this is
-   * Commons' broader full-text search instead - see runCommonsSearch's
-   * doc comment for why that matters. The web UI surfaces this so a user
-   * seeing odd results understands why, rather than assuming Domestique's
-   * own logic picked a bad result.
+   * Whether this came from the fallback Commons File-namespace search
+   * rather than the primary Wikipedia-article-image attempt - see
+   * searchCommonsLogos's doc comment for why that matters. The web UI
+   * surfaces this so a user seeing odd results understands why, rather
+   * than assuming Domestique's own logic picked a bad result.
    */
   broadened: boolean;
+}
+
+// Requested well above the number of results actually shown (see
+// searchCommonsLogos's `limit` param) - most Wikipedia articles matching a
+// race query (individual year editions, "X Women", etc.) have NO page
+// image at all, so a raw search needs a much bigger pool to find enough
+// candidates that do. Verified live: an intitle-scoped "Milan-San Remo"
+// search found its first image-bearing article only at position 12+ of the
+// raw (unfiltered) result list.
+const WIKIPEDIA_RAW_FETCH_LIMIT = 30;
+
+/**
+ * Runs one Wikipedia article search for `gsrsearch` and returns every
+ * matching article that actually has a "page image" - the single
+ * representative image MediaWiki's PageImages extension picks for a page,
+ * almost always its infobox image. Articles with no page image at all
+ * (common for minor one-off event pages, e.g. a single year's edition with
+ * only a route-map image or none) are skipped outright rather than
+ * returned with an empty thumbnail. Shared by both the title-scoped and
+ * broad Wikipedia attempts in searchCommonsLogos - only the raw
+ * `gsrsearch` value differs between them.
+ */
+async function searchWikipediaArticleImages(gsrsearch: string, apiUrl: string): Promise<CommonsSearchResult[]> {
+  const url = new URL(apiUrl);
+  url.searchParams.set("action", "query");
+  url.searchParams.set("generator", "search");
+  url.searchParams.set("gsrsearch", gsrsearch);
+  url.searchParams.set("gsrnamespace", "0"); // articles only, not Talk/User/etc
+  url.searchParams.set("gsrlimit", String(WIKIPEDIA_RAW_FETCH_LIMIT));
+  url.searchParams.set("prop", "pageimages");
+  url.searchParams.set("piprop", "thumbnail|original");
+  url.searchParams.set("pithumbsize", "200");
+  url.searchParams.set("format", "json");
+
+  const res = await fetch(url.toString(), {
+    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new Error(`Wikipedia search returned ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { query?: { pages?: Record<string, WikipediaSearchPage> } };
+  const pages = data.query?.pages ? Object.values(data.query.pages) : [];
+  const results: CommonsSearchResult[] = [];
+  for (const page of pages) {
+    const original = page.original?.source;
+    if (!page.title || !original) continue;
+    results.push({ title: page.title, fileUrl: original, thumbUrl: page.thumbnail?.source ?? original });
+  }
+  return results;
 }
 
 async function runCommonsSearch(gsrsearch: string, limit: number, apiUrl: string): Promise<CommonsSearchResult[]> {
@@ -83,52 +140,86 @@ async function runCommonsSearch(gsrsearch: string, limit: number, apiUrl: string
   return results;
 }
 
+/** `intitle:word1 intitle:word2 ...` - requires every query word to actually appear in the result's own title, not just anywhere in its full text/metadata. Shared by both the Wikipedia and Commons title-scoped tiers below. */
+function titleScopedQuery(query: string): string {
+  return query.trim().split(/\s+/).filter(Boolean).map((w) => `intitle:${w}`).join(" ");
+}
+
 /**
- * Searches Wikimedia Commons' File namespace (gsrnamespace=6), not plain
- * Wikipedia article search - a Commons file title is usually the actual
- * clean logo asset itself (e.g. "File:Tour de France logo.svg"), where a
- * Wikipedia article's own lead/infobox image is just as often a course map
- * or an action photo instead of the event's logo.
+ * Finds logo candidates for a race, trying four progressively broader (and
+ * progressively less precise) sources in order, stopping at the first that
+ * finds anything:
  *
- * Two-tier query strategy, found necessary from real testing (not just
- * theorized): Commons' plain full-text search ranks by term frequency
- * across a file's ENTIRE description/metadata text, not primarily by
- * title. For a short, common-word query like "<race> logo" this regularly
- * surfaces garbage - e.g. "Milan-San Remo logo" and "Paris-Roubaix logo"
- * returned old scanned legal PDFs with no connection to cycling, because
- * those words happened to appear somewhere in the documents' own metadata.
- * So the first attempt wraps every query word in `intitle:`, which
- * requires each word to actually appear in the file's title - when a
- * dedicated logo file exists, this is dramatically cleaner. But it's also
- * fragile (apostrophes/diacritics can tokenize differently, e.g.
- * "d'Italia" not matching intitle:italia) and returns nothing at all for
- * races with no title-matching file on Commons, so a genuinely empty
- * title-scoped result automatically falls back to the plain, broader
- * search rather than showing "no results" when Commons does have SOME
- * loosely-related files.
+ * 1. Wikipedia article search, `intitle:`-scoped (every query word must be
+ *    in the article's own title) - real Wikipedia article search, using
+ *    each matched article's page image (see searchWikipediaArticleImages).
+ *    Title-scoping matters here for the same reason it does on Commons
+ *    below: an unscoped query resolves to whatever articles MENTION the
+ *    race prominently, which pulls in riders' and teams' own biography
+ *    pages (verified live: unscoped "Milan-San Remo" put "Mathieu van der
+ *    Poel" and "Wout van Aert" - both real people, both with their own
+ *    portrait as a page image - ahead of the race's own year-edition
+ *    articles). Title-scoping keeps every result genuinely about the race
+ *    itself.
+ * 2. Wikipedia article search, unscoped - the fallback for when even
+ *    title-scoping finds no article with a usable image at all (small
+ *    races may have no title-matching article with a page image within
+ *    the raw fetch window). Accepts the "prominent-mention" noise tier 1
+ *    avoids, since some candidates beat none.
+ * 3. A Commons File-namespace search, `intitle:`-scoped - the fallback for
+ *    when NO Wikipedia article (title-scoped or not) had a usable image at
+ *    all. Commons' plain full-text search ranks by term frequency across a
+ *    file's ENTIRE description/metadata text, not primarily by title, so
+ *    an unscoped query regularly surfaces garbage (verified live:
+ *    "Milan-San Remo logo" returned old scanned legal PDFs with zero
+ *    connection to cycling, since those words happened to appear
+ *    somewhere in the documents' own metadata) - title-scoping avoids that
+ *    whenever a dedicated logo file actually exists.
+ * 4. Commons' plain, unscoped full-text search - the last resort when even
+ *    the title-scoped Commons attempt finds nothing (it's fragile too:
+ *    apostrophes/diacritics can tokenize differently) - "some noisy
+ *    results" beats "no results" as a genuine last resort.
  *
- * `apiUrl` defaults to the real Commons API and is only ever overridden in
- * tests (pointed at a local stub server), the same "the real endpoint is a
- * parameter with a production-real default" shape PlexConfig.url already
- * uses elsewhere in this app - keeps this fully unit-testable without
- * hitting the actual Wikimedia API from the test suite.
+ * `broadened` in the response is true whenever the result came from tier
+ * 2, 3, or 4 rather than tier 1, so the web UI can warn that these are
+ * less reliable than the primary title-scoped Wikipedia attempt.
+ *
+ * `apiUrl`/`wikipediaApiUrl` default to the real Commons/Wikipedia APIs and
+ * are only ever overridden in tests (pointed at a local stub server), the
+ * same "the real endpoint is a parameter with a production-real default"
+ * shape PlexConfig.url already uses elsewhere in this app - keeps this
+ * fully unit-testable without hitting the actual Wikimedia API from the
+ * test suite. `limit` caps how many results are actually returned (the raw
+ * Wikipedia fetch itself always requests more than this - see
+ * WIKIPEDIA_RAW_FETCH_LIMIT - since most raw matches don't have a usable
+ * image at all).
  */
 export async function searchCommonsLogos(
   query: string,
-  opts: { limit?: number; apiUrl?: string } = {}
+  opts: { limit?: number; apiUrl?: string; wikipediaApiUrl?: string } = {}
 ): Promise<CommonsSearchResponse> {
   const limit = opts.limit ?? 10;
   const apiUrl = opts.apiUrl ?? COMMONS_API_URL;
+  const wikipediaApiUrl = opts.wikipediaApiUrl ?? WIKIPEDIA_API_URL;
+  const titleScoped = titleScopedQuery(query);
 
-  const words = query.trim().split(/\s+/).filter(Boolean);
-  const titleScoped = words.map((w) => `intitle:${w}`).join(" ");
-  const titleResults = titleScoped ? await runCommonsSearch(titleScoped, limit, apiUrl) : [];
-  if (titleResults.length > 0) {
-    return { results: titleResults, broadened: false };
+  const wikipediaTitleResults = titleScoped ? await searchWikipediaArticleImages(titleScoped, wikipediaApiUrl) : [];
+  if (wikipediaTitleResults.length > 0) {
+    return { results: wikipediaTitleResults.slice(0, limit), broadened: false };
   }
 
-  const broadResults = await runCommonsSearch(query, limit, apiUrl);
-  return { results: broadResults, broadened: true };
+  const wikipediaBroadResults = await searchWikipediaArticleImages(query, wikipediaApiUrl);
+  if (wikipediaBroadResults.length > 0) {
+    return { results: wikipediaBroadResults.slice(0, limit), broadened: true };
+  }
+
+  const commonsTitleResults = titleScoped ? await runCommonsSearch(titleScoped, limit, apiUrl) : [];
+  if (commonsTitleResults.length > 0) {
+    return { results: commonsTitleResults, broadened: true };
+  }
+
+  const commonsBroadResults = await runCommonsSearch(query, limit, apiUrl);
+  return { results: commonsBroadResults, broadened: true };
 }
 
 /**
