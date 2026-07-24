@@ -32,7 +32,7 @@ import {
 } from "./settings.js";
 import { matchShow } from "./matcher.js";
 import { parseName } from "./parser.js";
-import { getRecentActivity, recordActivity } from "./activity.js";
+import { getRecentActivity, recordActivity, markActivityRead } from "./activity.js";
 import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
 import { handleCoverArtRequest } from "./coverArt.js";
 import { checkPlexLive, plexLibraryUrl } from "./plex.js";
@@ -406,6 +406,21 @@ export async function handleWebUiRequest(
 
     if (req.method === "GET" && url === "/api/activity") {
       sendJson(res, 200, { events: getRecentActivity(opts.activityPath) });
+      return true;
+    }
+
+    if (req.method === "POST" && url === "/api/activity/read") {
+      const body = await readBody(req);
+      const payload = JSON.parse(body) as { ids?: unknown; all?: unknown };
+      if (payload.all === true) {
+        markActivityRead("all", opts.activityPath);
+      } else if (Array.isArray(payload.ids) && payload.ids.every((id) => typeof id === "string")) {
+        markActivityRead(payload.ids, opts.activityPath);
+      } else {
+        sendJson(res, 400, { error: "expected { all: true } or { ids: string[] }" });
+        return true;
+      }
+      sendJson(res, 200, { ok: true });
       return true;
     }
 

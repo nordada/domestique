@@ -234,6 +234,56 @@ test("GET /api/activity and /api/status respond with the expected shape", async 
   }
 });
 
+test("POST /api/activity/read marks events read without deleting them, both by id and via {all: true}", async () => {
+  const { baseUrl, activityPath, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+    await fs.writeFile(
+      activityPath,
+      JSON.stringify([
+        { id: "evt-1", read: false, timestamp: new Date().toISOString(), torrentName: "one", lines: ["✅ one"], reviewWorthy: false },
+        { id: "evt-2", read: false, timestamp: new Date().toISOString(), torrentName: "two", lines: ["✅ two"], reviewWorthy: false },
+      ]),
+      "utf-8"
+    );
+
+    const byIdRes = await fetch(`${baseUrl}/api/activity/read`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ["evt-1"] }),
+    });
+    assert.equal(byIdRes.status, 200);
+
+    const afterOne = (await (await fetch(`${baseUrl}/api/activity`, { headers: { Authorization: auth } })).json()) as {
+      events: Array<{ id: string; read: boolean }>;
+    };
+    assert.equal(afterOne.events.length, 2); // still present - marking read never deletes
+    assert.equal(afterOne.events.find((e) => e.id === "evt-1")?.read, true);
+    assert.equal(afterOne.events.find((e) => e.id === "evt-2")?.read, false);
+
+    const allRes = await fetch(`${baseUrl}/api/activity/read`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true }),
+    });
+    assert.equal(allRes.status, 200);
+
+    const afterAll = (await (await fetch(`${baseUrl}/api/activity`, { headers: { Authorization: auth } })).json()) as {
+      events: Array<{ read: boolean }>;
+    };
+    assert.ok(afterAll.events.every((e) => e.read === true));
+
+    const badRes = await fetch(`${baseUrl}/api/activity/read`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(badRes.status, 400);
+  } finally {
+    await close();
+  }
+});
+
 test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secrets in its response", async () => {
   const { baseUrl, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
   try {

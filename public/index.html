@@ -138,9 +138,18 @@
   .activity-item:last-child { border-bottom: none; }
   .activity-item .meta { opacity: 0.6; font-size: 0.78rem; }
   .activity-item pre { margin: 0.25rem 0 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; }
+  .activity-item-row { display: flex; align-items: flex-start; gap: 0.5rem; }
+  .activity-item-row .activity-body { flex: 1; min-width: 0; }
+  .activity-item.unread { border-left: 2px solid var(--accent); padding-left: 0.5rem; }
   .review-flag { color: var(--warn); font-weight: 600; }
   .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
   .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+  .icon-btn { padding: 0.3rem; line-height: 0; flex: 0 0 auto; }
+  .icon-btn svg { display: block; }
+  .icon-btn.subtle { opacity: 0.55; border-color: transparent; }
+  .icon-btn.subtle:hover { opacity: 1; border-color: var(--border); }
+  .muted-link { color: #888; text-decoration: none; font-size: 0.8rem; display: inline-block; margin-top: 0.5rem; }
+  .muted-link:hover { text-decoration: underline; }
   footer { text-align: center; opacity: 0.45; font-size: 0.78rem; padding: 1rem 0 2rem; }
   footer a { color: inherit; }
 
@@ -433,9 +442,13 @@
 <section id="activity-section">
   <div class="toolbar">
     <h2 style="margin:0">Recent activity</h2>
-    <button class="primary" id="refresh-activity-btn">Refresh</button>
+    <div class="row" style="flex:0 0 auto; gap:0.4rem;">
+      <button type="button" class="icon-btn subtle" id="refresh-activity-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <button type="button" class="icon-btn subtle" id="clear-activity-btn" title="Clear (marks everything as read - nothing is deleted)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></button>
+    </div>
   </div>
   <div id="activity-list">Loading…</div>
+  <a href="#" class="muted-link" id="view-full-activity-link">View full activity log &rarr;</a>
 </section>
 
 <section id="upload-section">
@@ -746,6 +759,17 @@
     <button class="primary" id="save-settings-btn">Save settings</button>
   </div>
   <div class="status-msg" id="settings-status"></div>
+
+  <h3>Activity log</h3>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    The complete activity history (up to the last 100 events), including
+    ones already marked as read on the Activity tab - nothing gets deleted
+    when you clear or mark an entry read there.
+  </p>
+  <div class="row" style="justify-content:flex-end; margin-bottom:0.5rem;">
+    <button type="button" class="icon-btn subtle" id="refresh-full-activity-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+  </div>
+  <div id="full-activity-list">Loading…</div>
 </section>
 
 </div>
@@ -776,6 +800,13 @@ function esc(s) {
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[c]);
 }
+
+// Inline rather than separate asset files - unlike the gauge icons (which
+// need CSS-mask tinting for the theme accent), these are plain small
+// UI-control glyphs used in exactly a couple of spots each.
+const ICON_REFRESH = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const ICON_CHECK_CIRCLE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
 
 function showTab(name) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
@@ -1483,22 +1514,60 @@ async function addTorrentFiles(fileList) {
   await loadActivity();
 }
 
+function activityItemHtml(e, { showMarkRead }) {
+  const markReadBtn = showMarkRead
+    ? `<button type="button" class="icon-btn subtle" data-mark-read="${esc(e.id)}" title="Mark as read">${ICON_CHECK}</button>`
+    : "";
+  return `
+    <div class="activity-item${!e.read ? " unread" : ""}">
+      <div class="activity-item-row">
+        <div class="activity-body">
+          <div class="meta">${esc(new Date(e.timestamp).toLocaleString())} - ${esc(e.torrentName)} ${e.reviewWorthy ? '<span class="review-flag">(needs review)</span>' : ""}</div>
+          <pre>${esc(e.lines.join("\n"))}</pre>
+        </div>
+        ${markReadBtn}
+      </div>
+    </div>
+  `;
+}
+
+async function markActivityRead(ids) {
+  await api("/api/activity/read", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(ids === "all" ? { all: true } : { ids }),
+  });
+}
+
+// Only unread events show here - this is meant to read like an inbox of
+// what's new, not the full history (that's the Settings tab's Activity log
+// section below, via loadFullActivityLog).
 async function loadActivity() {
   const el = document.getElementById("activity-list");
+  try {
+    const data = await api("/api/activity");
+    const unread = data.events.filter((e) => !e.read);
+    if (unread.length === 0) {
+      el.textContent = "No new activity.";
+      return;
+    }
+    el.innerHTML = unread.map((e) => activityItemHtml(e, { showMarkRead: true })).join("");
+  } catch (err) {
+    el.textContent = `Failed to load activity: ${err.message}`;
+  }
+}
+
+async function loadFullActivityLog() {
+  const el = document.getElementById("full-activity-list");
   try {
     const data = await api("/api/activity");
     if (data.events.length === 0) {
       el.textContent = "No activity recorded yet.";
       return;
     }
-    el.innerHTML = data.events.map((e) => `
-      <div class="activity-item">
-        <div class="meta">${esc(new Date(e.timestamp).toLocaleString())} - ${esc(e.torrentName)} ${e.reviewWorthy ? '<span class="review-flag">(needs review)</span>' : ""}</div>
-        <pre>${esc(e.lines.join("\n"))}</pre>
-      </div>
-    `).join("");
+    el.innerHTML = data.events.map((e) => activityItemHtml(e, { showMarkRead: false })).join("");
   } catch (err) {
-    el.textContent = `Failed to load activity: ${err.message}`;
+    el.textContent = `Failed to load full activity log: ${err.message}`;
   }
 }
 
@@ -1574,6 +1643,34 @@ document.getElementById("add-from-match-btn").addEventListener("click", () => {
   updateCategoriesVisibility();
 });
 document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
+document.getElementById("clear-activity-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("clear-activity-btn");
+  btn.disabled = true;
+  try {
+    await markActivityRead("all");
+    await loadActivity();
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById("activity-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-mark-read]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    await markActivityRead([btn.dataset.markRead]);
+    await loadActivity();
+  } catch {
+    btn.disabled = false;
+  }
+});
+document.getElementById("view-full-activity-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  showTab("settings");
+  loadFullActivityLog();
+  document.getElementById("full-activity-list").scrollIntoView({ behavior: "smooth", block: "center" });
+});
+document.getElementById("refresh-full-activity-btn").addEventListener("click", loadFullActivityLog);
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => showTab(btn.dataset.tab));
 });
@@ -1652,6 +1749,7 @@ scheduleStatusPoll(20000, false);
 loadSettingsPanel();
 loadEvents();
 loadActivity();
+loadFullActivityLog();
 </script>
 </body>
 </html>
