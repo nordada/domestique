@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, type RequestListener } from "node:http";
 import { searchCommonsLogos, fetchCommonsFile } from "../src/wikimediaCommons.js";
 
-async function withStub(handler: Parameters<typeof createServer>[0]) {
+async function withStub(handler: RequestListener) {
   const server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const address = server.address();
@@ -14,11 +14,23 @@ async function withStub(handler: Parameters<typeof createServer>[0]) {
   };
 }
 
-test("searchCommonsLogos parses a realistic Commons API response into flat results", async () => {
-  const stub = await withStub((req, res) => {
+// title-scoped attempt always fires first (see searchCommonsLogos's doc
+// comment) - the stub inspects gsrsearch to tell which attempt it's
+// answering, since most tests only care about one or the other.
+function stubResponseFor(page: { titleScoped: unknown; broad: unknown }): RequestListener {
+  return (req, res) => {
+    const url = new URL(req.url ?? "", "http://internal");
+    const gsrsearch = url.searchParams.get("gsrsearch") ?? "";
+    const isTitleScoped = gsrsearch.includes("intitle:");
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
+    res.end(JSON.stringify(isTitleScoped ? page.titleScoped : page.broad));
+  };
+}
+
+test("searchCommonsLogos parses a realistic Commons API response into flat results, with broadened:false when the title-scoped attempt already found something", async () => {
+  const stub = await withStub(
+    stubResponseFor({
+      titleScoped: {
         query: {
           pages: {
             "111": {
@@ -32,11 +44,13 @@ test("searchCommonsLogos parses a realistic Commons API response into flat resul
             "333": { title: "File:Something with no imageinfo" }, // dropped - no usable url
           },
         },
-      })
-    );
-  });
+      },
+      broad: { query: {} }, // should never be reached - the title-scoped attempt already succeeded
+    })
+  );
   try {
-    const results = await searchCommonsLogos("tour de france logo", { apiUrl: stub.url });
+    const { results, broadened } = await searchCommonsLogos("tour de france logo", { apiUrl: stub.url });
+    assert.equal(broadened, false);
     assert.equal(results.length, 2);
     assert.deepEqual(results[0], {
       title: "File:Tour de France logo.svg",
@@ -48,6 +62,32 @@ test("searchCommonsLogos parses a realistic Commons API response into flat resul
       fileUrl: "https://upload.wikimedia.org/x/TdF2023.png",
       thumbUrl: "https://upload.wikimedia.org/x/TdF2023.png", // fell back to fileUrl
     });
+  } finally {
+    await stub.close();
+  }
+});
+
+test("searchCommonsLogos falls back to the broader search when the title-scoped attempt finds nothing, and flags broadened:true", async () => {
+  const stub = await withStub(
+    stubResponseFor({
+      titleScoped: { query: {} }, // no title match, e.g. no dedicated logo file exists
+      broad: {
+        query: {
+          pages: {
+            "444": {
+              title: "File:Some loosely related file.jpg",
+              imageinfo: [{ url: "https://upload.wikimedia.org/x/loose.jpg" }],
+            },
+          },
+        },
+      },
+    })
+  );
+  try {
+    const { results, broadened } = await searchCommonsLogos("obscure race logo", { apiUrl: stub.url });
+    assert.equal(broadened, true);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, "File:Some loosely related file.jpg");
   } finally {
     await stub.close();
   }
@@ -65,14 +105,15 @@ test("searchCommonsLogos throws on a non-ok response", async () => {
   }
 });
 
-test("searchCommonsLogos returns an empty array when the query has no matches", async () => {
+test("searchCommonsLogos returns an empty result set (broadened:true) when neither attempt finds anything", async () => {
   const stub = await withStub((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ query: {} }));
   });
   try {
-    const results = await searchCommonsLogos("something with no results", { apiUrl: stub.url });
+    const { results, broadened } = await searchCommonsLogos("something with no results", { apiUrl: stub.url });
     assert.deepEqual(results, []);
+    assert.equal(broadened, true);
   } finally {
     await stub.close();
   }

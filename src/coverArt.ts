@@ -146,34 +146,40 @@ async function handleLogoSearch(res: ServerResponse, url: URL): Promise<void> {
     return;
   }
   try {
-    const results = await searchCommonsLogos(q);
-    sendJson(res, 200, { results });
+    const { results, broadened } = await searchCommonsLogos(q);
+    sendJson(res, 200, { results, broadened });
   } catch (err) {
     sendJson(res, 502, { error: `Wikipedia search failed: ${err}` });
   }
 }
 
-async function handleLogoFromUrl(req: IncomingMessage, res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
-  const config = loadConfig(opts.configPath);
-  const show = requireShow(url, res, config);
-  if (!show) return;
-
-  const body = await readBody(req);
+function parseUrlPayload(body: string, res: ServerResponse): string | null {
   let payload: { url?: unknown };
   try {
     payload = JSON.parse(body);
   } catch {
     sendJson(res, 400, { error: "invalid JSON body" });
-    return;
+    return null;
   }
   if (typeof payload.url !== "string" || !payload.url) {
     sendJson(res, 400, { error: "url is required" });
-    return;
+    return null;
   }
+  return payload.url;
+}
+
+/** Used when the client picked a Wikipedia/Commons search result - restricted to Wikimedia's own upload host (see fetchCommonsFile). */
+async function handleLogoFromUrl(req: IncomingMessage, res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const show = requireShow(url, res, config);
+  if (!show) return;
+
+  const fileUrl = parseUrlPayload(await readBody(req), res);
+  if (!fileUrl) return;
 
   let raw: Buffer;
   try {
-    raw = await fetchCommonsFile(payload.url);
+    raw = await fetchCommonsFile(fileUrl);
   } catch (err) {
     sendJson(res, 502, { error: `failed to fetch image: ${err}` });
     return;

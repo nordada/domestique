@@ -39,29 +39,25 @@ interface CommonsSearchPage {
   imageinfo?: Array<{ url?: string; thumburl?: string }>;
 }
 
-/**
- * Searches Wikimedia Commons' File namespace (gsrnamespace=6), not plain
- * Wikipedia article search - a Commons file title is usually the actual
- * clean logo asset itself (e.g. "File:Tour de France logo.svg"), where a
- * Wikipedia article's own lead/infobox image is just as often a course map
- * or an action photo instead of the event's logo.
- *
- * `apiUrl` defaults to the real Commons API and is only ever overridden in
- * tests (pointed at a local stub server), the same "the real endpoint is a
- * parameter with a production-real default" shape PlexConfig.url already
- * uses elsewhere in this app - keeps this fully unit-testable without
- * hitting the actual Wikimedia API from the test suite.
- */
-export async function searchCommonsLogos(
-  query: string,
-  opts: { limit?: number; apiUrl?: string } = {}
-): Promise<CommonsSearchResult[]> {
-  const url = new URL(opts.apiUrl ?? COMMONS_API_URL);
+export interface CommonsSearchResponse {
+  results: CommonsSearchResult[];
+  /**
+   * Whether the "title" (precise) attempt found nothing and this is
+   * Commons' broader full-text search instead - see runCommonsSearch's
+   * doc comment for why that matters. The web UI surfaces this so a user
+   * seeing odd results understands why, rather than assuming Domestique's
+   * own logic picked a bad result.
+   */
+  broadened: boolean;
+}
+
+async function runCommonsSearch(gsrsearch: string, limit: number, apiUrl: string): Promise<CommonsSearchResult[]> {
+  const url = new URL(apiUrl);
   url.searchParams.set("action", "query");
   url.searchParams.set("generator", "search");
-  url.searchParams.set("gsrsearch", query);
+  url.searchParams.set("gsrsearch", gsrsearch);
   url.searchParams.set("gsrnamespace", "6");
-  url.searchParams.set("gsrlimit", String(opts.limit ?? 8));
+  url.searchParams.set("gsrlimit", String(limit));
   url.searchParams.set("prop", "imageinfo");
   url.searchParams.set("iiprop", "url");
   url.searchParams.set("iiurlwidth", "200");
@@ -85,6 +81,54 @@ export async function searchCommonsLogos(
     results.push({ title: page.title, fileUrl: info.url, thumbUrl: info.thumburl ?? info.url });
   }
   return results;
+}
+
+/**
+ * Searches Wikimedia Commons' File namespace (gsrnamespace=6), not plain
+ * Wikipedia article search - a Commons file title is usually the actual
+ * clean logo asset itself (e.g. "File:Tour de France logo.svg"), where a
+ * Wikipedia article's own lead/infobox image is just as often a course map
+ * or an action photo instead of the event's logo.
+ *
+ * Two-tier query strategy, found necessary from real testing (not just
+ * theorized): Commons' plain full-text search ranks by term frequency
+ * across a file's ENTIRE description/metadata text, not primarily by
+ * title. For a short, common-word query like "<race> logo" this regularly
+ * surfaces garbage - e.g. "Milan-San Remo logo" and "Paris-Roubaix logo"
+ * returned old scanned legal PDFs with no connection to cycling, because
+ * those words happened to appear somewhere in the documents' own metadata.
+ * So the first attempt wraps every query word in `intitle:`, which
+ * requires each word to actually appear in the file's title - when a
+ * dedicated logo file exists, this is dramatically cleaner. But it's also
+ * fragile (apostrophes/diacritics can tokenize differently, e.g.
+ * "d'Italia" not matching intitle:italia) and returns nothing at all for
+ * races with no title-matching file on Commons, so a genuinely empty
+ * title-scoped result automatically falls back to the plain, broader
+ * search rather than showing "no results" when Commons does have SOME
+ * loosely-related files.
+ *
+ * `apiUrl` defaults to the real Commons API and is only ever overridden in
+ * tests (pointed at a local stub server), the same "the real endpoint is a
+ * parameter with a production-real default" shape PlexConfig.url already
+ * uses elsewhere in this app - keeps this fully unit-testable without
+ * hitting the actual Wikimedia API from the test suite.
+ */
+export async function searchCommonsLogos(
+  query: string,
+  opts: { limit?: number; apiUrl?: string } = {}
+): Promise<CommonsSearchResponse> {
+  const limit = opts.limit ?? 10;
+  const apiUrl = opts.apiUrl ?? COMMONS_API_URL;
+
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  const titleScoped = words.map((w) => `intitle:${w}`).join(" ");
+  const titleResults = titleScoped ? await runCommonsSearch(titleScoped, limit, apiUrl) : [];
+  if (titleResults.length > 0) {
+    return { results: titleResults, broadened: false };
+  }
+
+  const broadResults = await runCommonsSearch(query, limit, apiUrl);
+  return { results: broadResults, broadened: true };
 }
 
 /**
