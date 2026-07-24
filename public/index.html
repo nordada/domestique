@@ -592,10 +592,10 @@
     <input type="file" id="f-logo-input" class="hidden" accept="image/*">
     <div id="f-logo-wiki-search-panel" class="hidden">
       <div class="row" style="align-items:center; margin-top:0.5rem;">
-        <input type="text" id="f-logo-wiki-query" placeholder="Search query, e.g. race name + logo">
+        <input type="text" id="f-logo-wiki-query" placeholder="Race name, e.g. Tour de France">
         <button type="button" id="f-logo-wiki-search-go-btn">Search</button>
       </div>
-      <p id="f-logo-wiki-broadened-note" class="hidden" style="font-size:0.8rem; opacity:0.7; margin:0.4rem 0 0;">No file titled with a match for this search - showing Commons' broader results instead, which can be less precise.</p>
+      <p id="f-logo-wiki-broadened-note" class="hidden" style="font-size:0.8rem; opacity:0.7; margin:0.4rem 0 0;">No Wikipedia article had a matching image - showing Wikimedia Commons search results instead, which can be less precise.</p>
       <div class="wiki-results" id="f-logo-wiki-results"></div>
     </div>
     <div id="f-logo-url-panel" class="hidden">
@@ -1775,11 +1775,16 @@ document.getElementById("f-logo-wiki-search-btn").addEventListener("click", () =
   const wasHidden = panel.classList.contains("hidden");
   panel.classList.toggle("hidden");
   const queryInput = document.getElementById("f-logo-wiki-query");
-  // Prefill with the show's own name as a sensible starting query, only the
-  // first time the panel opens - don't clobber whatever the user's already
-  // typed if they toggle it closed and back open.
+  // Prefill with just the show's own name (no "logo" suffix) as a sensible
+  // starting query, only the first time the panel opens - don't clobber
+  // whatever the user's already typed if they toggle it closed and back
+  // open. Deliberately bare: this now searches real Wikipedia articles
+  // first, and appending "logo" measurably hurts that search - e.g. "Tour
+  // de France logo" ranks a random year's edition above the main article,
+  // where the bare name correctly ranks the main article (and its actual
+  // logo image) first.
   if (wasHidden && !queryInput.value && editingIndex !== null) {
-    queryInput.value = `${events[editingIndex].folderName} logo`;
+    queryInput.value = events[editingIndex].folderName;
     queryInput.focus();
   }
   if (wasHidden) document.getElementById("f-logo-url-panel").classList.add("hidden");
