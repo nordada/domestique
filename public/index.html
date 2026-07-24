@@ -239,6 +239,30 @@
     color: color-mix(in srgb, var(--accent) 70%, canvastext);
   }
 
+  /* Settings' second-level nav (Appearance/Cover art/Plex/etc) - same
+     active-state language as .tab-btn above, just smaller and wrapping,
+     since there are far more of these than top-level tabs. */
+  .subtab-nav { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+  .subtab-btn {
+    font: inherit;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.82rem;
+    opacity: 0.6;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .subtab-btn:hover { opacity: 0.85; }
+  .subtab-btn.active {
+    opacity: 1;
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 20%, canvas);
+    color: color-mix(in srgb, var(--accent) 70%, canvastext);
+  }
+  .subtab-panel.hidden { display: none; }
+
   .gauge-cluster { display: flex; gap: 0.6rem; }
   .gauge {
     display: flex;
@@ -599,183 +623,216 @@
     "Clear" to remove one instead.
   </p>
 
-  <h3>Appearance</h3>
-  <label><span>Accent color (6-digit hex; blank uses the default) - primary buttons and the "on" status icons</span>
-    <div class="row" style="align-items:center; margin-bottom:0;">
-      <input type="text" id="s-accent-color" placeholder="#28e0ec" style="flex:1;">
-      <span id="accent-color-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border); background:var(--accent);"></span>
+  <div class="subtab-nav">
+    <button type="button" class="subtab-btn active" data-subtab="appearance">Appearance</button>
+    <button type="button" class="subtab-btn" data-subtab="coverart">Cover art</button>
+    <button type="button" class="subtab-btn" data-subtab="status">Status polling</button>
+    <button type="button" class="subtab-btn" data-subtab="plex">Plex</button>
+    <button type="button" class="subtab-btn" data-subtab="discord">Discord</button>
+    <button type="button" class="subtab-btn" data-subtab="hotfolder">Hot folder</button>
+    <button type="button" class="subtab-btn" data-subtab="transmission">Transmission</button>
+    <button type="button" class="subtab-btn" data-subtab="indexer">Indexer</button>
+    <button type="button" class="subtab-btn" data-subtab="security">Security</button>
+    <button type="button" class="subtab-btn" data-subtab="activitylog">Activity log</button>
+  </div>
+
+  <div class="subtab-panel" id="settings-subtab-appearance">
+    <h3>Appearance</h3>
+    <label><span>Accent color (6-digit hex; blank uses the default) - primary buttons and the "on" status icons</span>
+      <div class="row" style="align-items:center; margin-bottom:0;">
+        <input type="text" id="s-accent-color" placeholder="#28e0ec" style="flex:1;">
+        <span id="accent-color-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border); background:var(--accent);"></span>
+      </div>
+    </label>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-coverart">
+    <h3>Cover art</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Generates a Plex poster (poster.jpg) for a show once it has an uploaded
+      logo (see the Events tab), since most niche races aren't recognized by
+      Plex's own metadata agents. Purely opt-in per show - a show with no
+      logo is left alone entirely, no placeholder poster is generated for it.
+      These colors are independent of the accent color above - that's this
+      web UI's own theme; this art is what shows up inside Plex.
+    </p>
+    <label class="clear-toggle" style="margin-top:-0.4rem;">
+      <input type="checkbox" id="s-coverart-enabled">
+      Enabled
+    </label>
+    <div class="row" style="align-items:center;">
+      <label style="flex:1;"><span>Background color</span>
+        <input type="text" id="s-coverart-bg1" placeholder="#14213d">
+      </label>
+      <span id="coverart-bg1-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
+      <label style="flex:1;"><span>Gradient end color (optional - blank uses a solid fill)</span>
+        <input type="text" id="s-coverart-bg2" placeholder="">
+      </label>
+      <span id="coverart-bg2-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
     </div>
-  </label>
-
-  <h3>Cover art</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Generates a Plex poster (poster.jpg) for a show once it has an uploaded
-    logo (see the Events tab), since most niche races aren't recognized by
-    Plex's own metadata agents. Purely opt-in per show - a show with no
-    logo is left alone entirely, no placeholder poster is generated for it.
-    These colors are independent of the accent color above - that's this
-    web UI's own theme; this art is what shows up inside Plex.
-  </p>
-  <label class="clear-toggle" style="margin-top:-0.4rem;">
-    <input type="checkbox" id="s-coverart-enabled">
-    Enabled
-  </label>
-  <div class="row" style="align-items:center;">
-    <label style="flex:1;"><span>Background color</span>
-      <input type="text" id="s-coverart-bg1" placeholder="#14213d">
+    <label><span>Logo size (fraction of the poster it's scaled to fit within, 0.2-1.0)</span>
+      <input type="number" id="s-coverart-logo-scale" placeholder="0.72" min="0.2" max="1" step="0.05" style="max-width:10rem;">
     </label>
-    <span id="coverart-bg1-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
-    <label style="flex:1;"><span>Gradient end color (optional - blank uses a solid fill)</span>
-      <input type="text" id="s-coverart-bg2" placeholder="">
+    <div class="actions">
+      <button id="s-coverart-regenerate-btn">Regenerate all posters</button>
+    </div>
+    <div class="status-msg" id="coverart-regenerate-status"></div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-status">
+    <h3>Status polling</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Controls how often the header gauges (including Transmission's
+      torrent-status glow) refresh in the background, without needing a page
+      reload.
+    </p>
+    <label><span>Poll interval (seconds)</span>
+      <input type="number" id="s-status-poll-interval" placeholder="20" min="5" max="600" style="max-width:10rem;">
     </label>
-    <span id="coverart-bg2-swatch" style="flex:0 0 auto; width:2.1rem; height:2.1rem; border-radius:6px; border:1px solid var(--border);"></span>
-  </div>
-  <label><span>Logo size (fraction of the poster it's scaled to fit within, 0.2-1.0)</span>
-    <input type="number" id="s-coverart-logo-scale" placeholder="0.72" min="0.2" max="1" step="0.05" style="max-width:10rem;">
-  </label>
-  <div class="actions">
-    <button id="s-coverart-regenerate-btn">Regenerate all posters</button>
-  </div>
-  <div class="status-msg" id="coverart-regenerate-status"></div>
-
-  <h3>Status polling</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Controls how often the header gauges (including Transmission's
-    torrent-status glow) refresh in the background, without needing a page
-    reload.
-  </p>
-  <label><span>Poll interval (seconds)</span>
-    <input type="number" id="s-status-poll-interval" placeholder="20" min="5" max="600" style="max-width:10rem;">
-  </label>
-  <label class="clear-toggle" style="margin-top:-0.4rem;">
-    <input type="checkbox" id="s-status-poll-when-hidden">
-    Keep polling even when this browser tab/window isn't active
-  </label>
-
-  <h3>Plex partial-scan</h3>
-  <div class="row">
-    <label><span>Plex URL (blank disables)</span><input type="text" id="s-plex-url" placeholder="http://192.168.1.10:32400"></label>
-    <label><span>Section ID</span><input type="text" id="s-plex-sectionId" placeholder="35"></label>
-  </div>
-  <label><span>Library root override (optional - only if Plex sees a different path than this container)</span>
-    <input type="text" id="s-plex-libraryRoot" placeholder="">
-  </label>
-  <label><span>Plex token</span>
-    <input type="password" id="s-plex-token">
-    <span class="clear-toggle"><input type="checkbox" id="s-plex-token-clear"> Clear stored token</span>
-  </label>
-
-  <h3>Discord notifications</h3>
-  <label><span>Webhook URL (blank disables)</span>
-    <input type="password" id="s-discord-webhook">
-    <span class="clear-toggle"><input type="checkbox" id="s-discord-webhook-clear"> Clear stored webhook URL</span>
-  </label>
-  <label><span>Mention user id (optional)</span>
-    <input type="text" id="s-discord-mention" placeholder="">
-  </label>
-
-  <h3>Hot-folder ingestion</h3>
-  <label><span>Watch directory (blank disables)</span>
-    <input type="text" id="s-hotfolder-dir" placeholder="/downloads/domestique">
-  </label>
-  <label class="clear-toggle" style="margin-top:-0.4rem; margin-bottom:0.75rem; align-items:flex-start;">
-    <input type="checkbox" id="s-hotfolder-ack" style="margin-top:0.2rem;">
-    <span style="flex:1; min-width:0;">I understand hot-folder ingestion moves the original file out of the downloads share (into its <code>processed/</code> subfolder) instead of leaving it to keep seeding, and accept that tradeoff.</span>
-  </label>
-  <div class="row">
-    <label><span>Poll interval (ms)</span><input type="number" id="s-hotfolder-interval" placeholder="60000"></label>
-    <label><span>Stable polls</span><input type="number" id="s-hotfolder-stable" placeholder="3"></label>
-  </div>
-
-  <h3>Transmission status check</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Drives the header icon's glow with what your torrents are actually doing,
-    not just whether Transmission is reachable: green when everything's
-    idle/seeding with no errors, amber while something's downloading, red if
-    any torrent has a tracker or local error. Unrelated to the webhook
-    Transmission already sends this app on torrent completion.
-  </p>
-  <label><span>RPC URL (blank disables)</span>
-    <input type="text" id="s-transmission-url" placeholder="http://192.168.1.10:9091/transmission/rpc">
-  </label>
-  <div class="row">
-    <label><span>Username (optional)</span><input type="text" id="s-transmission-username" placeholder=""></label>
-    <label><span>Password</span>
-      <input type="password" id="s-transmission-password">
-      <span class="clear-toggle"><input type="checkbox" id="s-transmission-password-clear"> Clear stored password</span>
+    <label class="clear-toggle" style="margin-top:-0.4rem;">
+      <input type="checkbox" id="s-status-poll-when-hidden">
+      Keep polling even when this browser tab/window isn't active
     </label>
   </div>
 
-  <h3>External indexer</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Bookmarks the race indexer/tracker site this instance sources torrents
-    from. Unlike the other header icons, clicking it opens the site itself
-    in a new tab instead of jumping here, and it shows that site's own
-    favicon with an accent ring once a URL is set. The glow layers on top of
-    that once reachability is known: green while the site's responding, red
-    if a check finds it down. Checked on its own heartbeat below rather than
-    the general status-poll interval, so a single slow response doesn't
-    flicker the glow.
-  </p>
-  <div class="row">
-    <label><span>Indexer URL (blank disables)</span>
-      <input type="text" id="s-indexer-url" placeholder="https://example-indexer.com">
+  <div class="subtab-panel hidden" id="settings-subtab-plex">
+    <h3>Plex partial-scan</h3>
+    <div class="row">
+      <label><span>Plex URL (blank disables)</span><input type="text" id="s-plex-url" placeholder="http://192.168.1.10:32400"></label>
+      <label><span>Section ID</span><input type="text" id="s-plex-sectionId" placeholder="35"></label>
+    </div>
+    <label><span>Library root override (optional - only if Plex sees a different path than this container)</span>
+      <input type="text" id="s-plex-libraryRoot" placeholder="">
     </label>
-    <label><span>Check interval (seconds)</span>
-      <input type="number" id="s-indexer-check-interval" placeholder="300" min="30" max="3600" style="max-width:10rem;">
+    <label><span>Plex token</span>
+      <input type="password" id="s-plex-token">
+      <span class="clear-toggle"><input type="checkbox" id="s-plex-token-clear"> Clear stored token</span>
     </label>
   </div>
 
-  <h3>Webhook security</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    /webhook/torrent-done (what Transmission's hook script calls) has no
-    other authentication of its own: it's meant to be reached only by that
-    script, trusted implicitly on your LAN. Set a secret here if that route
-    is ever reachable from outside your LAN, e.g. behind a reverse proxy or
-    a Cloudflare Tunnel, and put the same value in torrent-done.env's
-    WEBHOOK_SECRET so the hook script keeps working. Leave blank to keep
-    the original open behavior.
-  </p>
-  <label><span>Shared secret</span>
-    <input type="password" id="s-webhook-secret">
-    <span class="clear-toggle"><input type="checkbox" id="s-webhook-secret-clear"> Clear stored secret</span>
-  </label>
+  <div class="subtab-panel hidden" id="settings-subtab-discord">
+    <h3>Discord notifications</h3>
+    <label><span>Webhook URL (blank disables)</span>
+      <input type="password" id="s-discord-webhook">
+      <span class="clear-toggle"><input type="checkbox" id="s-discord-webhook-clear"> Clear stored webhook URL</span>
+    </label>
+    <label><span>Mention user id (optional)</span>
+      <input type="text" id="s-discord-mention" placeholder="">
+    </label>
+  </div>
 
-  <h3>Login lockout</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Basic Auth (the password prompt for this whole site) has no built-in
-    brute-force protection, so this app adds its own: after this many
-    wrong-password attempts in a row, further attempts are rejected for a
-    cooldown instead of even being checked. The cooldown clears itself
-    automatically (no restart needed) and doubles each time it's triggered
-    again right after expiring, up to a 30-minute cap, then resets to the
-    base once a login actually succeeds.
-  </p>
-  <div class="row">
-    <label><span>Failed attempts before lockout</span>
-      <input type="number" id="s-lockout-threshold" placeholder="5" min="3" max="20" style="max-width:10rem;">
+  <div class="subtab-panel hidden" id="settings-subtab-hotfolder">
+    <h3>Hot-folder ingestion</h3>
+    <label><span>Watch directory (blank disables)</span>
+      <input type="text" id="s-hotfolder-dir" placeholder="/downloads/domestique">
     </label>
-    <label><span>Base cooldown (seconds)</span>
-      <input type="number" id="s-lockout-seconds" placeholder="60" min="10" max="3600" style="max-width:10rem;">
+    <label class="clear-toggle" style="margin-top:-0.4rem; margin-bottom:0.75rem; align-items:flex-start;">
+      <input type="checkbox" id="s-hotfolder-ack" style="margin-top:0.2rem;">
+      <span style="flex:1; min-width:0;">I understand hot-folder ingestion moves the original file out of the downloads share (into its <code>processed/</code> subfolder) instead of leaving it to keep seeding, and accept that tradeoff.</span>
     </label>
+    <div class="row">
+      <label><span>Poll interval (ms)</span><input type="number" id="s-hotfolder-interval" placeholder="60000"></label>
+      <label><span>Stable polls</span><input type="number" id="s-hotfolder-stable" placeholder="3"></label>
+    </div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-transmission">
+    <h3>Transmission status check</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Drives the header icon's glow with what your torrents are actually doing,
+      not just whether Transmission is reachable: green when everything's
+      idle/seeding with no errors, amber while something's downloading, red if
+      any torrent has a tracker or local error. Unrelated to the webhook
+      Transmission already sends this app on torrent completion.
+    </p>
+    <label><span>RPC URL (blank disables)</span>
+      <input type="text" id="s-transmission-url" placeholder="http://192.168.1.10:9091/transmission/rpc">
+    </label>
+    <div class="row">
+      <label><span>Username (optional)</span><input type="text" id="s-transmission-username" placeholder=""></label>
+      <label><span>Password</span>
+        <input type="password" id="s-transmission-password">
+        <span class="clear-toggle"><input type="checkbox" id="s-transmission-password-clear"> Clear stored password</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-indexer">
+    <h3>External indexer</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Bookmarks the race indexer/tracker site this instance sources torrents
+      from. Unlike the other header icons, clicking it opens the site itself
+      in a new tab instead of jumping here, and it shows that site's own
+      favicon with an accent ring once a URL is set. The glow layers on top of
+      that once reachability is known: green while the site's responding, red
+      if a check finds it down. Checked on its own heartbeat below rather than
+      the general status-poll interval, so a single slow response doesn't
+      flicker the glow.
+    </p>
+    <div class="row">
+      <label><span>Indexer URL (blank disables)</span>
+        <input type="text" id="s-indexer-url" placeholder="https://example-indexer.com">
+      </label>
+      <label><span>Check interval (seconds)</span>
+        <input type="number" id="s-indexer-check-interval" placeholder="300" min="30" max="3600" style="max-width:10rem;">
+      </label>
+    </div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-security">
+    <h3>Webhook security</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      /webhook/torrent-done (what Transmission's hook script calls) has no
+      other authentication of its own: it's meant to be reached only by that
+      script, trusted implicitly on your LAN. Set a secret here if that route
+      is ever reachable from outside your LAN, e.g. behind a reverse proxy or
+      a Cloudflare Tunnel, and put the same value in torrent-done.env's
+      WEBHOOK_SECRET so the hook script keeps working. Leave blank to keep
+      the original open behavior.
+    </p>
+    <label><span>Shared secret</span>
+      <input type="password" id="s-webhook-secret">
+      <span class="clear-toggle"><input type="checkbox" id="s-webhook-secret-clear"> Clear stored secret</span>
+    </label>
+
+    <h3>Login lockout</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Basic Auth (the password prompt for this whole site) has no built-in
+      brute-force protection, so this app adds its own: after this many
+      wrong-password attempts in a row, further attempts are rejected for a
+      cooldown instead of even being checked. The cooldown clears itself
+      automatically (no restart needed) and doubles each time it's triggered
+      again right after expiring, up to a 30-minute cap, then resets to the
+      base once a login actually succeeds.
+    </p>
+    <div class="row">
+      <label><span>Failed attempts before lockout</span>
+        <input type="number" id="s-lockout-threshold" placeholder="5" min="3" max="20" style="max-width:10rem;">
+      </label>
+      <label><span>Base cooldown (seconds)</span>
+        <input type="number" id="s-lockout-seconds" placeholder="60" min="10" max="3600" style="max-width:10rem;">
+      </label>
+    </div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-activitylog">
+    <h3>Activity log</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      The complete activity history (up to the last 100 events), including
+      ones already marked as read on the Activity tab - nothing gets deleted
+      when you clear or mark an entry read there.
+    </p>
+    <div class="row" style="justify-content:flex-end; align-items:center; margin-bottom:0.5rem;">
+      <span class="refresh-flash" id="full-activity-refresh-flash"></span>
+      <button type="button" class="icon-btn subtle" id="refresh-full-activity-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+    </div>
+    <div id="full-activity-list">Loading…</div>
   </div>
 
   <div class="actions">
     <button class="primary" id="save-settings-btn">Save settings</button>
   </div>
   <div class="status-msg" id="settings-status"></div>
-
-  <h3>Activity log</h3>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    The complete activity history (up to the last 100 events), including
-    ones already marked as read on the Activity tab - nothing gets deleted
-    when you clear or mark an entry read there.
-  </p>
-  <div class="row" style="justify-content:flex-end; align-items:center; margin-bottom:0.5rem;">
-    <span class="refresh-flash" id="full-activity-refresh-flash"></span>
-    <button type="button" class="icon-btn subtle" id="refresh-full-activity-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
-  </div>
-  <div id="full-activity-list">Loading…</div>
 </section>
 
 </div>
@@ -822,6 +879,21 @@ function showTab(name) {
     btn.classList.toggle("active", btn.dataset.tab === name);
   });
   try { localStorage.setItem("domestique-tab", name); } catch {}
+}
+
+// Settings' own sub-navigation (Appearance/Cover art/Plex/etc) - same
+// show/hide-by-id pattern as showTab, one level deeper. All fields stay in
+// the DOM regardless of which sub-tab is visible (just CSS-hidden), so
+// loadSettingsPanel()/saveSettingsPanel() don't need to know or care which
+// one is currently showing - the single Save button always saves everything.
+function showSettingsSubTab(name) {
+  document.querySelectorAll(".subtab-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== `settings-subtab-${name}`);
+  });
+  document.querySelectorAll(".subtab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.subtab === name);
+  });
+  try { localStorage.setItem("domestique-settings-subtab", name); } catch {}
 }
 
 const THEME_KEY = "domestique-theme";
@@ -989,7 +1061,7 @@ function indexerGauge(indexer) {
     : "";
   const wrap = `<span class="gauge-icon-wrap">${fallbackIcon}${favicon}</span>`;
   if (!indexer.enabled) {
-    return `<button type="button" class="gauge indexer off" data-goto-tab="settings" title="Indexer: ${statusText}">${wrap}</button>`;
+    return `<button type="button" class="gauge indexer off" data-goto-tab="settings" data-goto-subtab="indexer" title="Indexer: ${statusText}">${wrap}</button>`;
   }
   return `<a class="gauge indexer on${tier ? ` ${tier}` : ""}" href="${esc(indexer.url)}" target="_blank" rel="noopener noreferrer" title="Indexer: ${statusText}">${wrap}</a>`;
 }
@@ -1017,12 +1089,12 @@ async function loadStatus() {
     // Transmission and Plex use this once they're actually configured;
     // Hot folder never passes one, since it has no web UI of its own to
     // send anyone to.
-    const gauge = (label, iconFile, on, tier, statusText, linkUrl) => {
+    const gauge = (label, iconFile, on, tier, statusText, linkUrl, subtab) => {
       const icon = `<span class="gauge-icon-wrap"><span class="gauge-icon" style="-webkit-mask-image:url(/icons/${iconFile});mask-image:url(/icons/${iconFile});" role="img" aria-label="${label}"></span></span>`;
       const classes = `gauge ${on ? "on" : "off"}${tier ? ` ${tier}` : ""}`;
       return linkUrl
         ? `<a class="${classes}" href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" title="${label}: ${statusText}">${icon}</a>`
-        : `<button type="button" class="${classes}" data-goto-tab="settings" title="${label}: ${statusText}">${icon}</button>`;
+        : `<button type="button" class="${classes}" data-goto-tab="settings" data-goto-subtab="${subtab}" title="${label}: ${statusText}">${icon}</button>`;
     };
     const gaugeHtml = [
       // Unlike the other two gauges, "on" here tracks the downloads/seeding
@@ -1039,7 +1111,8 @@ async function loadStatus() {
           status.hotfolder.enabled
             ? `hot folder enabled (${esc(status.hotfolder.dir)})${status.hotfolder.acknowledgeNoSeedback ? ", no-seedback tradeoff acknowledged" : " - no-seedback tradeoff not yet acknowledged in Settings"}`
             : "hot folder disabled",
-        ].join("; ")
+        ].join("; "),
+        undefined, "hotfolder"
       ),
       // When Transmission exposes torrent status (it always does once
       // reachable - see getTransmissionTorrentSummary), the glow reflects
@@ -1050,13 +1123,13 @@ async function loadStatus() {
         "Transmission", "transmission.svg", status.transmission.enabled,
         transmissionTier(status.transmission),
         transmissionStatusText(status.transmission),
-        status.transmission.webUrl
+        status.transmission.webUrl, "transmission"
       ),
       gauge(
         "Plex", "plex.svg", status.plex.enabled,
         status.plex.enabled && status.plex.live ? "healthy" : null,
         status.plex.enabled ? (status.plex.live ? "enabled, reachable" : "enabled, unreachable") : "disabled",
-        status.plex.webUrl
+        status.plex.webUrl, "plex"
       ),
       indexerGauge(status.indexer),
     ].join("");
@@ -1064,7 +1137,10 @@ async function loadStatus() {
       lastGaugeHtml = gaugeHtml;
       el.innerHTML = gaugeHtml;
       el.querySelectorAll("[data-goto-tab]").forEach((btn) => {
-        btn.addEventListener("click", () => showTab(btn.dataset.gotoTab));
+        btn.addEventListener("click", () => {
+          showTab(btn.dataset.gotoTab);
+          if (btn.dataset.gotoSubtab) showSettingsSubTab(btn.dataset.gotoSubtab);
+        });
       });
     }
     setPauseUI(status.paused);
@@ -1699,6 +1775,7 @@ document.getElementById("activity-list").addEventListener("click", async (e) => 
 document.getElementById("view-full-activity-link").addEventListener("click", (e) => {
   e.preventDefault();
   showTab("settings");
+  showSettingsSubTab("activitylog");
   loadFullActivityLog();
   document.getElementById("full-activity-list").scrollIntoView({ behavior: "smooth", block: "center" });
 });
@@ -1770,6 +1847,17 @@ try {
   if (savedTab === "home" || savedTab === "events" || savedTab === "settings") initialTab = savedTab;
 } catch {}
 showTab(initialTab);
+
+const SETTINGS_SUBTABS = ["appearance", "coverart", "status", "plex", "discord", "hotfolder", "transmission", "indexer", "security", "activitylog"];
+document.querySelectorAll(".subtab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => showSettingsSubTab(btn.dataset.subtab));
+});
+let initialSettingsSubTab = "appearance";
+try {
+  const savedSubTab = localStorage.getItem("domestique-settings-subtab");
+  if (SETTINGS_SUBTABS.includes(savedSubTab)) initialSettingsSubTab = savedSubTab;
+} catch {}
+showSettingsSubTab(initialSettingsSubTab);
 
 let initialTheme = "system";
 try {
