@@ -148,6 +148,10 @@
   .icon-btn svg { display: block; }
   .icon-btn.subtle { opacity: 0.55; border-color: transparent; }
   .icon-btn.subtle:hover { opacity: 1; border-color: var(--border); }
+  @keyframes icon-btn-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .icon-btn.spinning svg { animation: icon-btn-spin 0.6s linear infinite; }
+  .refresh-flash { font-size: 0.78rem; opacity: 0.6; margin-left: 0.35rem; transition: opacity 0.4s ease; }
+  .refresh-flash:empty { opacity: 0; }
   .muted-link { color: #888; text-decoration: none; font-size: 0.8rem; display: inline-block; margin-top: 0.5rem; }
   .muted-link:hover { text-decoration: underline; }
   footer { text-align: center; opacity: 0.45; font-size: 0.78rem; padding: 1rem 0 2rem; }
@@ -442,9 +446,10 @@
 <section id="activity-section">
   <div class="toolbar">
     <h2 style="margin:0">Recent activity</h2>
-    <div class="row" style="flex:0 0 auto; gap:0.4rem;">
+    <div class="row" style="flex:0 0 auto; gap:0.4rem; align-items:center;">
       <button type="button" class="icon-btn subtle" id="refresh-activity-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
       <button type="button" class="icon-btn subtle" id="clear-activity-btn" title="Clear (marks everything as read - nothing is deleted)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></button>
+      <span class="refresh-flash" id="activity-refresh-flash"></span>
     </div>
   </div>
   <div id="activity-list">Loading…</div>
@@ -766,7 +771,8 @@
     ones already marked as read on the Activity tab - nothing gets deleted
     when you clear or mark an entry read there.
   </p>
-  <div class="row" style="justify-content:flex-end; margin-bottom:0.5rem;">
+  <div class="row" style="justify-content:flex-end; align-items:center; margin-bottom:0.5rem;">
+    <span class="refresh-flash" id="full-activity-refresh-flash"></span>
     <button type="button" class="icon-btn subtle" id="refresh-full-activity-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
   </div>
   <div id="full-activity-list">Loading…</div>
@@ -1514,6 +1520,26 @@ async function addTorrentFiles(fileList) {
   await loadActivity();
 }
 
+// Spins the button's icon for the duration of loadFn (confirms the click
+// actually registered) and briefly shows "Refreshed" afterward (confirms it
+// completed, even when the result looks identical because nothing's new -
+// otherwise a refresh with no new activity gives no feedback at all).
+async function refreshWithFeedback(btn, flashEl, loadFn) {
+  btn.classList.add("spinning");
+  btn.disabled = true;
+  try {
+    await loadFn();
+    flashEl.textContent = "Refreshed";
+  } catch {
+    flashEl.textContent = "Failed";
+  } finally {
+    btn.classList.remove("spinning");
+    btn.disabled = false;
+    clearTimeout(flashEl._clearTimer);
+    flashEl._clearTimer = setTimeout(() => { flashEl.textContent = ""; }, 1500);
+  }
+}
+
 function activityItemHtml(e, { showMarkRead }) {
   const markReadBtn = showMarkRead
     ? `<button type="button" class="icon-btn subtle" data-mark-read="${esc(e.id)}" title="Mark as read">${ICON_CHECK}</button>`
@@ -1642,7 +1668,13 @@ document.getElementById("add-from-match-btn").addEventListener("click", () => {
   document.getElementById("f-type").value = lastMatchGuess.type;
   updateCategoriesVisibility();
 });
-document.getElementById("refresh-activity-btn").addEventListener("click", loadActivity);
+document.getElementById("refresh-activity-btn").addEventListener("click", () => {
+  refreshWithFeedback(
+    document.getElementById("refresh-activity-btn"),
+    document.getElementById("activity-refresh-flash"),
+    loadActivity
+  );
+});
 document.getElementById("clear-activity-btn").addEventListener("click", async () => {
   const btn = document.getElementById("clear-activity-btn");
   btn.disabled = true;
@@ -1670,7 +1702,13 @@ document.getElementById("view-full-activity-link").addEventListener("click", (e)
   loadFullActivityLog();
   document.getElementById("full-activity-list").scrollIntoView({ behavior: "smooth", block: "center" });
 });
-document.getElementById("refresh-full-activity-btn").addEventListener("click", loadFullActivityLog);
+document.getElementById("refresh-full-activity-btn").addEventListener("click", () => {
+  refreshWithFeedback(
+    document.getElementById("refresh-full-activity-btn"),
+    document.getElementById("full-activity-refresh-flash"),
+    loadFullActivityLog
+  );
+});
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => showTab(btn.dataset.tab));
 });
