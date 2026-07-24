@@ -94,7 +94,12 @@
   table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
   th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { opacity: 0.7; font-weight: 600; }
-  .events-table-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  /* Scales with the window instead of a fixed pixel cap - clamp()'s middle
+     value (65% of viewport height) does the actual resizing; the min
+     (360px, ~8 rows) keeps it usable on a short/split window, the max
+     (900px) keeps a single huge monitor from turning this into the whole
+     page. */
+  .events-table-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .events-table-scroll table { margin: 0; }
   .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
   .logo-thumb { width: 24px; height: 24px; object-fit: contain; background: #fff; border-radius: 4px; display: block; }
