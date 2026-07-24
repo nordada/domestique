@@ -23,8 +23,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import sharp from "sharp";
 import { loadConfig, type ShowConfig, type ShowsConfigFile } from "./config.js";
 import { loadSettings, resolveCoverArtSettings, type CoverArtSettings } from "./settings.js";
-import { readBodyBuffer, BodyTooLargeError } from "./body.js";
+import { readBody, readBodyBuffer, BodyTooLargeError } from "./body.js";
 import { sanitizeName } from "./upload.js";
+import { searchCommonsLogos, fetchCommonsFile } from "./wikimediaCommons.js";
 import {
   refreshPlexFolder,
   fetchShowRatingKeyIndex,
@@ -85,6 +86,32 @@ function requireShow(url: URL, res: ServerResponse, config: ShowsConfigFile): Sh
   return show;
 }
 
+/**
+ * Normalizes raw image bytes to PNG (alpha preserved) and writes them as a
+ * show's logo, tmp-then-rename. Shared by both logo sources - a direct
+ * browser upload and a Wikipedia/Commons pick - so there's exactly one
+ * place that defines what "a valid logo" means, regardless of where the
+ * bytes came from. Normalizing doubles as real image-content validation:
+ * sharp throws on non-image/corrupt bytes rather than trusting a
+ * Content-Type header or file extension. Also caps dimensions so a huge
+ * source image can't balloon disk usage or slow every future poster
+ * composite. Throws on invalid image data - callers decide how to report
+ * that to their own caller.
+ */
+async function saveNormalizedLogo(raw: Buffer, opts: ServerOptions, show: ShowConfig): Promise<void> {
+  const normalized = await sharp(raw)
+    .resize({ width: LOGO_MAX_DIMENSION, height: LOGO_MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
+    .png()
+    .toBuffer();
+
+  const dir = join(opts.libraryRoot, LOGO_SUBDIR);
+  await mkdir(dir, { recursive: true });
+  const finalPath = logoPath(opts.libraryRoot, show.id);
+  const tmpPath = `${finalPath}.tmp`;
+  await writeFile(tmpPath, normalized);
+  await rename(tmpPath, finalPath);
+}
+
 async function handleLogoUpload(req: IncomingMessage, res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
   const config = loadConfig(opts.configPath);
   const show = requireShow(url, res, config);
@@ -102,28 +129,62 @@ async function handleLogoUpload(req: IncomingMessage, res: ServerResponse, opts:
     throw err;
   }
 
-  // Normalizing to PNG (with alpha preserved) on ingest doubles as real
-  // image-content validation - sharp throws on non-image/corrupt bytes
-  // rather than trusting the Content-Type header or file extension. Also
-  // caps dimensions so a huge upload can't balloon disk usage or slow every
-  // future poster composite.
-  let normalized: Buffer;
   try {
-    normalized = await sharp(raw)
-      .resize({ width: LOGO_MAX_DIMENSION, height: LOGO_MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
-      .png()
-      .toBuffer();
+    await saveNormalizedLogo(raw, opts, show);
   } catch {
     sendJson(res, 400, { error: "not a valid image" });
     return;
   }
 
-  const dir = join(opts.libraryRoot, LOGO_SUBDIR);
-  await mkdir(dir, { recursive: true });
-  const finalPath = logoPath(opts.libraryRoot, show.id);
-  const tmpPath = `${finalPath}.tmp`;
-  await writeFile(tmpPath, normalized);
-  await rename(tmpPath, finalPath);
+  sendJson(res, 200, { ok: true });
+}
+
+async function handleLogoSearch(res: ServerResponse, url: URL): Promise<void> {
+  const q = url.searchParams.get("q")?.trim();
+  if (!q) {
+    sendJson(res, 400, { error: "q query param is required" });
+    return;
+  }
+  try {
+    const results = await searchCommonsLogos(q);
+    sendJson(res, 200, { results });
+  } catch (err) {
+    sendJson(res, 502, { error: `Wikipedia search failed: ${err}` });
+  }
+}
+
+async function handleLogoFromUrl(req: IncomingMessage, res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const show = requireShow(url, res, config);
+  if (!show) return;
+
+  const body = await readBody(req);
+  let payload: { url?: unknown };
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    sendJson(res, 400, { error: "invalid JSON body" });
+    return;
+  }
+  if (typeof payload.url !== "string" || !payload.url) {
+    sendJson(res, 400, { error: "url is required" });
+    return;
+  }
+
+  let raw: Buffer;
+  try {
+    raw = await fetchCommonsFile(payload.url);
+  } catch (err) {
+    sendJson(res, 502, { error: `failed to fetch image: ${err}` });
+    return;
+  }
+
+  try {
+    await saveNormalizedLogo(raw, opts, show);
+  } catch {
+    sendJson(res, 400, { error: "not a valid image" });
+    return;
+  }
 
   sendJson(res, 200, { ok: true });
 }
@@ -270,8 +331,13 @@ export async function handleCoverArtRequest(
   opts: ServerOptions
 ): Promise<boolean> {
   const url = new URL(req.url ?? "", "http://internal");
-
-  if (url.pathname !== "/api/cover-art/logo" && url.pathname !== "/api/cover-art/regenerate") {
+  const knownPaths = new Set([
+    "/api/cover-art/logo",
+    "/api/cover-art/regenerate",
+    "/api/cover-art/logo-search",
+    "/api/cover-art/logo/from-url",
+  ]);
+  if (!knownPaths.has(url.pathname)) {
     return false;
   }
 
@@ -294,6 +360,16 @@ export async function handleCoverArtRequest(
 
     if (url.pathname === "/api/cover-art/regenerate" && req.method === "POST") {
       await handleRegenerateAll(res, opts);
+      return true;
+    }
+
+    if (url.pathname === "/api/cover-art/logo-search" && req.method === "GET") {
+      await handleLogoSearch(res, url);
+      return true;
+    }
+
+    if (url.pathname === "/api/cover-art/logo/from-url" && req.method === "POST") {
+      await handleLogoFromUrl(req, res, opts, url);
       return true;
     }
 

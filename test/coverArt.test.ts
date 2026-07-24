@@ -230,6 +230,55 @@ test("GET /api/cover-art/logo 404s when no logo has been set for a real show", a
   }
 });
 
+test("GET /api/cover-art/logo-search requires a q query param", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const res = await fetch(`${baseUrl}/api/cover-art/logo-search`, {
+      headers: { Authorization: authHeader("correct-password") },
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/cover-art/logo/from-url validates showId, JSON body, and the url field before ever fetching anything", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+
+    const unknownShowRes = await fetch(`${baseUrl}/api/cover-art/logo/from-url?showId=not-a-real-show`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://upload.wikimedia.org/x.png" }),
+    });
+    assert.equal(unknownShowRes.status, 400);
+
+    const badJsonRes = await fetch(`${baseUrl}/api/cover-art/logo/from-url?showId=tdf`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: "not json",
+    });
+    assert.equal(badJsonRes.status, 400);
+
+    const missingUrlRes = await fetch(`${baseUrl}/api/cover-art/logo/from-url?showId=tdf`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(missingUrlRes.status, 400);
+
+    // Deliberately does NOT test a well-formed request past this point:
+    // fetchCommonsFile's host allowlist is not overridable from an HTTP
+    // request (that's the point - see wikimediaCommons.test.ts's SSRF-guard
+    // test), so a real request here would genuinely reach the live
+    // Wikimedia host. That path is verified manually/live, not baked into
+    // this offline, deterministic suite as a real network dependency.
+  } finally {
+    await close();
+  }
+});
+
 test("POST /api/cover-art/regenerate skips a show with no logo, and force-regenerates one that has one", async () => {
   const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
   try {
