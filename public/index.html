@@ -97,6 +97,11 @@
   .events-table-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .events-table-scroll table { margin: 0; }
   .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
+  .logo-thumb { width: 24px; height: 24px; object-fit: contain; background: #fff; border-radius: 4px; display: block; }
+  .wiki-results { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+  .wiki-results:empty { margin-top: 0; }
+  .wiki-result-thumb { width: 64px; height: 64px; object-fit: contain; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; padding: 4px; box-sizing: border-box; }
+  .wiki-result-thumb:hover { border-color: var(--accent); }
   code { font-size: 0.85em; opacity: 0.85; }
   button {
     font: inherit;
@@ -526,7 +531,7 @@
   <div class="events-table-scroll">
     <table>
       <thead>
-        <tr><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
+        <tr><th></th><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
       </thead>
       <tbody id="events-tbody"></tbody>
     </table>
@@ -575,9 +580,17 @@
     <div class="row" style="align-items:center;">
       <img id="f-logo-preview" class="hidden" style="max-width:100px; max-height:100px; border-radius:6px; border:1px solid var(--border); object-fit:contain; background:#fff;">
       <button type="button" id="f-logo-upload-btn">Upload logo…</button>
+      <button type="button" id="f-logo-wiki-search-btn">Search Wikipedia…</button>
       <button type="button" id="f-logo-remove-btn" class="hidden">Remove logo</button>
     </div>
     <input type="file" id="f-logo-input" class="hidden" accept="image/*">
+    <div id="f-logo-wiki-search-panel" class="hidden">
+      <div class="row" style="align-items:center; margin-top:0.5rem;">
+        <input type="text" id="f-logo-wiki-query" placeholder="Search query, e.g. race name + logo">
+        <button type="button" id="f-logo-wiki-search-go-btn">Search</button>
+      </div>
+      <div class="wiki-results" id="f-logo-wiki-results"></div>
+    </div>
     <div class="status-msg" id="f-logo-status"></div>
   </div>
   <p id="f-logo-hint" class="hidden" style="font-size:0.85rem; opacity:0.75;">Save this event first, then reopen it to add a logo.</p>
@@ -1274,7 +1287,13 @@ function eventsTableRow(event, index) {
   const flags = [];
   if (event.isHighlights) flags.push("highlights");
   if (event.autoCreated) flags.push("auto-created");
+  // loading="lazy" matters here specifically - with hundreds of events in a
+  // personal config, rendering every row eagerly would fire a logo request
+  // (mostly 404s, for shows with no logo set) for all of them at once on
+  // load. Lazy-loading defers each one until its row actually scrolls into
+  // view in the scrollable table container.
   return `<tr>
+    <td><img class="logo-thumb" src="/api/cover-art/logo?showId=${esc(event.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"></td>
     <td><code>${esc(event.id)}</code></td>
     <td>${esc(event.folderName)}</td>
     <td>${esc(event.type)}</td>
@@ -1388,6 +1407,9 @@ function openForm(index) {
   document.getElementById("f-logo-status").textContent = "";
   document.getElementById("logo-section").classList.toggle("hidden", !event);
   document.getElementById("f-logo-hint").classList.toggle("hidden", !!event);
+  document.getElementById("f-logo-wiki-search-panel").classList.add("hidden");
+  document.getElementById("f-logo-wiki-query").value = "";
+  document.getElementById("f-logo-wiki-results").innerHTML = "";
   if (event) {
     updateLogoPreview(event.id);
   } else {
@@ -1729,6 +1751,63 @@ document.getElementById("f-logo-remove-btn").addEventListener("click", async () 
     updateLogoPreview(events[editingIndex].id);
   } catch (err) {
     statusEl.textContent = `Failed to remove: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+});
+document.getElementById("f-logo-wiki-search-btn").addEventListener("click", () => {
+  const panel = document.getElementById("f-logo-wiki-search-panel");
+  const wasHidden = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden");
+  const queryInput = document.getElementById("f-logo-wiki-query");
+  // Prefill with the show's own name as a sensible starting query, only the
+  // first time the panel opens - don't clobber whatever the user's already
+  // typed if they toggle it closed and back open.
+  if (wasHidden && !queryInput.value && editingIndex !== null) {
+    queryInput.value = `${events[editingIndex].folderName} logo`;
+    queryInput.focus();
+  }
+});
+async function runWikiLogoSearch() {
+  const query = document.getElementById("f-logo-wiki-query").value.trim();
+  const resultsEl = document.getElementById("f-logo-wiki-results");
+  if (!query) return;
+  resultsEl.textContent = "Searching…";
+  try {
+    const data = await api(`/api/cover-art/logo-search?q=${encodeURIComponent(query)}`);
+    if (data.results.length === 0) {
+      resultsEl.textContent = "No results.";
+      return;
+    }
+    resultsEl.innerHTML = data.results.map((r) => `
+      <img class="wiki-result-thumb" src="${esc(r.thumbUrl)}" data-file-url="${esc(r.fileUrl)}" title="${esc(r.title)}" loading="lazy">
+    `).join("");
+  } catch (err) {
+    resultsEl.textContent = `Search failed: ${err.message}`;
+  }
+}
+document.getElementById("f-logo-wiki-search-go-btn").addEventListener("click", runWikiLogoSearch);
+document.getElementById("f-logo-wiki-query").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); runWikiLogoSearch(); }
+});
+document.getElementById("f-logo-wiki-results").addEventListener("click", async (e) => {
+  const thumb = e.target.closest(".wiki-result-thumb");
+  if (!thumb || editingIndex === null) return;
+  const statusEl = document.getElementById("f-logo-status");
+  statusEl.textContent = "Setting logo from Wikipedia…";
+  statusEl.className = "status-msg";
+  try {
+    await api(`/api/cover-art/logo/from-url?showId=${encodeURIComponent(events[editingIndex].id)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: thumb.dataset.fileUrl }),
+    });
+    statusEl.textContent = "Logo set from Wikipedia.";
+    statusEl.className = "status-msg ok";
+    updateLogoPreview(events[editingIndex].id);
+    document.getElementById("f-logo-wiki-search-panel").classList.add("hidden");
+    document.getElementById("f-logo-wiki-results").innerHTML = "";
+  } catch (err) {
+    statusEl.textContent = `Failed to set logo: ${err.message}`;
     statusEl.className = "status-msg err";
   }
 });
