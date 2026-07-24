@@ -103,6 +103,11 @@
   .events-table-scroll table { margin: 0; }
   .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
   .logo-thumb { width: 24px; height: 24px; object-fit: contain; background: #fff; border-radius: 4px; display: block; }
+  /* Border always visible (not just on the filled state) so an event with
+     no per-event color override still shows as a clickable, discoverable
+     ring rather than disappearing entirely. */
+  .event-color-dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); padding: 0; cursor: pointer; display: block; background: transparent; }
+  .event-color-dot:hover { border-color: var(--accent); }
   .wiki-results { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
   .wiki-results:empty { margin-top: 0; }
   .wiki-result-thumb { width: 64px; height: 64px; object-fit: contain; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; padding: 4px; box-sizing: border-box; }
@@ -536,7 +541,7 @@
   <div class="events-table-scroll">
     <table>
       <thead>
-        <tr><th></th><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
+        <tr><th></th><th></th><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
       </thead>
       <tbody id="events-tbody"></tbody>
     </table>
@@ -1305,7 +1310,12 @@ function eventsTableRow(event, index) {
   // (mostly 404s, for shows with no logo set) for all of them at once on
   // load. Lazy-loading defers each one until its row actually scrolls into
   // view in the scrollable table container.
+  const overrideColor = event.coverArt && event.coverArt.backgroundColor;
+  const colorTitle = overrideColor
+    ? `Custom cover-art background: ${overrideColor} (click to edit)`
+    : "No custom cover-art background set (click to set one)";
   return `<tr>
+    <td><button type="button" class="event-color-dot" data-color-edit="${index}" title="${esc(colorTitle)}" style="background:${overrideColor ? esc(overrideColor) : "transparent"};"></button></td>
     <td><img class="logo-thumb" src="/api/cover-art/logo?showId=${esc(event.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"></td>
     <td><code>${esc(event.id)}</code></td>
     <td>${esc(event.folderName)}</td>
@@ -1340,12 +1350,15 @@ function renderEvents() {
     .filter(({ event }) => matches(event));
   tbody.innerHTML = rows.length
     ? rows.map(({ event, index }) => eventsTableRow(event, index)).join("")
-    : `<tr><td colspan="6" style="opacity:0.6;">No events match "${esc(query)}".</td></tr>`;
+    : `<tr><td colspan="7" style="opacity:0.6;">No events match "${esc(query)}".</td></tr>`;
   tbody.querySelectorAll("[data-edit]").forEach((btn) => {
     btn.addEventListener("click", () => openForm(parseInt(btn.dataset.edit, 10)));
   });
   tbody.querySelectorAll("[data-delete]").forEach((btn) => {
     btn.addEventListener("click", () => deleteEvent(parseInt(btn.dataset.delete, 10)));
+  });
+  tbody.querySelectorAll("[data-color-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => editEventColorField(parseInt(btn.dataset.colorEdit, 10)));
   });
 }
 
@@ -1716,24 +1729,50 @@ document.getElementById("events-search").addEventListener("input", renderEvents)
 document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
 document.getElementById("save-event-btn").addEventListener("click", saveEvent);
 document.getElementById("f-type").addEventListener("change", updateCategoriesVisibility);
+// Shared by the override checkbox's own change handler and
+// editEventColorField (the events-table color dot) - both need "turning
+// the override on for the first time prefills from the current global
+// defaults" behavior, not just the checkbox.
+async function prefillEventCoverArtFromGlobalIfEmpty() {
+  if (document.getElementById("f-coverart-bg1").value) return;
+  // First time this event's override is turned on - prefill with the
+  // current global defaults as a starting point to tweak, rather than
+  // blank fields (which would resolve to the app's factory colors, not
+  // what Settings actually has, if the user saves without touching them).
+  try {
+    const s = await api("/api/settings");
+    document.getElementById("f-coverart-bg1").value = s.coverArt.backgroundColor;
+    document.getElementById("f-coverart-bg2").value = s.coverArt.backgroundColor2 || "";
+    document.getElementById("f-coverart-logo-scale").value = s.coverArt.logoScale;
+    updateEventCoverArtSwatches();
+  } catch {}
+}
 document.getElementById("f-coverart-override-enabled").addEventListener("change", async (e) => {
   document.getElementById("f-coverart-override-fields").classList.toggle("hidden", !e.target.checked);
-  if (e.target.checked && !document.getElementById("f-coverart-bg1").value) {
-    // First time this event's override is turned on - prefill with the
-    // current global defaults as a starting point to tweak, rather than
-    // blank fields (which would resolve to the app's factory colors, not
-    // what Settings actually has, if the user saves without touching them).
-    try {
-      const s = await api("/api/settings");
-      document.getElementById("f-coverart-bg1").value = s.coverArt.backgroundColor;
-      document.getElementById("f-coverart-bg2").value = s.coverArt.backgroundColor2 || "";
-      document.getElementById("f-coverart-logo-scale").value = s.coverArt.logoScale;
-      updateEventCoverArtSwatches();
-    } catch {}
-  }
+  if (e.target.checked) await prefillEventCoverArtFromGlobalIfEmpty();
 });
 document.getElementById("f-coverart-bg1").addEventListener("input", updateEventCoverArtSwatches);
 document.getElementById("f-coverart-bg2").addEventListener("input", updateEventCoverArtSwatches);
+
+// The events-table color dot: opens this event's edit form, turns on its
+// cover-art override if it isn't already (prefilling from the global
+// defaults the same way manually checking the box does), then puts the
+// cursor straight into the background-color field - this is what makes
+// clicking an unset (empty) dot still usable for setting a color, not just
+// clicking an already-set one.
+async function editEventColorField(index) {
+  openForm(index);
+  const checkbox = document.getElementById("f-coverart-override-enabled");
+  if (!checkbox.checked) {
+    checkbox.checked = true;
+    document.getElementById("f-coverart-override-fields").classList.remove("hidden");
+    await prefillEventCoverArtFromGlobalIfEmpty();
+  }
+  const bg1 = document.getElementById("f-coverart-bg1");
+  bg1.scrollIntoView({ behavior: "smooth", block: "center" });
+  bg1.focus();
+  bg1.select();
+}
 document.getElementById("add-category-btn").addEventListener("click", () => {
   const editor = document.getElementById("categories-editor");
   editor.insertAdjacentHTML("beforeend", categoryRowHtml({ episode: editor.children.length + 1, title: "", include: [], exclude: [] }));
