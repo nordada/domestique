@@ -594,6 +594,7 @@
         <input type="text" id="f-logo-wiki-query" placeholder="Search query, e.g. race name + logo">
         <button type="button" id="f-logo-wiki-search-go-btn">Search</button>
       </div>
+      <p id="f-logo-wiki-broadened-note" class="hidden" style="font-size:0.8rem; opacity:0.7; margin:0.4rem 0 0;">No file titled with a match for this search - showing Commons' broader results instead, which can be less precise.</p>
       <div class="wiki-results" id="f-logo-wiki-results"></div>
     </div>
     <div class="status-msg" id="f-logo-status"></div>
@@ -1415,6 +1416,7 @@ function openForm(index) {
   document.getElementById("f-logo-wiki-search-panel").classList.add("hidden");
   document.getElementById("f-logo-wiki-query").value = "";
   document.getElementById("f-logo-wiki-results").innerHTML = "";
+  document.getElementById("f-logo-wiki-broadened-note").classList.add("hidden");
   if (event) {
     updateLogoPreview(event.id);
   } else {
@@ -1775,10 +1777,13 @@ document.getElementById("f-logo-wiki-search-btn").addEventListener("click", () =
 async function runWikiLogoSearch() {
   const query = document.getElementById("f-logo-wiki-query").value.trim();
   const resultsEl = document.getElementById("f-logo-wiki-results");
+  const broadenedNoteEl = document.getElementById("f-logo-wiki-broadened-note");
   if (!query) return;
   resultsEl.textContent = "Searching…";
+  broadenedNoteEl.classList.add("hidden");
   try {
     const data = await api(`/api/cover-art/logo-search?q=${encodeURIComponent(query)}`);
+    broadenedNoteEl.classList.toggle("hidden", !data.broadened);
     if (data.results.length === 0) {
       resultsEl.textContent = "No results.";
       return;
