@@ -279,6 +279,42 @@ test("POST /api/cover-art/logo/from-url validates showId, JSON body, and the url
   }
 });
 
+test("POST /api/cover-art/logo/from-external-url validates its inputs the same way, and rejects a private-address URL deterministically (no live network call needed)", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
+  try {
+    const auth = authHeader("correct-password");
+
+    const unknownShowRes = await fetch(`${baseUrl}/api/cover-art/logo/from-external-url?showId=not-a-real-show`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com/logo.png" }),
+    });
+    assert.equal(unknownShowRes.status, 400);
+
+    const missingUrlRes = await fetch(`${baseUrl}/api/cover-art/logo/from-external-url?showId=tdf`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(missingUrlRes.status, 400);
+
+    // Unlike the Wikimedia-only route above, this one's SSRF guard rejects
+    // a private-address URL entirely offline (no network call, no live
+    // dependency) - safe to actually exercise the failure path for real
+    // here, not just the input-shape validation.
+    const privateAddressRes = await fetch(`${baseUrl}/api/cover-art/logo/from-external-url?showId=tdf`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://192.168.1.24/some-logo.png" }),
+    });
+    assert.equal(privateAddressRes.status, 502);
+    const body = (await privateAddressRes.json()) as { error: string };
+    assert.match(body.error, /refusing to fetch/);
+  } finally {
+    await close();
+  }
+});
+
 test("POST /api/cover-art/regenerate skips a show with no logo, and force-regenerates one that has one", async () => {
   const { baseUrl, libraryRoot, close } = await makeScratchServer({ password: "correct-password" });
   try {

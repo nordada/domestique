@@ -26,6 +26,7 @@ import { loadSettings, resolveCoverArtSettings, type CoverArtSettings } from "./
 import { readBody, readBodyBuffer, BodyTooLargeError } from "./body.js";
 import { sanitizeName } from "./upload.js";
 import { searchCommonsLogos, fetchCommonsFile } from "./wikimediaCommons.js";
+import { fetchExternalImage } from "./externalImage.js";
 import {
   refreshPlexFolder,
   fetchShowRatingKeyIndex,
@@ -195,6 +196,38 @@ async function handleLogoFromUrl(req: IncomingMessage, res: ServerResponse, opts
   sendJson(res, 200, { ok: true });
 }
 
+/**
+ * Used for a directly pasted URL (any host, not just Wikimedia) - the
+ * "search wasn't good enough, I found the logo myself" escape hatch.
+ * fetchExternalImage carries the actual SSRF protections (see
+ * externalImage.ts/ssrfGuard.ts); this handler is just request plumbing.
+ */
+async function handleLogoFromExternalUrl(req: IncomingMessage, res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
+  const config = loadConfig(opts.configPath);
+  const show = requireShow(url, res, config);
+  if (!show) return;
+
+  const externalUrl = parseUrlPayload(await readBody(req), res);
+  if (!externalUrl) return;
+
+  let raw: Buffer;
+  try {
+    raw = await fetchExternalImage(externalUrl);
+  } catch (err) {
+    sendJson(res, 502, { error: `failed to fetch image: ${err}` });
+    return;
+  }
+
+  try {
+    await saveNormalizedLogo(raw, opts, show);
+  } catch {
+    sendJson(res, 400, { error: "not a valid image" });
+    return;
+  }
+
+  sendJson(res, 200, { ok: true });
+}
+
 async function handleLogoGet(res: ServerResponse, opts: ServerOptions, url: URL): Promise<void> {
   const config = loadConfig(opts.configPath);
   const show = requireShow(url, res, config);
@@ -342,6 +375,7 @@ export async function handleCoverArtRequest(
     "/api/cover-art/regenerate",
     "/api/cover-art/logo-search",
     "/api/cover-art/logo/from-url",
+    "/api/cover-art/logo/from-external-url",
   ]);
   if (!knownPaths.has(url.pathname)) {
     return false;
@@ -376,6 +410,11 @@ export async function handleCoverArtRequest(
 
     if (url.pathname === "/api/cover-art/logo/from-url" && req.method === "POST") {
       await handleLogoFromUrl(req, res, opts, url);
+      return true;
+    }
+
+    if (url.pathname === "/api/cover-art/logo/from-external-url" && req.method === "POST") {
+      await handleLogoFromExternalUrl(req, res, opts, url);
       return true;
     }
 
