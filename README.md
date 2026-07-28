@@ -145,7 +145,7 @@ to match against to file correctly. This tab edits the same
 `config/events.json` file the app itself reads, through the browser instead
 of a text editor.
 
-<img src="docs/screenshots/events.png" width="620" alt="Events table, filtered to &quot;Tour de France&quot;, showing several related entries">
+<img src="docs/screenshots/events.png" width="620" alt="Events table showing the Icon, World Tour order, ID, Folder, and Type columns, each sortable by clicking its header">
 
 The filter box searches id, folder name, and keywords at once, handy once
 you have a few hundred entries, which happens fast if your tracker covers
