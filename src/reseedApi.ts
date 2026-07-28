@@ -1,0 +1,144 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
+import { previewReseed, commitReseed } from "./reseed.js";
+import { recordActivity } from "./activity.js";
+import { readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
+import type { ServerOptions } from "./server.js";
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+/**
+ * Handles /api/reseed/preview (a pure, non-destructive library query - see
+ * previewReseed) and /api/reseed/commit (stages matches and hands the
+ * torrent to Transmission - see commitReseed), both in src/reseed.ts. Same
+ * "return true if handled" contract as upload.ts/coverArt.ts, so webui.ts's
+ * dispatch chain stays flat. Sits outside handleWebUiRequest's own
+ * try/catch (same as those two sibling modules), so body-size and
+ * processing errors are handled here directly rather than bubbling up.
+ */
+export async function handleReseedRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  opts: ServerOptions
+): Promise<boolean> {
+  const url = new URL(req.url ?? "", "http://internal");
+  const knownPaths = new Set(["/api/reseed/preview", "/api/reseed/commit"]);
+  if (req.method !== "POST" || !knownPaths.has(url.pathname)) return false;
+
+  let torrentBuf: Buffer;
+  try {
+    torrentBuf = await readBodyBuffer(req, TORRENT_BODY_LIMIT_BYTES);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+      return true;
+    }
+    sendJson(res, 400, { ok: false, error: String(err) });
+    return true;
+  }
+
+  const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+  const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
+
+  if (url.pathname === "/api/reseed/preview") {
+    try {
+      const plan = await previewReseed(torrentBuf, opts.libraryRoot, stagingRoot);
+      sendJson(res, 200, { ok: true, plan });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+    }
+    return true;
+  }
+
+  // /api/reseed/commit
+  if (!settings.transmission) {
+    const message = "Transmission isn't configured - set its RPC URL in Settings before reseeding.";
+    recordActivity(
+      { timestamp: new Date().toISOString(), torrentName: "reseed", lines: [`❌ ${message}`], reviewWorthy: true },
+      opts.activityPath
+    );
+    sendJson(res, 400, { ok: false, error: message });
+    return true;
+  }
+
+  try {
+    const result = await commitReseed(torrentBuf, opts.libraryRoot, stagingRoot, settings.transmission);
+    const verify = result.transmission?.verify;
+    const lines: string[] = [];
+
+    if (!result.staged) {
+      lines.push(`❌ no matches found in the library for "${result.torrentName}" - nothing staged.`);
+    } else {
+      lines.push(
+        `✅ staged ${result.stagedFiles.length}/${result.files.length} file(s) for "${result.torrentName}".`
+      );
+      if (result.ambiguousCount > 0) {
+        lines.push(
+          `⚠️ ${result.ambiguousCount} file(s) had multiple same-size candidates in the library - not guessed, left unstaged.`
+        );
+      }
+      if (result.unmatchedCount > 0) {
+        lines.push(`⚠️ ${result.unmatchedCount} file(s) had no library match at all.`);
+      }
+      if (result.transmission?.added.duplicate) {
+        lines.push(`⚠️ "${result.transmission.added.name}" was already in Transmission (duplicate).`);
+      }
+      if (verify) {
+        lines.push(
+          verify.error
+            ? `⚠️ Transmission reports an error after verifying: ${verify.errorString}`
+            : `Transmission verified ${Math.round(verify.percentDone * 100)}% of this torrent's data.`
+        );
+      } else {
+        lines.push(
+          "⚠️ Added to Transmission, but could not confirm its verify result after polling - check Transmission directly."
+        );
+      }
+    }
+
+    const reviewWorthy =
+      !result.staged ||
+      result.ambiguousCount > 0 ||
+      result.unmatchedCount > 0 ||
+      Boolean(result.transmission?.added.duplicate) ||
+      !verify ||
+      Boolean(verify.error) ||
+      verify.percentDone < 1;
+
+    recordActivity(
+      { timestamp: new Date().toISOString(), torrentName: result.torrentName, lines, reviewWorthy },
+      opts.activityPath
+    );
+    sendJson(res, 200, { ok: true, result });
+  } catch (err) {
+    const message = `Failed to reseed: ${err}`;
+    recordActivity(
+      { timestamp: new Date().toISOString(), torrentName: "reseed", lines: [`❌ ${message}`], reviewWorthy: true },
+      opts.activityPath
+    );
+    sendJson(res, 500, { ok: false, error: message });
+  }
+  return true;
+}

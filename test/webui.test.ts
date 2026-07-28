@@ -62,6 +62,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
 
   return {
     baseUrl,
+    libraryRoot,
     configPath,
     settingsPath,
     activityPath,
@@ -285,7 +286,7 @@ test("POST /api/activity/read marks events read without deleting them, both by i
 });
 
 test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secrets in its response", async () => {
-  const { baseUrl, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
+  const { baseUrl, libraryRoot, settingsPath, close } = await makeScratchServer({ password: "correct-password" });
   try {
     const getRes = await fetch(`${baseUrl}/api/settings`, {
       headers: { Authorization: authHeader("correct-password") },
@@ -306,6 +307,8 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       webhookSecretSet: false,
       loginLockoutThreshold: 5,
       loginLockoutSeconds: 60,
+      reseedStagingDir: "",
+      reseedStagingDirResolved: join(libraryRoot, ".reseed-staging"),
     });
 
     const putRes = await fetch(`${baseUrl}/api/settings`, {

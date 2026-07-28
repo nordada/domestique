@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSettings, saveSettings, setPaused, resolveCoverArtSettings } from "../src/settings.js";
+import { loadSettings, saveSettings, setPaused, resolveCoverArtSettings, resolveReseedStagingRoot } from "../src/settings.js";
 
 async function makeScratchDir() {
   return fs.mkdtemp(join(tmpdir(), "domestique-settings-"));
@@ -340,3 +340,44 @@ test("settings.json is written with owner-only 0600 permissions, and loadSetting
   loadSettings(settingsPath, "/library");
   assert.equal((await fs.stat(settingsPath)).mode & 0o777, 0o600);
 });
+
+test("saveSettings defaults reseedStagingDir to null and round-trips a blank string to null too", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  assert.equal(saveSettings({}, "/library", settingsPath).reseedStagingDir, null);
+  assert.equal(saveSettings({ reseedStagingDir: "   " }, "/library", settingsPath).reseedStagingDir, null);
+  assert.equal(
+    saveSettings({ reseedStagingDir: "/mnt/user/reseed" }, "/library", settingsPath).reseedStagingDir,
+    "/mnt/user/reseed"
+  );
+});
+
+test("resolveReseedStagingRoot falls back to a hidden subfolder of the library root when unset", () => {
+  const settings = fullSettingsFixture();
+  assert.equal(resolveReseedStagingRoot({ ...settings, reseedStagingDir: null }, "/library"), "/library/.reseed-staging");
+  assert.equal(
+    resolveReseedStagingRoot({ ...settings, reseedStagingDir: "/mnt/user/reseed" }, "/library"),
+    "/mnt/user/reseed"
+  );
+});
+
+/** Minimal fully-populated Settings object for tests that only care about one field (reseedStagingDir above) - avoids hand-writing every other required field inline. */
+function fullSettingsFixture() {
+  return {
+    plex: null,
+    discord: null,
+    hotfolder: null,
+    transmission: null,
+    indexer: null,
+    coverArt: { enabled: true, backgroundColor: "#14213d", backgroundColor2: null, logoScale: 0.72 },
+    paused: false,
+    accentColor: null,
+    statusPollIntervalMs: 20000,
+    statusPollWhenHidden: false,
+    webhookSecret: null,
+    loginLockoutThreshold: 5,
+    loginLockoutSeconds: 60,
+    reseedStagingDir: null,
+  };
+}

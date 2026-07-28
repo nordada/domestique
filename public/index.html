@@ -472,6 +472,7 @@
   <nav class="tabs">
     <button type="button" class="tab-btn" data-tab="home">Activity</button>
     <button type="button" class="tab-btn" data-tab="events">Events</button>
+    <button type="button" class="tab-btn" data-tab="reseed">Reseed</button>
     <button type="button" class="tab-btn" data-tab="settings">Settings</button>
   </nav>
 </header>
@@ -664,6 +665,34 @@
 
 </div>
 
+<div id="tab-reseed" class="tab-panel hidden">
+
+<section id="reseed-section">
+  <h2>Reseed from library</h2>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Drop a .torrent file for something your tracker says needs seeds. This checks
+    whether its content already exists somewhere in your library under a different
+    name (by exact file size), then - once you confirm - stages it into the exact
+    layout the torrent expects and hands it to Transmission, paused, to verify and
+    reseed. Matching here is size-only and can be wrong; Transmission's own
+    piece-hash verify after Stage &amp; hand off is what actually confirms a real
+    match, so always Preview first and check the verify percentage afterward.
+  </p>
+  <div id="reseed-dropzone">
+    <button class="primary" id="reseed-pick-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>Choose .torrent file…</button>
+    <span class="dropzone-hint">or drag a .torrent file here</span>
+  </div>
+  <input type="file" id="reseed-file-input" class="hidden" accept=".torrent">
+  <div id="reseed-preview-status" class="status-msg"></div>
+  <div id="reseed-preview-list" style="font-size:0.85rem; margin-top:0.5rem;"></div>
+  <div class="actions">
+    <button class="primary hidden" id="reseed-commit-btn">Stage &amp; hand to Transmission</button>
+  </div>
+  <div id="reseed-commit-status" class="status-msg"></div>
+</section>
+
+</div>
+
 <div id="tab-settings" class="tab-panel hidden">
 
 <section id="settings-section">
@@ -683,6 +712,7 @@
     <button type="button" class="subtab-btn" data-subtab="hotfolder">Hot folder</button>
     <button type="button" class="subtab-btn" data-subtab="transmission">Transmission</button>
     <button type="button" class="subtab-btn" data-subtab="indexer">Indexer</button>
+    <button type="button" class="subtab-btn" data-subtab="reseed">Reseed from library</button>
     <button type="button" class="subtab-btn" data-subtab="security">Security</button>
     <button type="button" class="subtab-btn" data-subtab="activitylog">Activity log</button>
   </div>
@@ -828,6 +858,24 @@
         <input type="number" id="s-indexer-check-interval" placeholder="300" min="30" max="3600" style="max-width:10rem;">
       </label>
     </div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-reseed">
+    <h3>Reseed from library</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Where staged (hardlinked, falling back to copied when necessary) files
+      live before being handed to Transmission - see the Reseed tab. Defaults
+      to a hidden folder inside your library root, which also guarantees
+      hardlinking actually works (same filesystem/device as the library
+      itself). Only override this to point at a separate volume instead -
+      trading that hardlink guarantee for isolation. If you do, this path
+      must also be bind-mounted read-write into Transmission's own container
+      at this exact same path, or Transmission will report 0% verified even
+      on a perfectly good match.
+    </p>
+    <label><span>Staging directory override (blank uses the default shown below)</span>
+      <input type="text" id="s-reseed-staging-dir" placeholder="">
+    </label>
   </div>
 
   <div class="subtab-panel hidden" id="settings-subtab-security">
@@ -1234,6 +1282,8 @@ async function loadSettingsPanel() {
     document.getElementById("s-coverart-bg2").value = s.coverArt.backgroundColor2 || "";
     document.getElementById("s-coverart-logo-scale").value = s.coverArt.logoScale;
     updateCoverArtSwatches();
+    document.getElementById("s-reseed-staging-dir").value = s.reseedStagingDir;
+    document.getElementById("s-reseed-staging-dir").placeholder = s.reseedStagingDirResolved;
     document.getElementById("s-webhook-secret").placeholder = s.webhookSecretSet ? "already set, leave blank to keep" : "not set";
     document.getElementById("s-lockout-threshold").value = s.loginLockoutThreshold;
     document.getElementById("s-lockout-seconds").value = s.loginLockoutSeconds;
@@ -1279,6 +1329,7 @@ async function saveSettingsPanel() {
     },
     loginLockoutThreshold: parseInt(document.getElementById("s-lockout-threshold").value, 10) || 5,
     loginLockoutSeconds: parseInt(document.getElementById("s-lockout-seconds").value, 10) || 60,
+    reseedStagingDir: document.getElementById("s-reseed-staging-dir").value.trim(),
   };
 
   const plexToken = document.getElementById("s-plex-token").value;
@@ -1668,6 +1719,92 @@ async function uploadFolder(fileList) {
     await loadActivity();
   } catch (err) {
     statusEl.textContent = `Upload failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+
+let lastReseedFile = null;
+let lastReseedPlan = null;
+
+function formatBytes(n) {
+  if (n === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function renderReseedPlan(plan) {
+  const listEl = document.getElementById("reseed-preview-list");
+  listEl.innerHTML = plan.files.map((f) => {
+    const icon = f.status === "matched" ? "✅" : f.status === "ambiguous" ? "⚠️" : "❌";
+    let detail = "";
+    if (f.status === "matched" && f.candidate) detail = ` &mdash; ${esc(f.candidate)}`;
+    else if (f.status === "ambiguous") detail = ` &mdash; ${f.candidates.length} same-size candidates in the library, not guessed`;
+    else if (f.status === "unmatched") detail = " &mdash; no library file this size";
+    return `<div>${icon} ${esc(f.relativePath)} (${formatBytes(f.length)})${detail}</div>`;
+  }).join("");
+}
+
+async function previewReseedFile(file) {
+  lastReseedFile = file;
+  lastReseedPlan = null;
+  document.getElementById("reseed-commit-btn").classList.add("hidden");
+  document.getElementById("reseed-commit-status").textContent = "";
+  document.getElementById("reseed-commit-status").className = "status-msg";
+  document.getElementById("reseed-preview-list").innerHTML = "";
+  const statusEl = document.getElementById("reseed-preview-status");
+  statusEl.textContent = `Checking "${file.name}" against the library…`;
+  statusEl.className = "status-msg";
+  try {
+    const data = await api("/api/reseed/preview", { method: "POST", body: file });
+    lastReseedPlan = data.plan;
+    renderReseedPlan(data.plan);
+    statusEl.textContent = `${data.plan.matchedCount} matched, ${data.plan.ambiguousCount} ambiguous, ${data.plan.unmatchedCount} unmatched (of ${data.plan.files.length} file(s)).`;
+    statusEl.className = `status-msg ${data.plan.matchedCount === data.plan.files.length ? "ok" : "err"}`;
+    if (data.plan.matchedCount > 0) document.getElementById("reseed-commit-btn").classList.remove("hidden");
+  } catch (err) {
+    statusEl.textContent = `Preview failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+  }
+}
+
+async function commitReseedFile() {
+  if (!lastReseedFile || !lastReseedPlan) return;
+  if (lastReseedPlan.ambiguousCount > 0 || lastReseedPlan.unmatchedCount > 0) {
+    const proceed = confirm(
+      `${lastReseedPlan.ambiguousCount} ambiguous and ${lastReseedPlan.unmatchedCount} unmatched file(s) will be left out of this torrent - this will only be a partial reseed attempt. Continue?`
+    );
+    if (!proceed) return;
+  }
+  const statusEl = document.getElementById("reseed-commit-status");
+  statusEl.textContent = "Staging matched file(s) and handing off to Transmission…";
+  statusEl.className = "status-msg";
+  try {
+    const data = await api("/api/reseed/commit", { method: "POST", body: lastReseedFile });
+    const r = data.result;
+    const lines = [];
+    let ok = false;
+    if (!r.staged) {
+      lines.push(`No matches found for "${r.torrentName}" - nothing staged.`);
+    } else {
+      lines.push(`Staged ${r.stagedFiles.length}/${r.files.length} file(s) for "${r.torrentName}".`);
+      const verify = r.transmission && r.transmission.verify;
+      if (verify) {
+        lines.push(
+          verify.error
+            ? `Transmission reports an error after verifying: ${verify.errorString}`
+            : `Transmission verified ${Math.round(verify.percentDone * 100)}% of this torrent's data.`
+        );
+        ok = !verify.error && verify.percentDone === 1;
+      } else {
+        lines.push("Added to Transmission, but couldn't confirm its verify result after polling - check Transmission directly.");
+      }
+    }
+    statusEl.textContent = lines.join("\n");
+    statusEl.className = `status-msg ${ok ? "ok" : "err"}`;
+    await loadActivity();
+  } catch (err) {
+    statusEl.textContent = `Failed: ${err.message}`;
     statusEl.className = "status-msg err";
   }
 }
@@ -2140,15 +2277,43 @@ document.getElementById("upload-folder-input").addEventListener("change", (e) =>
   if (e.target.files.length > 0) uploadFolder(e.target.files);
   e.target.value = "";
 });
+document.getElementById("reseed-pick-btn").addEventListener("click", () => document.getElementById("reseed-file-input").click());
+document.getElementById("reseed-file-input").addEventListener("change", (e) => {
+  if (e.target.files.length > 0) previewReseedFile(e.target.files[0]);
+  e.target.value = "";
+});
+{
+  const dropzone = document.getElementById("reseed-dropzone");
+  let dragDepth = 0;
+  dropzone.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    dragDepth++;
+    dropzone.classList.add("dragover");
+  });
+  dropzone.addEventListener("dragover", (e) => e.preventDefault());
+  dropzone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropzone.classList.remove("dragover");
+  });
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    dropzone.classList.remove("dragover");
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.name.toLowerCase().endsWith(".torrent"));
+    if (files.length > 0) previewReseedFile(files[0]);
+  });
+}
+document.getElementById("reseed-commit-btn").addEventListener("click", commitReseedFile);
 
 let initialTab = "home";
 try {
   const savedTab = localStorage.getItem("domestique-tab");
-  if (savedTab === "home" || savedTab === "events" || savedTab === "settings") initialTab = savedTab;
+  if (savedTab === "home" || savedTab === "events" || savedTab === "reseed" || savedTab === "settings") initialTab = savedTab;
 } catch {}
 showTab(initialTab);
 
-const SETTINGS_SUBTABS = ["appearance", "coverart", "status", "plex", "discord", "hotfolder", "transmission", "indexer", "security", "activitylog"];
+const SETTINGS_SUBTABS = ["appearance", "coverart", "status", "plex", "discord", "hotfolder", "transmission", "indexer", "reseed", "security", "activitylog"];
 document.querySelectorAll(".subtab-btn").forEach((btn) => {
   btn.addEventListener("click", () => showSettingsSubTab(btn.dataset.subtab));
 });

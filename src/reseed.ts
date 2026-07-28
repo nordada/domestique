@@ -1,0 +1,95 @@
+/**
+ * Domestique - files completed bike-race torrent downloads into a Plex-friendly library layout.
+ * Copyright (C) 2026  @nordada AKA Chris Reynolds
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { parseTorrentFile } from "./torrentFile.js";
+import { buildSizeIndex } from "./libraryIndex.js";
+import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
+import { stageMatchedFiles, type StageResult } from "./reseedStage.js";
+import {
+  addTorrentToTransmission,
+  pollTorrentVerification,
+  type TransmissionConfig,
+  type AddedTorrent,
+  type TorrentVerifyResult,
+} from "./transmission.js";
+
+/** Hidden-dot convention, same as upload.ts's ".uploads-tmp" / fileops.ts's ".archiver-meta.json" - invisible to Plex, lives inside LIBRARY_ROOT by default (see settings.ts's resolveReseedStagingRoot) so hardlinking actually works (same filesystem/device as the library). */
+export const DEFAULT_RESEED_STAGING_SUBDIR = ".reseed-staging";
+
+/**
+ * Pure library query: parses the .torrent, walks the library (excluding the
+ * staging directory itself, so a previous commit's staged hardlinks never
+ * get "discovered" as candidates for themselves), and matches. Never writes
+ * anything, never touches Transmission - safe to call as often as wanted.
+ */
+export async function previewReseed(
+  torrentBuf: Buffer,
+  libraryRoot: string,
+  stagingRoot: string
+): Promise<ReseedPlan> {
+  const meta = parseTorrentFile(torrentBuf);
+  const sizeIndex = await buildSizeIndex(libraryRoot, { excludeDirs: [stagingRoot] });
+  return buildReseedPlan(meta, sizeIndex);
+}
+
+export interface ReseedCommitResult extends ReseedPlan {
+  staged: boolean;
+  stagedFiles: StageResult[];
+  perTorrentDir: string;
+  transmission?: { added: AddedTorrent; verify: TorrentVerifyResult | null };
+}
+
+/**
+ * Re-derives a fresh plan (no caching between a prior Preview call and this
+ * one - see the README's known limitations - a `.torrent` is cheap to
+ * re-parse, and re-checking the library right before staging is more
+ * correct anyway: it catches a library change made between the two calls).
+ * Refuses to touch the filesystem or Transmission at all when nothing
+ * matched. Otherwise clears/recreates this torrent's own staging subdir
+ * (`plan.torrentName` is already a validated single path segment - see
+ * torrentFile.ts's sanitizePathSegment, applied to info.name), stages every
+ * matched file, then hands Transmission the *original* .torrent bytes
+ * pointed at that directory, paused, and waits out its own verify pass.
+ */
+export async function commitReseed(
+  torrentBuf: Buffer,
+  libraryRoot: string,
+  stagingRoot: string,
+  transmissionConfig: TransmissionConfig
+): Promise<ReseedCommitResult> {
+  const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot);
+  const perTorrentDir = join(stagingRoot, plan.torrentName);
+
+  if (plan.matchedCount === 0) {
+    return { ...plan, staged: false, stagedFiles: [], perTorrentDir };
+  }
+
+  await rm(perTorrentDir, { recursive: true, force: true });
+  await mkdir(perTorrentDir, { recursive: true });
+  const stagedFiles = await stageMatchedFiles(plan, perTorrentDir);
+
+  const added = await addTorrentToTransmission(transmissionConfig, torrentBuf.toString("base64"), {
+    downloadDir: perTorrentDir,
+    paused: true,
+  });
+  const verify = await pollTorrentVerification(transmissionConfig, added.id);
+
+  return { ...plan, staged: true, stagedFiles, perTorrentDir, transmission: { added, verify } };
+}

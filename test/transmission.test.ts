@@ -6,6 +6,7 @@ import {
   getTransmissionTorrentSummary,
   addTorrentToTransmission,
   pollTorrentAdded,
+  pollTorrentVerification,
   transmissionWebUrl,
 } from "../src/transmission.js";
 
@@ -212,6 +213,42 @@ test("addTorrentToTransmission reports duplicate:true for an already-added torre
   }
 });
 
+test("addTorrentToTransmission sends download-dir and paused when opts are provided", async () => {
+  let receivedArgs: Record<string, unknown> | undefined;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-add") {
+      receivedArgs = args;
+      return { "torrent-added": { id: 1, name: "Race", hashString: "abc" } };
+    }
+    return {};
+  });
+  try {
+    await addTorrentToTransmission({ url }, "base64bytes", { downloadDir: "/staging/Race", paused: true });
+    assert.equal(receivedArgs?.["download-dir"], "/staging/Race");
+    assert.equal(receivedArgs?.paused, true);
+  } finally {
+    await close();
+  }
+});
+
+test("addTorrentToTransmission omits download-dir/paused entirely when opts aren't provided", async () => {
+  let receivedArgs: Record<string, unknown> | undefined;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-add") {
+      receivedArgs = args;
+      return { "torrent-added": { id: 1, name: "Race", hashString: "abc" } };
+    }
+    return {};
+  });
+  try {
+    await addTorrentToTransmission({ url }, "base64bytes");
+    assert.equal("download-dir" in (receivedArgs ?? {}), false);
+    assert.equal("paused" in (receivedArgs ?? {}), false);
+  } finally {
+    await close();
+  }
+});
+
 test("addTorrentToTransmission throws when the response has neither torrent-added nor torrent-duplicate", async () => {
   const { url, close } = await startFakeTransmissionRpc(() => ({}));
   try {
@@ -258,6 +295,66 @@ test("pollTorrentAdded gives up and returns null once attempts run out", async (
   const { url, close } = await startFakeTransmissionRpc((method) => (method === "torrent-get" ? { torrents: [] } : {}));
   try {
     const result = await pollTorrentAdded({ url }, 42, { attempts: 3, intervalMs: 10 });
+    assert.equal(result, null);
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentVerification returns immediately once status is no longer check-wait/checking", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return { torrents: [{ id: 5, status: 6, error: 0, errorString: "", percentDone: 1 }] };
+    }
+    return {};
+  });
+  try {
+    const result = await pollTorrentVerification({ url }, 5, { attempts: 3, intervalMs: 10 });
+    assert.deepEqual(result, { id: 5, status: 6, error: 0, errorString: "", percentDone: 1 });
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentVerification keeps polling while status is check-wait (1) or checking (2), then returns the settled result", async () => {
+  let calls = 0;
+  const { url, close } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      calls += 1;
+      const status = calls === 1 ? 1 : calls === 2 ? 2 : 6;
+      const percentDone = calls < 3 ? 0 : 0.42;
+      return { torrents: [{ id: 8, status, error: 0, errorString: "", percentDone }] };
+    }
+    return {};
+  });
+  try {
+    const result = await pollTorrentVerification({ url }, 8, { attempts: 5, intervalMs: 10 });
+    assert.deepEqual(result, { id: 8, status: 6, error: 0, errorString: "", percentDone: 0.42 });
+    assert.equal(calls, 3);
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentVerification returns the last-seen still-checking result (not null) once attempts run out", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return { torrents: [{ id: 11, status: 2, error: 0, errorString: "", percentDone: 0.5 }] };
+    }
+    return {};
+  });
+  try {
+    const result = await pollTorrentVerification({ url }, 11, { attempts: 3, intervalMs: 10 });
+    assert.deepEqual(result, { id: 11, status: 2, error: 0, errorString: "", percentDone: 0.5 });
+  } finally {
+    await close();
+  }
+});
+
+test("pollTorrentVerification returns null when the torrent never shows up at all", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => (method === "torrent-get" ? { torrents: [] } : {}));
+  try {
+    const result = await pollTorrentVerification({ url }, 99, { attempts: 3, intervalMs: 10 });
     assert.equal(result, null);
   } finally {
     await close();

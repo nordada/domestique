@@ -136,6 +136,13 @@ export interface AddedTorrent {
   duplicate: boolean;
 }
 
+export interface AddTorrentOptions {
+  /** Passed through as RPC `download-dir` - where Transmission should look for (and write) this torrent's data. Omitted entirely from the RPC args when unset, so existing callers (the plain "Add torrent" feature) are unaffected. */
+  downloadDir?: string;
+  /** Passed through as RPC `paused` - true for the reseed-from-library flow (src/reseed.ts), which wants Transmission's own verify pass to run against the staged files before anything starts announcing/downloading. */
+  paused?: boolean;
+}
+
 /**
  * Hands a .torrent file's raw bytes to Transmission via RPC `torrent-add`
  * (its `metainfo` argument, base64-encoded file contents - as opposed to
@@ -146,9 +153,13 @@ export interface AddedTorrent {
 export async function addTorrentToTransmission(
   config: TransmissionConfig,
   metainfoBase64: string,
+  opts: AddTorrentOptions = {},
   timeoutMs = 10000
 ): Promise<AddedTorrent> {
-  const data = await rpcCall(config, "torrent-add", { metainfo: metainfoBase64 }, timeoutMs);
+  const args: Record<string, unknown> = { metainfo: metainfoBase64 };
+  if (opts.downloadDir !== undefined) args["download-dir"] = opts.downloadDir;
+  if (opts.paused !== undefined) args.paused = opts.paused;
+  const data = await rpcCall(config, "torrent-add", args, timeoutMs);
   const added = data.arguments?.["torrent-added"] as { id: number; name: string; hashString: string } | undefined;
   const duplicate = data.arguments?.["torrent-duplicate"] as
     | { id: number; name: string; hashString: string }
@@ -197,4 +208,61 @@ export async function pollTorrentAdded(
     }
   }
   return null;
+}
+
+// From Transmission's RPC spec (tr_torrent_activity): 1 = queued to check
+// existing data, 2 = actively checking it - the two states a torrent added
+// against a directory with existing files passes through before its own
+// piece-hash verify has actually settled.
+const STATUS_CHECK_WAIT = 1;
+const STATUS_CHECKING = 2;
+
+export interface TorrentVerifyResult {
+  id: number;
+  status: number;
+  error: number;
+  errorString: string;
+  /** 0-1 fraction Transmission reports as already verified/downloaded - the authoritative measure of whether a staged reseed match was actually correct (see reseed.ts and reseedMatch.ts's own, unverified size-only matching). */
+  percentDone: number;
+}
+
+/**
+ * Polls torrent-get until a freshly-added torrent's own verify pass (see
+ * STATUS_CHECK_WAIT/STATUS_CHECKING above) has settled, then returns the
+ * result - including percentDone, so a caller can tell a clean full verify
+ * from a partial or zero one. Used by the reseed-from-library flow
+ * (reseed.ts) after adding a torrent pointed at freshly staged files;
+ * unlike pollTorrentAdded (which only confirms the add was registered at
+ * all), this deliberately waits out the hash-check itself, since that's the
+ * whole point of staging files ahead of the add. If attempts run out before
+ * settling, the last-seen (still-checking) result is returned rather than
+ * null, so a caller can at least report "still verifying" instead of
+ * mistaking a slow check for a failed one.
+ */
+export async function pollTorrentVerification(
+  config: TransmissionConfig,
+  id: number,
+  { attempts = 30, intervalMs = 2000, timeoutMs = 5000 }: { attempts?: number; intervalMs?: number; timeoutMs?: number } = {}
+): Promise<TorrentVerifyResult | null> {
+  let last: TorrentVerifyResult | null = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    try {
+      const data = await rpcCall(
+        config,
+        "torrent-get",
+        { ids: [id], fields: ["id", "status", "error", "errorString", "percentDone"] },
+        timeoutMs
+      );
+      const torrents = (data.arguments?.torrents ?? []) as TorrentVerifyResult[];
+      const match = torrents.find((t) => t.id === id);
+      if (match) {
+        last = match;
+        if (match.status !== STATUS_CHECK_WAIT && match.status !== STATUS_CHECKING) return match;
+      }
+    } catch {
+      // Keep polling - a single failed attempt doesn't mean verification failed.
+    }
+  }
+  return last;
 }

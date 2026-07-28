@@ -24,6 +24,7 @@ import { plexConfigFromEnv, type PlexConfig } from "./plex.js";
 import { discordConfigFromEnv, type DiscordConfig } from "./discord.js";
 import { hotfolderConfigFromEnv, type HotfolderConfig } from "./hotfolder.js";
 import type { TransmissionConfig } from "./transmission.js";
+import { DEFAULT_RESEED_STAGING_SUBDIR } from "./reseed.js";
 
 export interface HotfolderSettings {
   dir: string;
@@ -100,6 +101,19 @@ export interface Settings {
   loginLockoutThreshold: number;
   /** Base cooldown, in seconds, applied the first time the lockout triggers. */
   loginLockoutSeconds: number;
+  /**
+   * Optional override for where the reseed-from-library feature (see
+   * reseed.ts) stages hardlinked/copied files before handing them to
+   * Transmission. Null means "use the default" - a hidden subfolder of the
+   * library root (see resolveReseedStagingRoot below), which also
+   * guarantees hardlinking actually works (same filesystem/device as the
+   * library). An override is only useful for pointing this at a separate
+   * shared volume instead of exposing part of the library tree into
+   * Transmission's container - trading the hardlink guarantee for
+   * isolation (falls back to a real copy on EXDEV, still correct, just
+   * slower).
+   */
+  reseedStagingDir: string | null;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -138,6 +152,9 @@ function seedFromEnv(libraryRoot: string): Settings {
     webhookSecret: normalizeWebhookSecret(process.env.WEBHOOK_SECRET),
     loginLockoutThreshold: DEFAULT_LOGIN_LOCKOUT_THRESHOLD,
     loginLockoutSeconds: DEFAULT_LOGIN_LOCKOUT_SECONDS,
+    // No env-var seeding precedent - new feature, same reasoning already
+    // used for transmission/indexer above.
+    reseedStagingDir: null,
   };
 }
 
@@ -167,7 +184,19 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     webhookSecret: normalizeWebhookSecret(raw.webhookSecret),
     loginLockoutThreshold: normalizeLoginLockoutThreshold(raw.loginLockoutThreshold),
     loginLockoutSeconds: normalizeLoginLockoutSeconds(raw.loginLockoutSeconds),
+    reseedStagingDir: normalizeReseedStagingDir(raw.reseedStagingDir),
   };
+}
+
+function normalizeReseedStagingDir(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** The one place "null override -> default" is resolved, reused by both the reseed API and the settings-panel display (see webui.ts's maskSettings). */
+export function resolveReseedStagingRoot(settings: Settings, libraryRoot: string): string {
+  return settings.reseedStagingDir ?? join(libraryRoot, DEFAULT_RESEED_STAGING_SUBDIR);
 }
 
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 20000;

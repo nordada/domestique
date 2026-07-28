@@ -26,6 +26,7 @@ import {
   loadSettings,
   saveSettings,
   setPaused,
+  resolveReseedStagingRoot,
   DEFAULT_INDEXER_CHECK_INTERVAL_MS,
   type Settings,
   type IndexerSettings,
@@ -35,6 +36,7 @@ import { parseName } from "./parser.js";
 import { getRecentActivity, recordActivity, markActivityRead } from "./activity.js";
 import { handleUploadRequest, sanitizeName, type ProcessTorrentDone } from "./upload.js";
 import { handleCoverArtRequest } from "./coverArt.js";
+import { handleReseedRequest } from "./reseedApi.js";
 import { syncSortTitlesToPlex } from "./sortTitles.js";
 import { checkPlexLive, plexLibraryUrl } from "./plex.js";
 import {
@@ -216,7 +218,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
  * Discord webhook URL are never sent back once set (only whether one is
  * set), so a stolen response or a screen-share can't leak either credential.
  */
-function maskSettings(settings: Settings) {
+function maskSettings(settings: Settings, libraryRoot: string) {
   return {
     plex: {
       url: settings.plex?.url ?? "",
@@ -252,6 +254,11 @@ function maskSettings(settings: Settings) {
     webhookSecretSet: Boolean(settings.webhookSecret),
     loginLockoutThreshold: settings.loginLockoutThreshold,
     loginLockoutSeconds: settings.loginLockoutSeconds,
+    // reseedStagingDir is the raw override (blank when unset); resolved is
+    // always populated, so the UI can show a "(default: ...)" placeholder
+    // the same way other optional path fields do elsewhere in this file.
+    reseedStagingDir: settings.reseedStagingDir ?? "",
+    reseedStagingDirResolved: resolveReseedStagingRoot(settings, libraryRoot),
   };
 }
 
@@ -333,6 +340,12 @@ export async function handleWebUiRequest(
 
   if (url.startsWith("/api/cover-art/")) {
     if (await handleCoverArtRequest(req, res, opts)) {
+      return true;
+    }
+  }
+
+  if (url.startsWith("/api/reseed/")) {
+    if (await handleReseedRequest(req, res, opts)) {
       return true;
     }
   }
@@ -587,7 +600,7 @@ export async function handleWebUiRequest(
 
     if (req.method === "GET" && url === "/api/settings") {
       const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
-      sendJson(res, 200, maskSettings(settings));
+      sendJson(res, 200, maskSettings(settings, opts.libraryRoot));
       return true;
     }
 
@@ -614,6 +627,7 @@ export async function handleWebUiRequest(
         webhookSecret?: string;
         loginLockoutThreshold?: number;
         loginLockoutSeconds?: number;
+        reseedStagingDir?: string;
       };
 
       // A field only overwrites its stored secret when the caller actually
@@ -647,11 +661,12 @@ export async function handleWebUiRequest(
             webhookSecret,
             loginLockoutThreshold: payload.loginLockoutThreshold,
             loginLockoutSeconds: payload.loginLockoutSeconds,
+            reseedStagingDir: payload.reseedStagingDir,
           },
           opts.libraryRoot,
           opts.settingsPath
         );
-        sendJson(res, 200, { ok: true, ...maskSettings(saved) });
+        sendJson(res, 200, { ok: true, ...maskSettings(saved, opts.libraryRoot) });
       } catch (err) {
         sendJson(res, 400, { ok: false, error: String(err) });
       }

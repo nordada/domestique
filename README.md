@@ -45,7 +45,7 @@ Most day-to-day use happens through the web UI, not the command line or a
 config file. This section walks through every screen in it, what each
 control actually does, and (for anyone who wants to know) exactly what it
 touches on your system to do it. It's optional (see [step
-7](#7-optional-web-ui) to enable it) but recommended; without it you'd be
+8](#8-optional-web-ui) to enable it) but recommended; without it you'd be
 hand-editing JSON files instead.
 
 ### Header: status at a glance
@@ -271,8 +271,9 @@ rejected while still locked out.
   3. [Add a new show](#3-add-a-new-show)
   4. [Optional: Plex partial-scan](#4-optional-plex-partial-scan)
   5. [Optional: hot-folder ingestion](#5-optional-hot-folder-ingestion-bypass-transmission)
-  6. [Optional: Discord notifications](#6-optional-discord-notifications)
-  7. [Optional: web UI](#7-optional-web-ui)
+  6. [Optional: reseed from your Plex library](#6-optional-reseed-from-your-plex-library)
+  7. [Optional: Discord notifications](#7-optional-discord-notifications)
+  8. [Optional: web UI](#8-optional-web-ui)
 - [Known limitations / assumptions](#known-limitations--assumptions-check-these-against-reality-as-you-go)
 - [Security posture](#security-posture)
   - [Running as a non-root user](#running-as-a-non-root-user-recommended)
@@ -497,11 +498,14 @@ rebuild needed. Minimal example:
 
 ### 4. Optional: Plex partial-scan
 
-**Everything in this section and the next two (hot-folder, Discord) is also
-editable live afterward via the web UI's Settings panel** (see step 7) -
-no container restart needed. The env vars below are a **one-time seed
-only**: the first time `config/settings.json` doesn't exist yet, it's
-created from whatever's set in `.env`; after that the file is authoritative
+**Everything in this section and the next two env-var-configurable ones
+(hot-folder, Discord) is also editable live afterward via the web UI's
+Settings panel** (see step 8) - no container restart needed. (The reseed
+feature in between, step 6, has no `.env` equivalent at all - it's
+Settings-only, same as Transmission/indexer below.) The env vars below are
+a **one-time seed only**: the first time `config/settings.json` doesn't
+exist yet, it's created from whatever's set in `.env`; after that the file
+is authoritative
 and these env vars are ignored on every later boot. Delete
 `config/settings.json` if you want `.env` to reseed it fresh.
 
@@ -600,7 +604,44 @@ top of the read-only one - the rest of the Transmission share stays
 untouched and read-only. Don't merge these two mounts back into one; that
 would make the whole downloads share writable.
 
-### 6. Optional: Discord notifications
+### 6. Optional: reseed from your Plex library
+
+Private trackers often need seeds long after a race first aired, and by
+then the file's usually been renamed away from whatever the tracker's own
+`.torrent` expected - by this app, or by hand. This feature closes that
+loop: drop the `.torrent` file for something your tracker says needs seeds
+into the **Reseed** tab, and it checks whether that content already exists
+somewhere in your library (matched by exact file size), then - once you
+confirm - stages it into the exact layout the torrent expects and hands it
+to Transmission, paused, to verify and start seeding. Nothing is guessed:
+matching here is size-only, so a same-size coincidence is possible;
+Transmission's own piece-hash verify (its normal behavior when a torrent is
+added against a directory with existing files) is what actually confirms a
+real match, which is why Preview always runs before anything is staged, and
+why the verify percentage afterward is the number that matters, not the
+size-match itself.
+
+Staged files live in a hidden `.reseed-staging` folder inside `LIBRARY_ROOT`
+by default (override with a staging-directory path in the Settings tab's
+"Reseed from library" section if you'd rather use a separate volume) -
+hardlinked into place when possible (instant, no extra disk, since the
+staged path and the library file are the same inode), falling back to a
+real copy only if hardlinking isn't possible (staging directory on a
+different filesystem/device than the library).
+
+**Path consistency matters here too**, same class of requirement as
+`DOWNLOADS_DIR` in step 2 above: whatever directory this feature stages
+into must be bind-mounted **read-write** into Transmission's own container
+at the exact same absolute path Domestique sees it at. Get this wrong and
+Transmission will report 0% verified even on a perfectly good match, since
+it's looking for the staged files in the wrong place. If you're using the
+default (`LIBRARY_ROOT`'s own `.reseed-staging` subfolder) and Transmission
+already sees the same `LIBRARY_ROOT` path this container does (a common
+setup when Plex, Transmission, and Domestique all mount the same host
+share), there's nothing extra to configure - Transmission just needs
+read-write access to that share, not read-only.
+
+### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after
 every torrent-done event (from the Transmission webhook or hot-folder
@@ -635,7 +676,7 @@ about the archiver changes, and startup logs will say `discord: disabled`.
 A failed Discord post is only ever logged as a warning; it never affects
 whether a file gets archived.
 
-### 7. Optional: web UI
+### 8. Optional: web UI
 
 A small web UI at `/ui` for editing `config/events.json` without hand-editing
 JSON, testing the matcher against a sample release name, adding a torrent
@@ -720,6 +761,37 @@ so tweaking it doesn't require a rebuild.
   practice this only matters if the *same* country/category/year gets two
   different broadcaster releases for a Nationals-type show - narrow enough
   that it's left as a known gap rather than adding more regex complexity.
+- **Reseed matching is by exact file size only** - it never hashes file
+  content itself. Two unrelated files that happen to be exactly the same
+  size both show up "ambiguous" and neither is guessed at; rename or move
+  one out of the way and re-run Preview if you want it resolved. The real
+  correctness check is Transmission's own piece-hash verify after Stage &
+  hand off, not this matching step.
+- **BitTorrent v2-only torrents** (the newer "file tree" layout, BEP 52)
+  aren't supported by the reseed feature - they're rejected outright with a
+  clear error rather than silently mis-parsed. Hybrid v1+v2 torrents work
+  fine, since they still carry the older v1 fields this feature actually
+  reads.
+- **A torrent with zero size-matches anywhere in the library** is never
+  handed to Transmission at all when you commit - there's nothing to
+  verify, so this just reports "no matches found."
+- **A partially-matched torrent is still committed** for whatever staged
+  successfully; Transmission's own verify percentage afterward is the
+  ground truth, not a plain yes/no - a low percentage on a confident-
+  looking match means a size coincidence, not a bug.
+- **Reseed's Preview and Commit each re-scan the whole library from
+  scratch** every time - no caching, no file-watching. Fine for a personal
+  library of a few thousand files; expect a brief pause on a very large
+  one, and expect the two steps to occasionally disagree with each other if
+  you change the library in between clicking them.
+- **The reseed library scan never follows symlinks** (skipped entirely, to
+  dodge cycles and double-counting) - a library organized with symlinks for
+  alternate versions won't offer those as match candidates.
+- **Staged reseed files are never auto-cleaned up.** Once a torrent's added
+  to Transmission, that staging folder is Transmission's to manage; if you
+  later remove the torrent from Transmission, delete
+  `<staging dir>/<that torrent's folder>` by hand. Safe either way - it's
+  only ever hardlinks or copies, never your library originals.
 
 ## Security posture
 
