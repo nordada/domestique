@@ -346,9 +346,11 @@ test("POST /api/cover-art/regenerate skips a show with no logo, and force-regene
 
 /**
  * Simulates enough of Plex's real API for refreshPlexForShow's two paths:
- * `/library/sections/{id}/all?type=2` (the ratingKey lookup, returns
- * `knownShows` as Metadata with a Location) and both refresh endpoints
- * (`/refresh?path=` passive, `/library/metadata/{key}/refresh` forced).
+ * `/library/sections/{id}/all?type=2` (the ratingKey-only listing - real
+ * Plex never includes Location here, confirmed against a real TOWER
+ * response), `/library/metadata/{key}` (the per-item fetch that DOES
+ * carry `knownShows`' Location), and both refresh endpoints (`/refresh?
+ * path=` passive, `/library/metadata/{key}/refresh` forced).
  */
 function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
   const passiveRefreshPaths: string[] = [];
@@ -360,7 +362,7 @@ function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
       allRequestCount++;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        MediaContainer: { Metadata: knownShows.map((s) => ({ ratingKey: s.ratingKey, Location: [{ path: s.path }] })) },
+        MediaContainer: { Metadata: knownShows.map((s) => ({ ratingKey: s.ratingKey })) },
       }));
       return;
     }
@@ -369,6 +371,15 @@ function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
       forceRefreshRatingKeys.push(metadataRefreshMatch[1]);
       res.writeHead(200);
       res.end();
+      return;
+    }
+    const metadataItemMatch = url.pathname.match(/\/library\/metadata\/([^/]+)$/);
+    if (metadataItemMatch) {
+      const show = knownShows.find((s) => s.ratingKey === metadataItemMatch[1]);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        MediaContainer: { Metadata: show ? [{ ratingKey: show.ratingKey, Location: [{ path: show.path }] }] : [] },
+      }));
       return;
     }
     passiveRefreshPaths.push(url.searchParams.get("path") ?? "");

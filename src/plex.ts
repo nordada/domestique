@@ -135,8 +135,8 @@ export type PlexShowRatingKeyIndex = Map<string, string>;
 
 /**
  * Fetches every show's ratingKey+root-folder-location in the configured
- * library section in one request. Needed because a passive path-scoped
- * scan (refreshPlexFolder) reliably detects new episode files but does NOT
+ * library section. Needed because a passive path-scoped scan
+ * (refreshPlexFolder) reliably detects new episode files but does NOT
  * reliably re-examine local media assets (like a newly added poster.jpg)
  * for a show Plex already considers fully matched - confirmed via a real
  * test where "Scan Library" left a fresh poster invisible in Plex's poster
@@ -145,32 +145,51 @@ export type PlexShowRatingKeyIndex = Map<string, string>;
  * Metadata" action, and needs a ratingKey first since Domestique only
  * knows a show by its local folder path, not Plex's internal id for it.
  *
- * Deliberately a single batch fetch + an in-memory index, not a per-show
- * lookup call: an earlier version called this per show being refreshed,
- * which meant regenerating N posters re-fetched Plex's entire section
- * listing N times - fine for one show, but with a few dozen logo'd shows
- * this became slow enough to look hung. Callers fetch this once per batch
- * and look up each show's ratingKey from it via lookupShowRatingKey.
+ * Two round-trips per show, not one: the section-wide listing
+ * (`/library/sections/{id}/all`) gives every show's ratingKey cheaply, but
+ * confirmed via a real TOWER response never includes that show's
+ * `Location` (root folder path) - only the per-item endpoint
+ * (`/library/metadata/{ratingKey}`) does. So each show's Location has to
+ * be fetched individually after the initial listing. Still only ONE
+ * listing fetch for the whole batch (not one per show being looked up) -
+ * an earlier version called the section listing itself per show, which
+ * meant regenerating N posters re-fetched Plex's entire section listing N
+ * times, slow enough to look hung with a few dozen logo'd shows. The N
+ * per-item Location fetches added here are a new, unavoidable cost of the
+ * same order as the per-show work callers already do once a ratingKey is
+ * found (e.g. forceRefreshItem), so this doesn't reintroduce that
+ * quadratic blowup.
  */
 export async function fetchShowRatingKeyIndex(plex: PlexConfig): Promise<PlexShowRatingKeyIndex> {
-  const url = new URL(`${plex.url}/library/sections/${plex.sectionId}/all`);
-  url.searchParams.set("type", "2"); // shows
-  url.searchParams.set("X-Plex-Token", plex.token);
+  const listUrl = new URL(`${plex.url}/library/sections/${plex.sectionId}/all`);
+  listUrl.searchParams.set("type", "2"); // shows
+  listUrl.searchParams.set("X-Plex-Token", plex.token);
 
-  const res = await fetch(url.toString(), {
+  const listRes = await fetch(listUrl.toString(), {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT_MS),
   });
-  if (!res.ok) {
-    throw new Error(`Plex section listing returned ${res.status} ${res.statusText}`);
+  if (!listRes.ok) {
+    throw new Error(`Plex section listing returned ${listRes.status} ${listRes.statusText}`);
   }
-  const data = (await res.json()) as { MediaContainer?: { Metadata?: PlexShowMetadata[] } };
-  const items = data.MediaContainer?.Metadata ?? [];
+  const listData = (await listRes.json()) as { MediaContainer?: { Metadata?: PlexShowMetadata[] } };
+  const ratingKeys = (listData.MediaContainer?.Metadata ?? [])
+    .map((item) => item.ratingKey)
+    .filter((k): k is string => Boolean(k));
+
   const index: PlexShowRatingKeyIndex = new Map();
-  for (const item of items) {
-    if (!item.ratingKey) continue;
-    for (const loc of item.Location ?? []) {
-      if (loc.path) index.set(loc.path, item.ratingKey);
+  for (const ratingKey of ratingKeys) {
+    const itemUrl = new URL(`${plex.url}/library/metadata/${ratingKey}`);
+    itemUrl.searchParams.set("X-Plex-Token", plex.token);
+    const itemRes = await fetch(itemUrl.toString(), {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(PLEX_REQUEST_TIMEOUT_MS),
+    });
+    if (!itemRes.ok) continue; // one show's metadata being unreachable shouldn't fail the whole batch
+    const itemData = (await itemRes.json()) as { MediaContainer?: { Metadata?: PlexShowMetadata[] } };
+    const item = itemData.MediaContainer?.Metadata?.[0];
+    for (const loc of item?.Location ?? []) {
+      if (loc.path) index.set(loc.path, ratingKey);
     }
   }
   return index;

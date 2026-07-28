@@ -535,6 +535,13 @@ test("POST /api/sort-titles/sync requires Plex to be configured, then pushes a l
     if (req.method === "GET" && url.pathname.endsWith("/all")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
+        MediaContainer: { Metadata: [{ ratingKey: "999" }] },
+      }));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/library/metadata/999") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
         MediaContainer: { Metadata: [{ ratingKey: "999", Location: [{ path: "/library/Tour de France" }] }] },
       }));
       return;

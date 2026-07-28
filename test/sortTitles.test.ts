@@ -13,10 +13,11 @@ test("formatSortTitle zero-pads to 2 digits and appends the show's own folder na
 });
 
 /**
- * The same Plex `/library/sections/{id}/all` path is used both for the
- * ratingKey-index GET (fetchShowRatingKeyIndex) and the sort-title-update
- * PUT (setShowSortTitle) - this stub distinguishes them by HTTP method,
- * matching the two real, different calls syncSortTitlesToPlex makes.
+ * Simulates the real three-endpoint Plex shape fetchShowRatingKeyIndex and
+ * setShowSortTitle rely on: a GET `/all` listing that returns ratingKeys
+ * only (real Plex never includes Location there, confirmed against a real
+ * TOWER response), a GET `/library/metadata/{key}` per-item fetch that
+ * DOES carry `knownShows`' Location, and the PUT `/all` sort-title update.
  */
 function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
   const sortTitleUpdates: Array<{ id: string; titleSortValue: string; locked: string | null }> = [];
@@ -25,7 +26,16 @@ function makePlexStub(knownShows: Array<{ ratingKey: string; path: string }>) {
     if (req.method === "GET" && url.pathname.endsWith("/all")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        MediaContainer: { Metadata: knownShows.map((s) => ({ ratingKey: s.ratingKey, Location: [{ path: s.path }] })) },
+        MediaContainer: { Metadata: knownShows.map((s) => ({ ratingKey: s.ratingKey })) },
+      }));
+      return;
+    }
+    const metadataItemMatch = req.method === "GET" && url.pathname.match(/\/library\/metadata\/([^/]+)$/);
+    if (metadataItemMatch) {
+      const show = knownShows.find((s) => s.ratingKey === metadataItemMatch[1]);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        MediaContainer: { Metadata: show ? [{ ratingKey: show.ratingKey, Location: [{ path: show.path }] }] : [] },
       }));
       return;
     }
