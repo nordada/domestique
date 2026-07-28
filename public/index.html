@@ -115,12 +115,16 @@
   code { font-size: 0.85em; opacity: 0.85; }
   button {
     font: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     padding: 0.35rem 0.75rem;
     border-radius: 6px;
     border: 1px solid var(--border);
     background: transparent;
     cursor: pointer;
   }
+  button svg { flex: 0 0 auto; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   button.danger { color: var(--err); border-color: var(--err); }
   button:hover { opacity: 0.85; }
@@ -474,14 +478,11 @@
 <section id="add-torrent-section">
   <h2>Add torrent</h2>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Hand a .torrent file straight to Transmission - for a race found outside
-    the tracker's RSS feed, without adding it in Transmission's own UI.
-    Requires Transmission's RPC connection to be configured in Settings.
-    Waits briefly after adding to confirm Transmission actually registered
-    it; check Recent activity below for the result.
+    Sends a .torrent file straight to Transmission, bypassing its own UI, for races the RSS feed missed.
+    Requires Transmission's RPC configured in Settings.
   </p>
   <div id="add-torrent-dropzone">
-    <button class="primary" id="add-torrent-btn">Add .torrent file(s)…</button>
+    <button class="primary" id="add-torrent-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>Add .torrent file(s)…</button>
     <span class="dropzone-hint">or drag .torrent files here</span>
   </div>
   <input type="file" id="add-torrent-input" class="hidden" accept=".torrent" multiple>
@@ -504,15 +505,12 @@
 <section id="upload-section">
   <h2>Upload</h2>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Send a file or folder straight into the library, bypassing Transmission
-    and the hot folder entirely - processed immediately (no polling wait),
-    using the same archiving pipeline as everything else. Uploading a folder
-    is how you'd send a multi-part stage release (each part as its own
-    file) so the parts group together correctly.
+    Sends a file or folder straight into the library, skipping Transmission and the hot folder, processed immediately.
+    Use folder upload for multi part stage releases so the parts group together.
   </p>
   <div class="row">
-    <button class="primary" id="upload-file-btn">Upload file…</button>
-    <button class="primary" id="upload-folder-btn">Upload folder…</button>
+    <button class="primary" id="upload-file-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg>Upload file…</button>
+    <button class="primary" id="upload-folder-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><polyline points="9.5 15.5 12 13 14.5 15.5"/><line x1="12" y1="13" x2="12" y2="18"/></svg>Upload folder…</button>
   </div>
   <input type="file" id="upload-file-input" class="hidden">
   <input type="file" id="upload-folder-input" class="hidden" webkitdirectory multiple>
@@ -522,16 +520,14 @@
 <section id="match-tester-section">
   <h2>Match tester</h2>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Paste a raw torrent/release name to see which event it would match - or
-    that it would auto-create - without saving anything. If it wouldn't
-    match, add it as a new event below.
+    Paste a raw release name to preview which event it would match, or that it would auto create, without saving.
   </p>
   <div class="row">
     <input type="text" id="match-input" placeholder="Tour-de-France-2026-Stage-05-1080p-Eurosport">
-    <button class="primary" id="match-btn" style="flex:0 0 auto;">Test</button>
+    <button class="primary" id="match-btn" style="flex:0 0 auto;"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Test</button>
   </div>
   <div id="match-result" class="status-msg"></div>
-  <button class="primary hidden" id="add-from-match-btn" style="margin-top:0.5rem;">Add as new event</button>
+  <button class="primary hidden" id="add-from-match-btn" style="margin-top:0.5rem;"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Add as new event</button>
 </section>
 
 </div>
