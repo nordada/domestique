@@ -551,7 +551,8 @@
     <table>
       <thead>
         <tr>
-          <th></th><th></th>
+          <th></th>
+          <th class="sortable-th" data-sort="hasLogo">Icon<span class="sort-arrow"></span></th>
           <th class="sortable-th" data-sort="sortOrder">World Tour order<span class="sort-arrow"></span></th>
           <th class="sortable-th" data-sort="id">ID<span class="sort-arrow"></span></th>
           <th class="sortable-th" data-sort="folderName">Folder<span class="sort-arrow"></span></th>
@@ -1350,13 +1351,14 @@ function eventsTableRow(event, index) {
 }
 
 async function loadEvents() {
-  const data = await api("/api/events");
-  events = data.shows;
+  const [data, logoData] = await Promise.all([api("/api/events"), api("/api/cover-art/logo-ids")]);
+  const logoIds = new Set(logoData.ids);
+  events = data.shows.map((e) => ({ ...e, hasLogo: logoIds.has(e.id) }));
   document.getElementById("events-count").textContent = events.length;
   renderEvents();
 }
 
-let eventsSortColumn = null; // "sortOrder" | "id" | "folderName" | "type" | null (original config order)
+let eventsSortColumn = null; // "hasLogo" | "sortOrder" | "id" | "folderName" | "type" | null (original config order)
 let eventsSortDir = "asc";
 
 function sortEventRows(rows) {
@@ -1372,6 +1374,9 @@ function sortEventRows(rows) {
       if (av == null) return 1;
       if (bv == null) return -1;
       return (av - bv) * dir;
+    }
+    if (col === "hasLogo") {
+      return ((av ? 1 : 0) - (bv ? 1 : 0)) * dir;
     }
     return String(av).localeCompare(String(bv), undefined, { sensitivity: "base", numeric: true }) * dir;
   });

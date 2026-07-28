@@ -230,6 +230,27 @@ test("GET /api/cover-art/logo 404s when no logo has been set for a real show", a
   }
 });
 
+test("GET /api/cover-art/logo-ids returns an empty list when no logos directory exists yet, then the real set once some are uploaded", async () => {
+  const { baseUrl, close } = await makeScratchServer({ password: "correct-password" }, [
+    TDF,
+    { id: "giro", folderName: "Giro D'Italia", matchKeywords: ["giro"], type: "stage-race" },
+  ]);
+  try {
+    const auth = authHeader("correct-password");
+
+    const beforeRes = await fetch(`${baseUrl}/api/cover-art/logo-ids`, { headers: { Authorization: auth } });
+    assert.equal(beforeRes.status, 200);
+    assert.deepEqual(await beforeRes.json(), { ids: [] });
+
+    await fetch(`${baseUrl}/api/cover-art/logo?showId=tdf`, { method: "POST", headers: { Authorization: auth }, body: await tinyPng() });
+
+    const afterRes = await fetch(`${baseUrl}/api/cover-art/logo-ids`, { headers: { Authorization: auth } });
+    assert.deepEqual(await afterRes.json(), { ids: ["tdf"] });
+  } finally {
+    await close();
+  }
+});
+
 test("GET /api/cover-art/logo-search requires a q query param", async () => {
   const { baseUrl, close } = await makeScratchServer({ password: "correct-password" });
   try {

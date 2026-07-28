@@ -17,7 +17,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import sharp from "sharp";
@@ -251,6 +251,27 @@ async function handleLogoDelete(res: ServerResponse, opts: ServerOptions, url: U
   sendJson(res, 200, { ok: true });
 }
 
+/**
+ * Lists every show id that currently has a logo, via one directory listing
+ * rather than a per-show existence check - lets the Events table's "has an
+ * icon" column sort correctly without fetching all ~hundreds of logo images
+ * up front, which is exactly what the table's `loading="lazy"` thumbnails
+ * were built to avoid (see eventsTableRow's own comment in index.html).
+ */
+async function handleLogoIds(res: ServerResponse, opts: ServerOptions): Promise<void> {
+  try {
+    const entries = await readdir(join(opts.libraryRoot, LOGO_SUBDIR));
+    const ids = entries.filter((f) => f.endsWith(".png")).map((f) => f.slice(0, -".png".length));
+    sendJson(res, 200, { ids });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      sendJson(res, 200, { ids: [] }); // no logos uploaded yet - not an error
+      return;
+    }
+    throw err;
+  }
+}
+
 async function refreshOnePlexShow(
   plex: PlexConfig,
   show: ShowConfig,
@@ -372,6 +393,7 @@ export async function handleCoverArtRequest(
   const url = new URL(req.url ?? "", "http://internal");
   const knownPaths = new Set([
     "/api/cover-art/logo",
+    "/api/cover-art/logo-ids",
     "/api/cover-art/regenerate",
     "/api/cover-art/logo-search",
     "/api/cover-art/logo/from-url",
@@ -396,6 +418,11 @@ export async function handleCoverArtRequest(
         return true;
       }
       return false;
+    }
+
+    if (url.pathname === "/api/cover-art/logo-ids" && req.method === "GET") {
+      await handleLogoIds(res, opts);
+      return true;
     }
 
     if (url.pathname === "/api/cover-art/regenerate" && req.method === "POST") {
