@@ -382,9 +382,12 @@ broadcaster for.
 ## Setup
 
 **On Unraid**, the easiest path is Community Applications rather than the
-manual steps below: add `https://github.com/nordada/domestique` as a
-template repository (Apps tab → gear icon → Template repositories), then
-install "domestique" from Apps like any other CA container. It pulls the
+manual steps below: open the **Apps** tab, search for "domestique", and
+install it like any other CA app. (Just submitted to the CA feed - if it
+doesn't show up in search yet, it may still be propagating; in the
+meantime, add `https://github.com/nordada/domestique` as a template
+repository instead, under Apps → gear icon → Template repositories, then
+install "domestique" from Apps the same way.) Either path pulls the
 prebuilt image from GHCR (`ghcr.io/nordada/domestique`, published by this
 repo's GitHub Actions workflow) instead of building from source, and its
 config fields map directly to the steps below - the descriptions in the
