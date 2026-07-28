@@ -102,6 +102,9 @@
   .events-table-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .events-table-scroll table { margin: 0; }
   .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
+  .sortable-th { cursor: pointer; user-select: none; }
+  .sortable-th:hover { opacity: 0.75; }
+  .sort-arrow { display: inline-block; width: 0.9em; margin-left: 0.15em; opacity: 0.7; }
   .logo-thumb { width: 24px; height: 24px; object-fit: contain; background: #fff; border-radius: 4px; display: block; }
   /* Border always visible (not just on the filled state) so an event with
      no per-event color override still shows as a clickable, discoverable
@@ -538,7 +541,7 @@
   <div class="toolbar">
     <h2 style="margin:0">Events (<span id="events-count">0</span>)</h2>
     <div class="row" style="flex:0 0 auto; gap:0.5rem;">
-      <button id="sync-sort-titles-btn" title="Push each event's Sort order (below) to Plex as a locked sort title">Sync sort order to Plex</button>
+      <button id="sync-sort-titles-btn" title="Push each event's World Tour order (below) to Plex as a locked sort title">Sync sort order to Plex</button>
       <button class="primary" id="add-event-btn">Add event</button>
     </div>
   </div>
@@ -547,7 +550,14 @@
   <div class="events-table-scroll">
     <table>
       <thead>
-        <tr><th></th><th></th><th>Sort</th><th>ID</th><th>Folder</th><th>Type</th><th>Keywords</th><th>Flags</th><th></th></tr>
+        <tr>
+          <th></th><th></th>
+          <th class="sortable-th" data-sort="sortOrder">World Tour order<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="id">ID<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="folderName">Folder<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="type">Type<span class="sort-arrow"></span></th>
+          <th>Keywords</th><th>Flags</th><th></th>
+        </tr>
       </thead>
       <tbody id="events-tbody"></tbody>
     </table>
@@ -584,7 +594,7 @@
       </select>
     </label>
   </div>
-  <label><span>Sort order (optional - a number used to push a locked, zero-padded sort title to Plex, e.g. "01 Tour Down Under", so a curated set of events can be browsed chronologically instead of alphabetically. Leave blank to leave Plex's sort title alone.)</span>
+  <label><span>World Tour order (optional - a number used to push a locked, zero-padded sort title to Plex, e.g. "01 Tour Down Under", so this season's World Tour events can be browsed chronologically instead of alphabetically. Leave blank for non-World-Tour events, or to leave Plex's sort title alone.)</span>
     <input type="number" id="f-sort-order" placeholder="" min="1" step="1" style="max-width:10rem;">
   </label>
 
@@ -1346,6 +1356,34 @@ async function loadEvents() {
   renderEvents();
 }
 
+let eventsSortColumn = null; // "sortOrder" | "id" | "folderName" | "type" | null (original config order)
+let eventsSortDir = "asc";
+
+function sortEventRows(rows) {
+  if (!eventsSortColumn) return rows;
+  const col = eventsSortColumn;
+  const dir = eventsSortDir === "asc" ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const av = a.event[col];
+    const bv = b.event[col];
+    if (col === "sortOrder") {
+      // Events with no World Tour order set always sort last, in either direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return (av - bv) * dir;
+    }
+    return String(av).localeCompare(String(bv), undefined, { sensitivity: "base", numeric: true }) * dir;
+  });
+}
+
+function updateEventsSortHeaders() {
+  document.querySelectorAll(".sortable-th").forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    arrow.textContent = th.dataset.sort === eventsSortColumn ? (eventsSortDir === "asc" ? "▲" : "▼") : "";
+  });
+}
+
 function renderEvents() {
   const query = document.getElementById("events-search").value.trim().toLowerCase();
   const matches = (event) => {
@@ -1355,9 +1393,11 @@ function renderEvents() {
   };
 
   const tbody = document.getElementById("events-tbody");
-  const rows = events
-    .map((e, i) => ({ event: e, index: i }))
-    .filter(({ event }) => matches(event));
+  const rows = sortEventRows(
+    events
+      .map((e, i) => ({ event: e, index: i }))
+      .filter(({ event }) => matches(event))
+  );
   tbody.innerHTML = rows.length
     ? rows.map(({ event, index }) => eventsTableRow(event, index)).join("")
     : `<tr><td colspan="9" style="opacity:0.6;">No events match "${esc(query)}".</td></tr>`;
@@ -1370,6 +1410,7 @@ function renderEvents() {
   tbody.querySelectorAll("[data-color-edit]").forEach((btn) => {
     btn.addEventListener("click", () => editEventColorField(parseInt(btn.dataset.colorEdit, 10)));
   });
+  updateEventsSortHeaders();
 }
 
 function categoryRowHtml(cat) {
@@ -1750,7 +1791,7 @@ document.getElementById("sync-sort-titles-btn").addEventListener("click", async 
     const skipped = data.results.filter((r) => r.status === "skipped").length;
     const errors = data.results.filter((r) => r.status === "error").length;
     if (data.results.length === 0) {
-      statusEl.textContent = "No events have a Sort order set yet - nothing to sync.";
+      statusEl.textContent = "No events have a World Tour order set yet - nothing to sync.";
       statusEl.className = "status-msg";
     } else {
       const parts = [`Synced ${synced}`];
@@ -1767,6 +1808,18 @@ document.getElementById("sync-sort-titles-btn").addEventListener("click", async 
   }
 });
 document.getElementById("events-search").addEventListener("input", renderEvents);
+document.querySelectorAll(".sortable-th").forEach((th) => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.sort;
+    if (eventsSortColumn === col) {
+      eventsSortDir = eventsSortDir === "asc" ? "desc" : "asc";
+    } else {
+      eventsSortColumn = col;
+      eventsSortDir = "asc";
+    }
+    renderEvents();
+  });
+});
 document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
 document.getElementById("save-event-btn").addEventListener("click", saveEvent);
 document.getElementById("f-type").addEventListener("change", updateCategoriesVisibility);
