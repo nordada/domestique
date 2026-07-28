@@ -7,6 +7,8 @@ import {
   addTorrentToTransmission,
   pollTorrentAdded,
   pollTorrentVerification,
+  startTorrent,
+  getAllTorrentsWithFiles,
   transmissionWebUrl,
 } from "../src/transmission.js";
 
@@ -356,6 +358,50 @@ test("pollTorrentVerification returns null when the torrent never shows up at al
   try {
     const result = await pollTorrentVerification({ url }, 99, { attempts: 3, intervalMs: 10 });
     assert.equal(result, null);
+  } finally {
+    await close();
+  }
+});
+
+test("startTorrent sends torrent-start with the given id", async () => {
+  let receivedMethod;
+  let receivedArgs;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    receivedMethod = method;
+    receivedArgs = args;
+    return {};
+  });
+  try {
+    await startTorrent({ url }, 12);
+    assert.equal(receivedMethod, "torrent-start");
+    assert.deepEqual(receivedArgs, { ids: [12] });
+  } finally {
+    await close();
+  }
+});
+
+test("startTorrent throws when Transmission is unreachable", async () => {
+  await assert.rejects(() => startTorrent({ url: "http://127.0.0.1:1" }, 12, 500));
+});
+
+test("getAllTorrentsWithFiles requests every torrent (no ids filter) and returns the raw list", async () => {
+  let receivedArgs;
+  const torrents = [
+    { id: 1, name: "Race A", status: 6, percentDone: 1, files: [{ name: "Race A/stage1.mp4", length: 100, bytesCompleted: 100 }] },
+    { id: 2, name: "Race B", status: 4, percentDone: 0.5, files: [{ name: "Race B.mp4", length: 200, bytesCompleted: 100 }] },
+  ];
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get") {
+      receivedArgs = args;
+      return { torrents };
+    }
+    return {};
+  });
+  try {
+    const result = await getAllTorrentsWithFiles({ url });
+    assert.deepEqual(result, torrents);
+    assert.equal(receivedArgs?.ids, undefined);
+    assert.ok((receivedArgs?.fields as string[]).includes("files"));
   } finally {
     await close();
   }

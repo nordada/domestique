@@ -167,6 +167,7 @@ test("POST /api/reseed/commit stages a matched file, adds it to Transmission, an
     assert.equal(body.ok, true);
     assert.equal(body.result.staged, true);
     assert.equal(body.result.transmission.verify.percentDone, 1);
+    assert.equal(body.result.transmission.started, true);
 
     const staged = await fs.readFile(
       join(libraryRoot, ".reseed-staging", "Tour de France 2026", "Tour de France 2026", "Stage 1.mp4")
@@ -176,7 +177,7 @@ test("POST /api/reseed/commit stages a matched file, adds it to Transmission, an
     const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
     assert.equal(activity[0].reviewWorthy, false);
     assert.match(activity[0].lines.join("\n"), /staged 1\/1 file/);
-    assert.match(activity[0].lines.join("\n"), /verified 100%/);
+    assert.match(activity[0].lines.join("\n"), /verified 100%.*started seeding/);
   } finally {
     await closeApp();
     await closeTransmission();
@@ -206,5 +207,59 @@ test("POST /api/reseed/commit reports staged:false without touching Transmission
     await assert.rejects(() => fs.stat(join(libraryRoot, ".reseed-staging")));
   } finally {
     await closeApp();
+  }
+});
+
+test("GET /api/reseed/seeding without Transmission configured returns 400, no library walk needed", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/seeding`, { headers: { Authorization: authHeader() } });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /isn't configured/i);
+  } finally {
+    await close();
+  }
+});
+
+test("GET /api/reseed/seeding returns seeding/paused torrents matched against the library", async () => {
+  const { baseUrl, libraryRoot, settingsPath, close: closeApp } = await makeScratchServer();
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return {
+        torrents: [
+          {
+            id: 1,
+            name: "Paris-Roubaix-2026-SBS.mp4",
+            status: 6,
+            percentDone: 1,
+            files: [{ name: "Paris-Roubaix-2026-SBS.mp4", length: 1000, bytesCompleted: 1000 }],
+          },
+          { id: 2, name: "Still Downloading", status: 4, percentDone: 0.2, files: [] },
+        ],
+      };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    await fs.writeFile(join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"), Buffer.alloc(1000));
+
+    const res = await fetch(`${baseUrl}/api/reseed/seeding`, { headers: { Authorization: authHeader() } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.torrents.length, 1);
+    assert.equal(body.torrents[0].id, 1);
+    assert.equal(body.torrents[0].plan.matchedCount, 1);
+    assert.equal(body.torrents[0].plan.files[0].candidate, join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"));
+  } finally {
+    await closeApp();
+    await closeTransmission();
   }
 });

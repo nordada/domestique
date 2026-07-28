@@ -25,6 +25,7 @@ import { stageMatchedFiles, type StageResult } from "./reseedStage.js";
 import {
   addTorrentToTransmission,
   pollTorrentVerification,
+  startTorrent,
   type TransmissionConfig,
   type AddedTorrent,
   type TorrentVerifyResult,
@@ -53,7 +54,11 @@ export interface ReseedCommitResult extends ReseedPlan {
   staged: boolean;
   stagedFiles: StageResult[];
   perTorrentDir: string;
-  transmission?: { added: AddedTorrent; verify: TorrentVerifyResult | null };
+  transmission?: { added: AddedTorrent; verify: TorrentVerifyResult | null; started: boolean };
+}
+
+function isCleanVerify(verify: TorrentVerifyResult | null): verify is TorrentVerifyResult {
+  return verify !== null && !verify.error && verify.percentDone === 1;
 }
 
 /**
@@ -67,6 +72,12 @@ export interface ReseedCommitResult extends ReseedPlan {
  * torrentFile.ts's sanitizePathSegment, applied to info.name), stages every
  * matched file, then hands Transmission the *original* .torrent bytes
  * pointed at that directory, paused, and waits out its own verify pass.
+ * Only once that verify comes back clean (100%, no error) is the torrent
+ * unpaused - a partial or failed verify is left paused for the caller to
+ * review rather than started half-complete. Failing to start it (e.g. a
+ * dropped connection right after a good verify) is non-fatal: the torrent
+ * is still correctly staged and verified, just left paused, and `started`
+ * reports false so the caller can say so.
  */
 export async function commitReseed(
   torrentBuf: Buffer,
@@ -91,5 +102,16 @@ export async function commitReseed(
   });
   const verify = await pollTorrentVerification(transmissionConfig, added.id);
 
-  return { ...plan, staged: true, stagedFiles, perTorrentDir, transmission: { added, verify } };
+  let started = false;
+  if (isCleanVerify(verify)) {
+    try {
+      await startTorrent(transmissionConfig, added.id);
+      started = true;
+    } catch {
+      // Non-fatal - see the doc comment above. started stays false so the
+      // caller can tell the user it still needs a manual Start.
+    }
+  }
+
+  return { ...plan, staged: true, stagedFiles, perTorrentDir, transmission: { added, verify, started } };
 }

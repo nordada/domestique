@@ -19,6 +19,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
+import { listSeedingTorrents } from "./seeding.js";
 import { recordActivity } from "./activity.js";
 import { readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
 import type { ServerOptions } from "./server.js";
@@ -30,12 +31,15 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 /**
  * Handles /api/reseed/preview (a pure, non-destructive library query - see
- * previewReseed) and /api/reseed/commit (stages matches and hands the
- * torrent to Transmission - see commitReseed), both in src/reseed.ts. Same
- * "return true if handled" contract as upload.ts/coverArt.ts, so webui.ts's
- * dispatch chain stays flat. Sits outside handleWebUiRequest's own
- * try/catch (same as those two sibling modules), so body-size and
- * processing errors are handled here directly rather than bubbling up.
+ * previewReseed), /api/reseed/commit (stages matches and hands the torrent
+ * to Transmission - see commitReseed), and /api/reseed/seeding (a read-only
+ * snapshot of every torrent Transmission is currently seeding or has
+ * paused, matched against the library - see listSeedingTorrents in
+ * seeding.ts), all backing the Reseed tab. Same "return true if handled"
+ * contract as upload.ts/coverArt.ts, so webui.ts's dispatch chain stays
+ * flat. Sits outside handleWebUiRequest's own try/catch (same as those two
+ * sibling modules), so body-size and processing errors are handled here
+ * directly rather than bubbling up.
  */
 export async function handleReseedRequest(
   req: IncomingMessage,
@@ -43,6 +47,26 @@ export async function handleReseedRequest(
   opts: ServerOptions
 ): Promise<boolean> {
   const url = new URL(req.url ?? "", "http://internal");
+
+  if (req.method === "GET" && url.pathname === "/api/reseed/seeding") {
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    if (!settings.transmission) {
+      sendJson(res, 400, {
+        ok: false,
+        error: "Transmission isn't configured - set its RPC URL in Settings before viewing seeding status.",
+      });
+      return true;
+    }
+    const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
+    try {
+      const torrents = await listSeedingTorrents(settings.transmission, opts.libraryRoot, stagingRoot);
+      sendJson(res, 200, { ok: true, torrents });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to list seeding torrents: ${err}` });
+    }
+    return true;
+  }
+
   const knownPaths = new Set(["/api/reseed/preview", "/api/reseed/commit"]);
   if (req.method !== "POST" || !knownPaths.has(url.pathname)) return false;
 
@@ -106,11 +130,19 @@ export async function handleReseedRequest(
         lines.push(`⚠️ "${result.transmission.added.name}" was already in Transmission (duplicate).`);
       }
       if (verify) {
-        lines.push(
-          verify.error
-            ? `⚠️ Transmission reports an error after verifying: ${verify.errorString}`
-            : `Transmission verified ${Math.round(verify.percentDone * 100)}% of this torrent's data.`
-        );
+        if (verify.error) {
+          lines.push(`⚠️ Transmission reports an error after verifying: ${verify.errorString}`);
+        } else if (verify.percentDone === 1) {
+          lines.push(
+            result.transmission?.started
+              ? "Transmission verified 100% of this torrent's data and started seeding."
+              : "⚠️ Transmission verified 100% of this torrent's data, but couldn't be started automatically - start it manually in Transmission."
+          );
+        } else {
+          lines.push(
+            `⚠️ Transmission verified only ${Math.round(verify.percentDone * 100)}% of this torrent's data - left paused for review.`
+          );
+        }
       } else {
         lines.push(
           "⚠️ Added to Transmission, but could not confirm its verify result after polling - check Transmission directly."
@@ -125,7 +157,8 @@ export async function handleReseedRequest(
       Boolean(result.transmission?.added.duplicate) ||
       !verify ||
       Boolean(verify.error) ||
-      verify.percentDone < 1;
+      verify.percentDone < 1 ||
+      !result.transmission?.started;
 
     recordActivity(
       { timestamp: new Date().toISOString(), torrentName: result.torrentName, lines, reviewWorthy },

@@ -266,3 +266,54 @@ export async function pollTorrentVerification(
   }
   return last;
 }
+
+/**
+ * Unpauses a torrent via RPC `torrent-start` - used by the reseed-from-
+ * library flow (reseed.ts) once pollTorrentVerification confirms a clean,
+ * complete verify, so a fully-matched reseed actually starts seeding
+ * instead of sitting paused until someone notices and clicks Start in
+ * Transmission's own UI. Throws on failure, same as the other RPC calls
+ * here - callers decide how to surface that (reseed.ts treats a failure to
+ * start as non-fatal: the torrent is still correctly staged and verified,
+ * just left paused, and the caller can start it manually).
+ */
+export async function startTorrent(config: TransmissionConfig, id: number, timeoutMs = 5000): Promise<void> {
+  await rpcCall(config, "torrent-start", { ids: [id] }, timeoutMs);
+}
+
+/** One entry of RPC `torrent-get`'s `files` field - `name` is already the full path relative to the torrent's own download-dir (i.e. it includes the torrent's top-level name/folder for a multi-file torrent), the same convention torrentFile.ts's `relativePath` uses. */
+export interface TransmissionFileEntry {
+  name: string;
+  length: number;
+  bytesCompleted: number;
+}
+
+export interface TransmissionTorrentDetail {
+  id: number;
+  name: string;
+  status: number;
+  percentDone: number;
+  files: TransmissionFileEntry[];
+}
+
+/**
+ * Fetches every torrent Transmission currently knows about, with its full
+ * file list and sizes - used by src/seeding.ts to size-match each one
+ * against the library without needing that torrent's original .torrent
+ * file at all (Transmission already has this information for anything
+ * it's managing, reseeded through this app or not). Omitting `ids` from
+ * the RPC args is what makes this return every torrent rather than a
+ * specific one.
+ */
+export async function getAllTorrentsWithFiles(
+  config: TransmissionConfig,
+  timeoutMs = 10000
+): Promise<TransmissionTorrentDetail[]> {
+  const data = await rpcCall(
+    config,
+    "torrent-get",
+    { fields: ["id", "name", "status", "percentDone", "files"] },
+    timeoutMs
+  );
+  return (data.arguments?.torrents ?? []) as TransmissionTorrentDetail[];
+}

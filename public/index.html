@@ -691,6 +691,23 @@
   <div id="reseed-commit-status" class="status-msg"></div>
 </section>
 
+<section id="seeding-section">
+  <div class="toolbar">
+    <h2 style="margin:0">Currently seeding</h2>
+    <div class="row" style="flex:0 0 auto; gap:0.4rem; align-items:center;">
+      <button type="button" class="icon-btn subtle" id="refresh-seeding-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <span class="refresh-flash" id="seeding-refresh-flash"></span>
+    </div>
+  </div>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Every torrent Transmission is currently seeding or has paused, each matched against
+    your library by file size the same way Preview above does - not limited to torrents
+    reseeded through this tab. A blank match means nothing in the library is that exact
+    size right now.
+  </p>
+  <div id="seeding-list">Loading…</div>
+</section>
+
 </div>
 
 <div id="tab-settings" class="tab-panel hidden">
@@ -1733,9 +1750,8 @@ function formatBytes(n) {
   return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-function renderReseedPlan(plan) {
-  const listEl = document.getElementById("reseed-preview-list");
-  listEl.innerHTML = plan.files.map((f) => {
+function planFilesHtml(files) {
+  return files.map((f) => {
     const icon = f.status === "matched" ? "✅" : f.status === "ambiguous" ? "⚠️" : "❌";
     let detail = "";
     if (f.status === "matched" && f.candidate) detail = ` &mdash; ${esc(f.candidate)}`;
@@ -1743,6 +1759,36 @@ function renderReseedPlan(plan) {
     else if (f.status === "unmatched") detail = " &mdash; no library file this size";
     return `<div>${icon} ${esc(f.relativePath)} (${formatBytes(f.length)})${detail}</div>`;
   }).join("");
+}
+
+function renderReseedPlan(plan) {
+  document.getElementById("reseed-preview-list").innerHTML = planFilesHtml(plan.files);
+}
+
+async function loadSeedingList() {
+  const listEl = document.getElementById("seeding-list");
+  try {
+    const data = await api("/api/reseed/seeding");
+    if (data.torrents.length === 0) {
+      listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing is currently seeding or paused.</p>";
+      return;
+    }
+    listEl.innerHTML = data.torrents.map((t) => {
+      const statusLabel = t.status === 6 ? "Seeding" : "Paused";
+      const statusClass = t.status === 6 ? "ok" : "";
+      return `
+        <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
+          <div><strong>${esc(t.plan.torrentName)}</strong>
+            <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
+            &nbsp;${Math.round(t.percentDone * 100)}%
+          </div>
+          <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
+        </div>
+      `;
+    }).join("");
+  } catch (err) {
+    listEl.innerHTML = `<p class="status-msg err">Failed to load: ${esc(err.message)}</p>`;
+  }
 }
 
 async function previewReseedFile(file) {
@@ -1790,12 +1836,18 @@ async function commitReseedFile() {
       lines.push(`Staged ${r.stagedFiles.length}/${r.files.length} file(s) for "${r.torrentName}".`);
       const verify = r.transmission && r.transmission.verify;
       if (verify) {
-        lines.push(
-          verify.error
-            ? `Transmission reports an error after verifying: ${verify.errorString}`
-            : `Transmission verified ${Math.round(verify.percentDone * 100)}% of this torrent's data.`
-        );
-        ok = !verify.error && verify.percentDone === 1;
+        if (verify.error) {
+          lines.push(`Transmission reports an error after verifying: ${verify.errorString}`);
+        } else if (verify.percentDone === 1) {
+          lines.push(
+            r.transmission.started
+              ? "Transmission verified 100% of this torrent's data and started seeding."
+              : "Transmission verified 100% of this torrent's data, but couldn't be started automatically - start it manually in Transmission."
+          );
+        } else {
+          lines.push(`Transmission verified only ${Math.round(verify.percentDone * 100)}% of this torrent's data - left paused for review.`);
+        }
+        ok = !verify.error && verify.percentDone === 1 && r.transmission.started;
       } else {
         lines.push("Added to Transmission, but couldn't confirm its verify result after polling - check Transmission directly.");
       }
@@ -1803,6 +1855,7 @@ async function commitReseedFile() {
     statusEl.textContent = lines.join("\n");
     statusEl.className = `status-msg ${ok ? "ok" : "err"}`;
     await loadActivity();
+    if (r.staged) await loadSeedingList();
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -2166,6 +2219,13 @@ document.getElementById("refresh-activity-btn").addEventListener("click", () => 
     loadActivity
   );
 });
+document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
+  refreshWithFeedback(
+    document.getElementById("refresh-seeding-btn"),
+    document.getElementById("seeding-refresh-flash"),
+    loadSeedingList
+  );
+});
 document.getElementById("clear-activity-btn").addEventListener("click", async () => {
   const btn = document.getElementById("clear-activity-btn");
   btn.disabled = true;
@@ -2341,6 +2401,7 @@ loadSettingsPanel();
 loadEvents();
 loadActivity();
 loadFullActivityLog();
+loadSeedingList();
 </script>
 </body>
 </html>

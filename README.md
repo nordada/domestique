@@ -613,13 +613,20 @@ loop: drop the `.torrent` file for something your tracker says needs seeds
 into the **Reseed** tab, and it checks whether that content already exists
 somewhere in your library (matched by exact file size), then - once you
 confirm - stages it into the exact layout the torrent expects and hands it
-to Transmission, paused, to verify and start seeding. Nothing is guessed:
-matching here is size-only, so a same-size coincidence is possible;
-Transmission's own piece-hash verify (its normal behavior when a torrent is
-added against a directory with existing files) is what actually confirms a
-real match, which is why Preview always runs before anything is staged, and
-why the verify percentage afterward is the number that matters, not the
-size-match itself.
+to Transmission, paused, to verify. Nothing is guessed: matching here is
+size-only, so a same-size coincidence is possible; Transmission's own
+piece-hash verify (its normal behavior when a torrent is added against a
+directory with existing files) is what actually confirms a real match,
+which is why Preview always runs before anything is staged, and why the
+verify percentage afterward is the number that matters, not the size-match
+itself. Once that verify comes back clean (100%, no error), the torrent is
+automatically unpaused and starts seeding - no manual click needed in
+Transmission's own UI. Anything short of a clean verify (partial,
+erroring, or unconfirmed) is deliberately left paused instead, so you can
+review it before it does anything; if the automatic unpause itself fails
+for some reason (a dropped connection right after a good verify, say), the
+torrent is still correctly staged and verified, just left paused, and
+that's called out in the result so you know to start it yourself.
 
 Staged files live in a hidden `.reseed-staging` folder inside `LIBRARY_ROOT`
 by default (override with a staging-directory path in the Settings tab's
@@ -640,6 +647,15 @@ already sees the same `LIBRARY_ROOT` path this container does (a common
 setup when Plex, Transmission, and Domestique all mount the same host
 share), there's nothing extra to configure - Transmission just needs
 read-write access to that share, not read-only.
+
+The same tab's **Currently seeding** section lists every torrent
+Transmission is presently seeding or has paused - not just ones reseeded
+through this feature - each matched against the library by file size the
+same way Preview does, so you can see at a glance which Plex file
+corresponds to which seeding torrent. This is a live query against
+Transmission and the library on every load/refresh, not a stored history,
+so it always reflects current reality (and costs one library walk each
+time you open or refresh it).
 
 ### 7. Optional: Discord notifications
 
