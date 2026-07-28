@@ -149,6 +149,9 @@
   .categories-editor .cat-row input { flex: 1; }
   .categories-editor .cat-row input[name=episode] { flex: 0 0 4rem; }
   .hidden { display: none !important; }
+  #add-torrent-dropzone { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem; border: 1px dashed var(--border); border-radius: 8px; transition: border-color 0.15s, background 0.15s; }
+  #add-torrent-dropzone .dropzone-hint { font-size: 0.82rem; opacity: 0.6; }
+  #add-torrent-dropzone.dragover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .activity-item { border-bottom: 1px solid var(--border); padding: 0.5rem 0; font-size: 0.85rem; }
   .activity-item:last-child { border-bottom: none; }
   .activity-item .meta { opacity: 0.6; font-size: 0.78rem; }
@@ -477,7 +480,10 @@
     Waits briefly after adding to confirm Transmission actually registered
     it; check Recent activity below for the result.
   </p>
-  <button class="primary" id="add-torrent-btn">Add .torrent file(s)…</button>
+  <div id="add-torrent-dropzone">
+    <button class="primary" id="add-torrent-btn">Add .torrent file(s)…</button>
+    <span class="dropzone-hint">or drag .torrent files here</span>
+  </div>
   <input type="file" id="add-torrent-input" class="hidden" accept=".torrent" multiple>
   <div id="add-torrent-status" class="status-msg"></div>
 </section>
@@ -2048,6 +2054,28 @@ document.getElementById("add-torrent-input").addEventListener("change", (e) => {
   if (e.target.files.length > 0) addTorrentFiles(e.target.files);
   e.target.value = "";
 });
+{
+  const dropzone = document.getElementById("add-torrent-dropzone");
+  let dragDepth = 0;
+  dropzone.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    dragDepth++;
+    dropzone.classList.add("dragover");
+  });
+  dropzone.addEventListener("dragover", (e) => e.preventDefault());
+  dropzone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropzone.classList.remove("dragover");
+  });
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    dropzone.classList.remove("dragover");
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.name.toLowerCase().endsWith(".torrent"));
+    if (files.length > 0) addTorrentFiles(files);
+  });
+}
 document.getElementById("upload-file-btn").addEventListener("click", () => document.getElementById("upload-file-input").click());
 document.getElementById("upload-folder-btn").addEventListener("click", () => document.getElementById("upload-folder-input").click());
 document.getElementById("upload-file-input").addEventListener("change", (e) => {
