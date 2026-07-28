@@ -1,0 +1,14 @@
+<CommunityApplications>
+  <!-- Required profile -->
+  <Profile>
+    This repository hosts the Community Applications template for **Domestique**: a boutique PVR for bike racing, built on the same idea as Sonarr/Radarr but specifically for how race footage actually gets released (multi-part stages, the same race re-released by different broadcasters, trackers that name every file slightly differently). It watches a downloads folder (via a Transmission webhook, a watched hot folder, or a direct upload) and automatically files finished race downloads into a clean, Plex-ready library.
+
+    Also includes a password-gated web UI for managing show/event definitions and testing the file-name matcher, optional Plex partial-scan refresh, optional Discord notifications, and optional Wikipedia-backed cover-art logo search.
+
+    This repository only ships this one application. For support or to report an issue, please use this repository's GitHub Issues.
+  </Profile>
+  <!-- Icon -->
+  <Icon>https://raw.githubusercontent.com/nordada/domestique/main/public/icon.png</Icon>
+  <!-- Web page -->
+  <WebPage>https://github.com/nordada/domestique</WebPage>
+</CommunityApplications>
