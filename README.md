@@ -707,7 +707,19 @@ it removes the torrent and deletes its downloaded data from disk, but
 never touches anything already filed in your Plex library, and never
 could, since it's a completely separate tree Transmission doesn't know
 the path to. Irreversible, gated behind a confirmation dialog that spells
-out exactly what it does before anything happens.
+out exactly what it does (including the real percentage below, not
+Transmission's own, see the next paragraph) before anything happens.
+
+**The percentage shown is deliberately not Transmission's own
+`percentDone`.** Transmission only counts files it considers "wanted"
+toward that figure, so a torrent with some or all files deselected can
+report 100% done while having nothing actually on disk for them - a real,
+known Transmission RPC quirk, not a display bug. This tab computes its own
+figure instead, straight from each file's actual bytes-on-disk versus its
+full size, and labels it "on disk" to be unambiguous. If the two numbers
+disagree, both are shown side by side with a note explaining why, rather
+than silently picking one - the "on disk" figure is the one that actually
+matters when deciding whether it's safe to remove a torrent's data.
 
 ### 7. Optional: Discord notifications
 

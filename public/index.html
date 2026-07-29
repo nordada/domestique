@@ -1827,16 +1827,27 @@ function renderSeedingList() {
           <button type="button" class="icon-btn subtle" data-force-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" title="Force file as new version - bypasses the &quot;already have this release&quot; check">${ICON_HAMMER}</button>
         `
       : "";
+    // percentComplete (bytes actually on disk, computed from the raw file
+    // list) is the trustworthy figure - Transmission's own percentDone can
+    // read 100% for a torrent with deselected files that has nothing on
+    // disk, since it only counts "wanted" files. Flagged explicitly rather
+    // than silently shown, so it's obvious *why* the two numbers disagree
+    // instead of just looking like a bug.
+    const percentOnDisk = Math.round(t.percentComplete * 100);
+    const mismatch = Math.abs(t.percentComplete - t.percentDone) > 0.01;
+    const mismatchNote = mismatch
+      ? `<span title="Transmission's own percentDone only counts files it considers &quot;wanted&quot; - a torrent with deselected files can report 100% there while having nothing on disk."> (Transmission reports ${Math.round(t.percentDone * 100)}% - some files may be deselected)</span>`
+      : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
         <div><strong>${esc(t.plan.torrentName)}</strong>
           <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
-          &nbsp;${Math.round(t.percentDone * 100)}%
+          &nbsp;${percentOnDisk}% on disk${mismatchNote}
         </div>
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
         <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
           ${matchButtons}
-          <button type="button" class="danger" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Remove &amp; delete files</button>
+          <button type="button" class="danger" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}">Remove &amp; delete files</button>
         </div>
       </div>
     `;
@@ -1844,7 +1855,12 @@ function renderSeedingList() {
 
   listEl.querySelectorAll("[data-remove-torrent]").forEach((btn) => {
     btn.addEventListener("click", () =>
-      removeSeedingTorrent(parseInt(btn.dataset.removeTorrent, 10), btn.dataset.torrentName, btn)
+      removeSeedingTorrent(
+        parseInt(btn.dataset.removeTorrent, 10),
+        btn.dataset.torrentName,
+        parseInt(btn.dataset.percentOnDisk, 10),
+        btn
+      )
     );
   });
 
@@ -1912,9 +1928,9 @@ async function addSeedingTorrentToLibrary(id, torrentName, btn, force) {
  * the Plex library), both spelled out in the confirm() dialog before this
  * ever sends a request.
  */
-async function removeSeedingTorrent(id, torrentName, btn) {
+async function removeSeedingTorrent(id, torrentName, percentOnDisk, btn) {
   const proceed = confirm(
-    `Permanently remove "${torrentName}" from Transmission and delete its downloaded data from disk? This cannot be undone. It does NOT touch anything already filed in your Plex library.`
+    `Permanently remove "${torrentName}" from Transmission and delete its downloaded data from disk (currently ${percentOnDisk}% of its bytes are actually present on disk)? This cannot be undone. It does NOT touch anything already filed in your Plex library.`
   );
   if (!proceed) return;
 

@@ -33,9 +33,32 @@ export interface SeedingTorrent {
   id: number;
   name: string;
   status: number;
+  /**
+   * Transmission's own RPC `percentDone` - kept for reference, but
+   * deliberately NOT what the UI treats as the trustworthy figure (see
+   * percentComplete below). Transmission computes this only over "wanted"
+   * files: a torrent with some/all files deselected can legitimately
+   * report 100% done while having zero of those bytes actually on disk -
+   * a real, known Transmission RPC quirk, not a bug in the math itself.
+   */
   percentDone: number;
+  /**
+   * Our own byte-accurate figure instead: sum(files[].bytesCompleted) /
+   * sum(files[].length) across every file Transmission reports, regardless
+   * of wanted/unwanted state. This is what's actually present on disk
+   * right now - the number that actually matters when deciding whether
+   * it's safe to remove a torrent's data.
+   */
+  percentComplete: number;
   /** Size-matched against the *current* library, the same way reseedMatch.ts matches a torrent file's own expected layout - not persisted, not tied to whether this torrent was ever reseeded through this app. A torrent reseeded through the Reseed tab still resolves correctly here: its staged files live under the (excluded) staging directory, but the original library file it was hardlinked from is still found by the same size search. */
   plan: ReseedPlan;
+}
+
+function computePercentComplete(files: { length: number; bytesCompleted: number }[]): number {
+  const totalLength = files.reduce((sum, f) => sum + f.length, 0);
+  if (totalLength === 0) return 0;
+  const totalCompleted = files.reduce((sum, f) => sum + f.bytesCompleted, 0);
+  return totalCompleted / totalLength;
 }
 
 /**
@@ -64,6 +87,7 @@ export async function listSeedingTorrents(
     name: t.name,
     status: t.status,
     percentDone: t.percentDone,
+    percentComplete: computePercentComplete(t.files),
     plan: buildReseedPlan(
       { name: t.name, files: t.files.map((f) => ({ relativePath: f.name, length: f.length })) },
       sizeIndex

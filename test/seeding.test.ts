@@ -87,6 +87,59 @@ test("listSeedingTorrents includes seeding (6) and paused/stopped (0) torrents, 
   }
 });
 
+test("listSeedingTorrents computes percentComplete from actual file bytes, not Transmission's own percentDone - the fix for a torrent with deselected files reporting 100% despite having nothing on disk", async () => {
+  const libraryRoot = await makeLibrary();
+  try {
+    const { url, close } = await startFakeTransmissionRpc((method) => {
+      if (method === "torrent-get") {
+        return {
+          torrents: [
+            {
+              // Transmission's own percentDone only counts "wanted" files,
+              // so a torrent with every file deselected can legitimately
+              // report 100% done while bytesCompleted is 0 for all of them.
+              id: 1,
+              name: "All Deselected",
+              status: 0,
+              percentDone: 1,
+              files: [{ name: "All Deselected/stage1.mp4", length: 1000, bytesCompleted: 0 }],
+            },
+            {
+              id: 2,
+              name: "Half Done",
+              status: 0,
+              percentDone: 1,
+              files: [
+                { name: "Half Done/a.mp4", length: 1000, bytesCompleted: 1000 },
+                { name: "Half Done/b.mp4", length: 1000, bytesCompleted: 0 },
+              ],
+            },
+            {
+              id: 3,
+              name: "Genuinely Complete",
+              status: 6,
+              percentDone: 1,
+              files: [{ name: "Genuinely Complete/stage1.mp4", length: 1000, bytesCompleted: 1000 }],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    try {
+      const result = await listSeedingTorrents({ url }, libraryRoot, join(libraryRoot, ".reseed-staging"));
+      assert.equal(result.find((t) => t.id === 1)?.percentComplete, 0);
+      assert.equal(result.find((t) => t.id === 1)?.percentDone, 1);
+      assert.equal(result.find((t) => t.id === 2)?.percentComplete, 0.5);
+      assert.equal(result.find((t) => t.id === 3)?.percentComplete, 1);
+    } finally {
+      await close();
+    }
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+  }
+});
+
 test("listSeedingTorrents excludes torrents that are downloading/checking/queued, not just seeding/paused", async () => {
   const libraryRoot = await makeLibrary();
   try {
