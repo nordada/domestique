@@ -82,6 +82,29 @@ test("extracts bare 'NofM' with no 'part' keyword at all", () => {
   assert.deepEqual(p1.tokens.sort(), p2.tokens.sort());
 });
 
+test("extracts 'Disc N' as a bare part number, same as legacy multi-disc DVD-rip releases", () => {
+  // Regression test: this exact bug happened for real - a multi-disc
+  // "(Complete)" boxset release with no "part"/"pt" marker, just
+  // "disc N", parsed identically for every disc (no differentiator at
+  // all), so every disc computed the same destination and only the first
+  // could ever be filed - the rest permanently "destination already exists".
+  const disc1 = parseName("Giro 2005 (Complete)/Giro 2005 disc 1.avi");
+  const disc2 = parseName("Giro 2005 (Complete)/Giro 2005 disc 2.avi");
+  const disc3 = parseName("Giro 2005 (Complete)/Giro 2005 disc 3.avi");
+  assert.equal(disc1.partNum, 1);
+  assert.equal(disc1.partTotal, null);
+  assert.equal(disc2.partNum, 2);
+  assert.equal(disc3.partNum, 3);
+  assert.ok(!disc1.tokens.includes("disc"));
+  assert.deepEqual(disc1.tokens.sort(), disc2.tokens.sort());
+});
+
+test("extracts 'CD N' the same way, another common legacy multi-disc naming convention", () => {
+  const p = parseName("Old Race 2005 CD2.avi");
+  assert.equal(p.partNum, 2);
+  assert.ok(!p.tokens.includes("cd"));
+});
+
 test("aliases Italian singular 'donna' to the canonical 'donne' config already uses", () => {
   const p = parseName(REAL_SOURCE_NAMES.girodItaliaDonnaHighlightsStage7);
   assert.ok(p.tokenSet.has("donne"));

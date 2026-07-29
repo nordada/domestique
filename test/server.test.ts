@@ -45,3 +45,25 @@ test("handleTorrentDone's per-file warning combines a namer warning with the rea
   assert.match(second[0].warning ?? "", /no year found/i);
   assert.match(second[0].warning ?? "", /destination already exists/i);
 });
+
+test("a real multi-disc release (Giro 2005 (Complete), disc 1/2/3) files all three discs distinctly, no collision or Force needed", async () => {
+  const { opts, downloadsPath } = await makeScratch();
+  const folder = "Giro 2005 (Complete)";
+  const folderPath = join(downloadsPath, folder);
+  await fs.mkdir(folderPath, { recursive: true });
+  await fs.writeFile(join(folderPath, "Giro 2005 disc 1.avi"), "disc 1 bytes");
+  await fs.writeFile(join(folderPath, "Giro 2005 disc 2.avi"), "disc 2 bytes");
+  await fs.writeFile(join(folderPath, "Giro 2005 disc 3.avi"), "disc 3 bytes");
+
+  const results = await handleTorrentDone({ dir: downloadsPath, name: folder }, opts);
+  assert.equal(results.length, 3);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["copied", "copied", "copied"]
+  );
+  const destPaths = results.map((r) => r.destPath);
+  assert.equal(new Set(destPaths).size, 3, "all three discs should land at distinct destinations");
+  assert.ok(destPaths.some((p) => p?.endsWith("pt01.avi")));
+  assert.ok(destPaths.some((p) => p?.endsWith("pt02.avi")));
+  assert.ok(destPaths.some((p) => p?.endsWith("pt03.avi")));
+});

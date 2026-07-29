@@ -121,22 +121,53 @@ test("force: bypasses the duplicate-destination skip and files a distinctly-tagg
   assert.equal(await fs.readFile(forced.destPath, "utf-8"), "different bytes, same everything else");
 });
 
-test("force: still refuses to overwrite even the forced filename if that's also somehow already taken", async () => {
+test("force: when the plain forced slot is also taken, tries numbered slots (forced 2, forced 3, ...) instead of giving up - the multi-disc-collision case", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const disc1 = await makeSourceFile(sourceDir, "disc1.mp4", "disc 1 bytes");
+  const disc2 = await makeSourceFile(sourceDir, "disc2.mp4", "disc 2 bytes");
+  const disc3 = await makeSourceFile(sourceDir, "disc3.mp4", "disc 3 bytes");
+
+  // All three "discs" parse to the same identity in real life (no "disc N"
+  // differentiator recognized), so all three ask for the exact same
+  // destination - exactly the Giro-2005-style collision this fix is for.
+  const first = await copyIntoLibrary(disc1, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null);
+  assertCopied(first);
+
+  const forcedTwice = await copyIntoLibrary(disc2, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null, true);
+  assertCopied(forcedTwice);
+  assert.match(forcedTwice.destPath, /REVIEW - forced\.mp4$/);
+
+  const forcedThrice = await copyIntoLibrary(disc3, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null, true);
+  assertCopied(forcedThrice);
+  assert.match(forcedThrice.destPath, /REVIEW - forced 2\.mp4$/);
+
+  // All three coexist, each with its own real bytes - none clobbered another.
+  assert.equal(await fs.readFile(first.destPath, "utf-8"), "disc 1 bytes");
+  assert.equal(await fs.readFile(forcedTwice.destPath, "utf-8"), "disc 2 bytes");
+  assert.equal(await fs.readFile(forcedThrice.destPath, "utf-8"), "disc 3 bytes");
+});
+
+test("force: still refuses to overwrite anything once every numbered forced slot up to the cap is also taken", async () => {
   const { libraryRoot, sourceDir } = await makeScratch();
   const destDir = "TestShow/Season 2026";
   const src = await makeSourceFile(sourceDir, "a.mp4");
 
   await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null);
-  // Pre-occupy the exact path the forced retry would use.
-  await fs.writeFile(join(libraryRoot, destDir, "TestShow - S2026E01 - REVIEW - forced.mp4"), "already here");
+  // Pre-occupy the plain forced slot and every numbered one up to the cap
+  // (20), so even the exhaustive retry has nowhere left to go.
+  await fs.writeFile(join(libraryRoot, destDir, "TestShow - S2026E01 - REVIEW - forced.mp4"), "slot 1");
+  for (let i = 2; i <= 20; i++) {
+    await fs.writeFile(join(libraryRoot, destDir, `TestShow - S2026E01 - REVIEW - forced ${i}.mp4`), `slot ${i}`);
+  }
 
   const result = await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null, true);
   assertSkipped(result);
   assert.match(result.reason, /already exists/);
-  // Confirms it didn't overwrite the pre-existing forced file either.
+  // Confirms nothing already there got overwritten.
   assert.equal(
     await fs.readFile(join(libraryRoot, destDir, "TestShow - S2026E01 - REVIEW - forced.mp4"), "utf-8"),
-    "already here"
+    "slot 1"
   );
 });
 

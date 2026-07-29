@@ -255,17 +255,38 @@ export async function copyIntoLibrary(
     if (!force) {
       return { status: "skipped", destPath: finalDestPath, reason: "destination already exists" };
     }
-    const forcedName = insertVersionTag(basename(finalDestPath), "REVIEW - forced");
-    finalDestPath = join(dirname(finalDestPath), forcedName);
+    // Tries "REVIEW - forced", then "REVIEW - forced 2", "REVIEW - forced 3",
+    // etc. - a single retry isn't enough for a release with more than one
+    // colliding file (e.g. a multi-disc rip where "disc 1"/"disc 2"/"disc 3"
+    // all parse to the same untagged identity, since nothing here recognizes
+    // "disc N" as a differentiator the way "pt0N"/"Stage N" are): forcing
+    // disc 2 claims the plain "REVIEW - forced" slot, so forcing disc 3
+    // needs to look one slot further rather than dead-ending on "even the
+    // forced filename is taken". Never overwrites regardless - if every
+    // attempt up to the cap is also taken, stays safe and skips instead of
+    // clobbering the last one found.
+    const MAX_FORCE_ATTEMPTS = 20;
+    let forcedPath: string | null = null;
+    for (let attempt = 1; attempt <= MAX_FORCE_ATTEMPTS; attempt++) {
+      const tag = attempt === 1 ? "REVIEW - forced" : `REVIEW - forced ${attempt}`;
+      const candidate = join(dirname(finalDestPath), insertVersionTag(basename(finalDestPath), tag));
+      if (!(await pathExists(candidate))) {
+        forcedPath = candidate;
+        break;
+      }
+    }
+    if (!forcedPath) {
+      return {
+        status: "skipped",
+        destPath: finalDestPath,
+        reason: `destination already exists (even ${MAX_FORCE_ATTEMPTS} forced-copy filenames are taken)`,
+      };
+    }
+    const forcedName = basename(forcedPath);
+    finalDestPath = forcedPath;
     warning = warning
       ? `${warning}; forced past an existing file at the plain destination for ${key}, filed as "${forcedName}" instead - review both files by hand.`
       : `Forced past an existing file at the plain destination for ${key} - filed as "${forcedName}" instead of skipping. Review both files by hand.`;
-    // Still never overwrites: if even the forced filename is somehow
-    // already taken (e.g. a double-click), stay safe and skip rather than
-    // clobber it.
-    if (await pathExists(finalDestPath)) {
-      return { status: "skipped", destPath: finalDestPath, reason: "destination already exists (even the forced filename is taken)" };
-    }
   }
 
   await fs.mkdir(destDirAbs, { recursive: true });
