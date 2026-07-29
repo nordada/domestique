@@ -738,23 +738,38 @@ that's specific to reseed staging, not the normal copy pipeline), so every
 torrent filed the ordinary way costs disk space twice: once in the
 downloads share, once again in the library. A fully-matched, still-duplicated entry
 shows a **📦 Duplicated** chip and a **Dedupe (reclaim disk space)**
-button. Dedupe hardlinks the matched library file into the same staging
-directory the reseed feature uses, repoints Transmission at it, and forces
-a real re-verify there - if that verify comes back clean, the chip flips
-to **🔗 Deduped** and a **Delete original copy** button appears (the same
-two-click confirm as Remove & delete files) to reclaim the now-orphaned
-downloads-share copy - this specific action needs Domestique's own
-container to have write access to the downloads share (`DOWNLOADS_DIR` is
-mounted read-write in `docker-compose.yml` for exactly this reason);
-relinking and verifying themselves don't need it. If verify *isn't* clean - an unlucky same-size,
-different-content collision, the one failure mode this app's own
-size-only matching can't rule out - Transmission is automatically
-repointed back to the original location and re-verified there too, so a
-torrent that was seeding fine before Dedupe can never end up broken by it;
-nothing is ever deleted unless the relink was actually confirmed good
-first. A multi-file torrent that's only partly relinked (by hand, outside
-this app) shows **🔀 Partially deduped** instead, with no action offered -
-only a full, unambiguous match is ever deduped automatically.
+button (a two-click confirm, same arm-then-confirm pattern as Remove &
+delete files, just accent-colored instead of red since nothing is deleted
+by this step). Dedupe hardlinks the matched library file into the same
+staging directory the reseed feature uses, repoints Transmission at it,
+and forces a real re-verify there - if that verify comes back clean, the
+chip flips to **🔗 Deduped** and a **Delete original copy** button appears
+to reclaim the now-orphaned downloads-share copy - this specific action
+needs Domestique's own container to have write access to the downloads
+share (`DOWNLOADS_DIR` is mounted read-write in `docker-compose.yml` for
+exactly this reason); relinking and verifying themselves don't need it. If
+verify *isn't* clean - an unlucky same-size, different-content collision,
+the one failure mode this app's own size-only matching can't rule out -
+Transmission is automatically repointed back to the original location and
+re-verified there too, so a torrent that was seeding fine before Dedupe
+can never end up broken by it; nothing is ever deleted unless the relink
+was actually confirmed good first. A multi-file torrent that's only partly
+relinked (by hand, outside this app) shows **🔀 Partially deduped**
+instead, with no action offered - only a full, unambiguous match is ever
+deduped automatically.
+
+**The "Delete original copy" button is durable, not one-shot** - it's
+recomputed fresh on every Currently seeding load (checking whether a
+deduped torrent's original file is still confirmed present at its exact
+original path and size), not just shown briefly right after a successful
+Dedupe click. If a delete attempt fails or you never get to it, the button
+(and a red "⚠️ original download-folder copy still exists" note) stays
+visible on that torrent's entry indefinitely, across refreshes and
+restarts, until the file's actually gone - it also counts toward the
+needs-attention badge/sort. It's deliberately narrow, not a broad search:
+it only ever checks the one exact path a torrent's own files would still
+be sitting at, matched by both name and byte-exact size, never a size
+match against something unrelated elsewhere in the share.
 
 ### 7. Optional: Discord notifications
 
@@ -915,6 +930,13 @@ so tweaking it doesn't require a rebuild.
   Dedupe relink-and-verify step still works fine either way, only the
   optional delete-the-original follow-up needs it, and fails with a clear
   `EROFS` error (not silently) if it's missing.
+- **Orphan detection assumes a byte-exact match at a deduped torrent's
+  original download-folder path genuinely is the leftover duplicate** -
+  it isn't content-hash-verified, the same class of assumption reseed's
+  own size-only matching already documents above. In practice this is safe
+  because the check is narrow (the one exact path that torrent's own files
+  would occupy, not a broad search) rather than because the bytes are
+  independently confirmed.
 
 ## Security posture
 

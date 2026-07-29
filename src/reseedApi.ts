@@ -71,7 +71,7 @@ export async function handleReseedRequest(
     }
     const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
     try {
-      const torrents = await listSeedingTorrents(settings.transmission, opts.libraryRoot, stagingRoot);
+      const torrents = await listSeedingTorrents(settings.transmission, opts.libraryRoot, stagingRoot, opts.downloadsPath);
       sendJson(res, 200, { ok: true, torrents });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to list seeding torrents: ${err}` });

@@ -64,9 +64,23 @@ export interface SeedingTorrent {
    * hand-relinked - reported honestly rather than collapsed into one bucket.
    */
   storageStatus: StorageStatus;
+  /**
+   * Set only when storageStatus is "deduped" AND a leftover copy of the
+   * torrent's original data is still confirmed sitting at its old download-
+   * folder location - see findOrphanOriginal below. Shaped to match
+   * POST /api/reseed/delete-original's own body exactly, so the UI can pass
+   * it straight through with no translation.
+   */
+  orphanOriginal: OrphanOriginal | null;
 }
 
 export type StorageStatus = "deduped" | "duplicate" | "mixed" | "n/a";
+
+export interface OrphanOriginal {
+  dir: string;
+  name: string;
+  totalBytes: number;
+}
 
 function computePercentComplete(files: { length: number; bytesCompleted: number }[]): number {
   const totalLength = files.reduce((sum, f) => sum + f.length, 0);
@@ -109,6 +123,37 @@ async function computeStorageStatus(plan: ReseedPlan, downloadDir: string): Prom
 }
 
 /**
+ * Checks the *one* specific place a deduped torrent's original data would
+ * still be sitting, if its "Delete original copy" step was never run or
+ * failed (see dedupe.ts/reseedApi.ts's delete-original route) - never a
+ * broad search across the downloads share, deliberately, so this can never
+ * suggest deleting an unrelated same-size file. `relativePath` already
+ * includes the torrent's own name as its first path segment (the same
+ * convention every other reseed/dedupe path already relies on), so
+ * `join(downloadsPath, file.relativePath)` is exactly where each file would
+ * live if it were still there - no folder-structure guessing involved.
+ * Only reports a candidate when EVERY matched file is confirmed present at
+ * its exact expected byte size - a partial/resized leftover is left alone
+ * rather than guessed at, same rigor this app applies everywhere before an
+ * action that leads to a deletion.
+ */
+async function findOrphanOriginal(plan: ReseedPlan, downloadsPath: string): Promise<OrphanOriginal | null> {
+  let totalBytes = 0;
+  for (const file of plan.files) {
+    if (!file.candidate) continue; // zero-length match - nothing physical to confirm
+    try {
+      const info = await stat(join(downloadsPath, file.relativePath));
+      if (info.size !== file.length) return null;
+      totalBytes += file.length;
+    } catch {
+      return null;
+    }
+  }
+  if (totalBytes === 0) return null; // nothing but zero-length entries - nothing to reclaim
+  return { dir: downloadsPath, name: plan.torrentName, totalBytes };
+}
+
+/**
  * Lists every torrent Transmission is currently seeding or has paused
  * (stopped), each matched against the library by file size - the same
  * size-only matching reseedMatch.ts uses, just fed from Transmission's own
@@ -121,7 +166,8 @@ async function computeStorageStatus(plan: ReseedPlan, downloadDir: string): Prom
 export async function listSeedingTorrents(
   transmissionConfig: TransmissionConfig,
   libraryRoot: string,
-  stagingRoot: string
+  stagingRoot: string,
+  downloadsPath: string
 ): Promise<SeedingTorrent[]> {
   const torrents = await getAllTorrentsWithFiles(transmissionConfig);
   const relevant = torrents.filter((t) => SEEDING_OR_PAUSED.has(t.status));
@@ -135,6 +181,7 @@ export async function listSeedingTorrents(
         { name: t.name, files: t.files.map((f) => ({ relativePath: f.name, length: f.length })) },
         sizeIndex
       );
+      const storageStatus = await computeStorageStatus(plan, t.downloadDir);
       return {
         id: t.id,
         name: t.name,
@@ -142,7 +189,8 @@ export async function listSeedingTorrents(
         percentDone: t.percentDone,
         percentComplete: computePercentComplete(t.files),
         plan,
-        storageStatus: await computeStorageStatus(plan, t.downloadDir),
+        storageStatus,
+        orphanOriginal: storageStatus === "deduped" ? await findOrphanOriginal(plan, downloadsPath) : null,
       };
     })
   );

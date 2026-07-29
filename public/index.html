@@ -138,6 +138,11 @@
      see armDangerButton() - deliberately loud (solid fill, bold) since a
      second click on it is irreversible. */
   button.danger.armed { background: var(--err); color: #fff; border-color: var(--err); font-weight: 700; }
+  /* Same two-click armDangerButton() mechanic, for an action that mutates
+     live state (Transmission's torrent location) but isn't itself
+     destructive/irreversible - accent-colored rather than the red/error
+     treatment above, so it doesn't overstate the risk. */
+  button.confirm-action.armed { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
   .seeding-summary-badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid; }
   .seeding-summary-badge.err { color: var(--err); border-color: var(--err); }
   .seeding-summary-badge.ok { color: var(--ok); border-color: var(--ok); }
@@ -1842,7 +1847,11 @@ async function loadSeedingList() {
  * there's nothing to click to "fix" it here.
  */
 function torrentNeedsAttention(t) {
-  return t.plan.matchedCount < t.plan.files.length || Math.abs(t.percentComplete - t.percentDone) > 0.01;
+  return (
+    t.plan.matchedCount < t.plan.files.length ||
+    Math.abs(t.percentComplete - t.percentDone) > 0.01 ||
+    Boolean(t.orphanOriginal)
+  );
 }
 
 function renderSeedingList() {
@@ -1917,18 +1926,31 @@ function renderSeedingList() {
     }[t.storageStatus] || "";
     const dedupeButton =
       t.storageStatus === "duplicate"
-        ? `<button type="button" data-dedupe="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Dedupe (reclaim disk space)</button>`
+        ? `<button type="button" class="confirm-action" data-dedupe="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" title="Relinks this torrent to its Plex library copy and asks Transmission to re-verify it there. A clean verify makes the completed-folder copy safe to delete separately; a failed verify automatically reverts Transmission back to its original location - nothing is deleted either way.">Dedupe (reclaim disk space)</button>`
         : "";
+    // Durable, not one-shot: recomputed fresh on every list load (see
+    // seeding.ts's findOrphanOriginal), so it stays visible any time a
+    // dedupe's original download-folder copy hasn't actually been deleted
+    // yet - whether that's seconds after Dedupe or after a page reload days
+    // later (the real gap a production EROFS incident exposed).
+    const orphanNote = t.orphanOriginal
+      ? `<div style="font-size:0.85rem; color:var(--err); margin-top:0.25rem;">⚠️ original download-folder copy still exists (${formatBytes(t.orphanOriginal.totalBytes)}) - not yet reclaimed.</div>`
+      : "";
+    const deleteOrphanButton = t.orphanOriginal
+      ? `<button type="button" class="danger" style="flex:0 0 auto;" data-delete-orphan="${t.id}" data-orphan-dir="${esc(t.orphanOriginal.dir)}" data-orphan-name="${esc(t.orphanOriginal.name)}">Delete original copy (${formatBytes(t.orphanOriginal.totalBytes)})</button>`
+      : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
         <div><strong>${esc(t.plan.torrentName)}</strong>
           <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
           &nbsp;${percentOnDisk}% on disk${mismatchNote}${storageChip}
         </div>
+        ${orphanNote}
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
         <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
           ${matchButtons}
           ${dedupeButton}
+          ${deleteOrphanButton}
           <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}">Remove &amp; delete files</button>
         </div>
       </div>
@@ -1965,12 +1987,20 @@ function renderSeedingList() {
   });
 
   listEl.querySelectorAll("[data-dedupe]").forEach((btn) => {
+    const originalLabel = btn.textContent;
     btn.addEventListener("click", () => {
-      const torrentName = btn.dataset.torrentName;
-      const proceed = confirm(
-        `This relinks "${torrentName}" to its Plex library copy and asks Transmission to re-verify it there. If verify comes back clean, the completed-folder copy becomes safe to delete separately (a follow-up button will appear). If verify fails, Transmission is automatically reverted to its original location - nothing is deleted either way. Continue?`
+      armDangerButton(btn, originalLabel, "CONFIRM", () =>
+        dedupeSeedingTorrent(parseInt(btn.dataset.dedupe, 10), btn.dataset.torrentName, btn)
       );
-      if (proceed) dedupeSeedingTorrent(parseInt(btn.dataset.dedupe, 10), torrentName, btn);
+    });
+  });
+
+  listEl.querySelectorAll("[data-delete-orphan]").forEach((btn) => {
+    const originalLabel = btn.textContent;
+    btn.addEventListener("click", () => {
+      armDangerButton(btn, originalLabel, "CONFIRM", () =>
+        deleteOriginalCopy(btn.dataset.orphanDir, btn.dataset.orphanName, btn)
+      );
     });
   });
 }
@@ -1979,13 +2009,17 @@ function renderSeedingList() {
  * Converts a full-duplicate seeding torrent into a hardlink-backed one (see
  * reseedApi.ts's /api/reseed/dedupe and dedupe.ts's commitDedupe) - relinks
  * its matched files to the Plex library copy and asks Transmission to
- * re-verify against them. Deliberately does NOT delete anything itself: on
- * a clean verify, a follow-up "Delete original copy" button is appended
- * into #seeding-action-status (two-click arm/confirm, same as Remove &
- * delete files) so removing the now-orphaned completed-folder file stays a
- * separate, explicit action. A failed verify means commitDedupe already
- * auto-reverted Transmission back to its original location server-side -
- * nothing here is broken, just reported.
+ * re-verify against them. Deliberately does NOT delete anything itself:
+ * loadSeedingList() below re-fetches fresh state after a clean verify, and
+ * if the original download-folder copy is still there (the common case -
+ * see seeding.ts's findOrphanOriginal), the per-item render in
+ * renderSeedingList() picks it up and shows a durable "Delete original
+ * copy" button on that torrent's own entry - not a one-shot button here
+ * that vanishes the moment you navigate away or reload, which is exactly
+ * the gap a real EROFS incident exposed (dedupe succeeded, the delete
+ * failed, and there was no way back to retry it afterward). A failed
+ * verify means commitDedupe already auto-reverted Transmission back to its
+ * original location server-side - nothing here is broken, just reported.
  */
 async function dedupeSeedingTorrent(id, torrentName, btn) {
   const statusEl = document.getElementById("seeding-action-status");
@@ -2000,21 +2034,8 @@ async function dedupeSeedingTorrent(id, torrentName, btn) {
     });
     const result = data.result;
     if (result.staged) {
-      const totalBytes = result.plan.files.reduce((sum, f) => sum + f.length, 0);
       statusEl.className = "status-msg ok";
-      statusEl.textContent = `"${torrentName}" is now deduped - Transmission verified 100% against the library copy.`;
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "danger";
-      delBtn.style.marginLeft = "0.75rem";
-      const delLabel = `Delete original copy (${formatBytes(totalBytes)})`;
-      delBtn.textContent = delLabel;
-      delBtn.addEventListener("click", () => {
-        armDangerButton(delBtn, delLabel, "CONFIRM", () =>
-          deleteOriginalCopy(result.originalLocation.dir, result.originalLocation.name, delBtn)
-        );
-      });
-      statusEl.appendChild(delBtn);
+      statusEl.textContent = `"${torrentName}" is now deduped - Transmission verified 100% against the library copy. If its original download-folder copy still exists, a "Delete original copy" button now appears on its entry below.`;
       await loadActivity();
       await loadSeedingList();
     } else if (result.reverted) {
@@ -2036,12 +2057,15 @@ async function dedupeSeedingTorrent(id, torrentName, btn) {
 
 /**
  * Deletes the now-orphaned original download-folder copy of a torrent that
- * was just successfully deduped (see dedupeSeedingTorrent above) - the
+ * was already deduped (its own durable button in renderSeedingList() -
+ * recomputed fresh on every list load via seeding.ts's findOrphanOriginal,
+ * so it's available any time the original hasn't actually been deleted
+ * yet, not just in the few seconds right after a Dedupe click) - the
  * explicit, separate follow-up step, never combined with dedupe itself.
- * Reports failure on the button's own text rather than touching
- * #seeding-action-status, since this button lives inside that same element
- * and overwriting its textContent would delete the button out from under
- * its own click handler.
+ * Reports failure on the button's own text rather than a shared status
+ * element, since a failure shouldn't wipe out anything else on the page.
+ * On success, refreshes the seeding list so the item's warning note and
+ * this button both disappear immediately rather than lingering stale.
  */
 async function deleteOriginalCopy(dir, name, btn) {
   btn.disabled = true;
@@ -2053,6 +2077,7 @@ async function deleteOriginalCopy(dir, name, btn) {
     });
     btn.textContent = "Deleted";
     await loadActivity();
+    await loadSeedingList();
   } catch (err) {
     btn.disabled = false;
     btn.textContent = `Delete failed: ${err.message}`;
