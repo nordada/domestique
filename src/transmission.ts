@@ -317,3 +317,31 @@ export async function getAllTorrentsWithFiles(
   );
   return (data.arguments?.torrents ?? []) as TransmissionTorrentDetail[];
 }
+
+export interface TorrentLocation {
+  name: string;
+  downloadDir: string;
+}
+
+/**
+ * Looks up where Transmission actually has a torrent's data on disk right
+ * now - used by the "Add to Plex library" action on the Currently seeding
+ * list (see reseedApi.ts) to feed the torrent's real, current dir/name
+ * into the same handleTorrentDone pipeline the webhook uses, for a torrent
+ * Transmission is seeding but that never went through Domestique's normal
+ * ingestion (or whose library copy is missing/gone). Deliberately re-fetched
+ * fresh from Transmission server-side rather than trusting a client-supplied
+ * path - `dir`/`name` end up feeding a filesystem copy operation, so this
+ * is the one source of truth for them. Returns null if Transmission doesn't
+ * report a torrent with this id at all (removed, wrong id, etc).
+ */
+export async function getTorrentLocation(
+  config: TransmissionConfig,
+  id: number,
+  timeoutMs = 5000
+): Promise<TorrentLocation | null> {
+  const data = await rpcCall(config, "torrent-get", { ids: [id], fields: ["id", "name", "downloadDir"] }, timeoutMs);
+  const torrents = (data.arguments?.torrents ?? []) as Array<{ id: number; name: string; downloadDir: string }>;
+  const match = torrents.find((t) => t.id === id);
+  return match ? { name: match.name, downloadDir: match.downloadDir } : null;
+}

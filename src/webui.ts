@@ -345,7 +345,7 @@ export async function handleWebUiRequest(
   }
 
   if (url.startsWith("/api/reseed/")) {
-    if (await handleReseedRequest(req, res, opts)) {
+    if (await handleReseedRequest(req, res, opts, processTorrentDone)) {
       return true;
     }
   }

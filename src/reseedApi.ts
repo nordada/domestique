@@ -16,13 +16,17 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
 import { listSeedingTorrents } from "./seeding.js";
+import { getTorrentLocation } from "./transmission.js";
+import { isPathWithin } from "./fileops.js";
 import { recordActivity } from "./activity.js";
-import { readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
+import { readBody, readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
 import type { ServerOptions } from "./server.js";
+import type { ProcessTorrentDone } from "./upload.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -32,10 +36,12 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 /**
  * Handles /api/reseed/preview (a pure, non-destructive library query - see
  * previewReseed), /api/reseed/commit (stages matches and hands the torrent
- * to Transmission - see commitReseed), and /api/reseed/seeding (a read-only
+ * to Transmission - see commitReseed), /api/reseed/seeding (a read-only
  * snapshot of every torrent Transmission is currently seeding or has
  * paused, matched against the library - see listSeedingTorrents in
- * seeding.ts), all backing the Reseed tab. Same "return true if handled"
+ * seeding.ts), and /api/reseed/add-to-library (runs a seeding torrent
+ * Transmission already has through the normal ingestion pipeline - see
+ * below), all backing the Reseed tab. Same "return true if handled"
  * contract as upload.ts/coverArt.ts, so webui.ts's dispatch chain stays
  * flat. Sits outside handleWebUiRequest's own try/catch (same as those two
  * sibling modules), so body-size and processing errors are handled here
@@ -44,7 +50,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 export async function handleReseedRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  opts: ServerOptions
+  opts: ServerOptions,
+  processTorrentDone: ProcessTorrentDone
 ): Promise<boolean> {
   const url = new URL(req.url ?? "", "http://internal");
 
@@ -63,6 +70,63 @@ export async function handleReseedRequest(
       sendJson(res, 200, { ok: true, torrents });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to list seeding torrents: ${err}` });
+    }
+    return true;
+  }
+
+  /**
+   * Takes a torrent Transmission is already seeding (found via the
+   * Currently seeding list, typically one whose library file is missing/
+   * unmatched) and runs it through the exact same parse/match/copy
+   * pipeline the webhook and hot-folder use - same auto-create-a-show
+   * behavior, same duplicate/quality handling, nothing new. `dir`/`name`
+   * are re-fetched fresh from Transmission server-side (never trusting a
+   * client-supplied path), then confined to the downloads share with the
+   * same isPathWithin check the webhook itself uses - this also naturally
+   * rejects a torrent whose data lives under the reseed staging directory
+   * (that lives inside LIBRARY_ROOT, a different tree from the downloads
+   * share entirely), so this can't be used to re-copy an already-staged
+   * reseed back onto itself.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/add-to-library") {
+    let payload: { id?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.id !== "number") {
+      sendJson(res, 400, { ok: false, error: "body must include a numeric id" });
+      return true;
+    }
+
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    if (!settings.transmission) {
+      sendJson(res, 400, {
+        ok: false,
+        error: "Transmission isn't configured - set its RPC URL in Settings before adding to the library.",
+      });
+      return true;
+    }
+
+    try {
+      const location = await getTorrentLocation(settings.transmission, payload.id);
+      if (!location) {
+        sendJson(res, 404, { ok: false, error: `Transmission doesn't report a torrent with id ${payload.id}` });
+        return true;
+      }
+      if (!isPathWithin(join(location.downloadDir, location.name), opts.downloadsPath)) {
+        sendJson(res, 400, {
+          ok: false,
+          error: `"${location.name}" resolves outside the downloads share - refusing to process it`,
+        });
+        return true;
+      }
+      const results = await processTorrentDone({ dir: location.downloadDir, name: location.name }, opts);
+      sendJson(res, 200, { ok: true, results });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to add to library: ${err}` });
     }
     return true;
   }

@@ -9,6 +9,7 @@ import {
   pollTorrentVerification,
   startTorrent,
   getAllTorrentsWithFiles,
+  getTorrentLocation,
   transmissionWebUrl,
 } from "../src/transmission.js";
 
@@ -402,6 +403,34 @@ test("getAllTorrentsWithFiles requests every torrent (no ids filter) and returns
     assert.deepEqual(result, torrents);
     assert.equal(receivedArgs?.ids, undefined);
     assert.ok((receivedArgs?.fields as string[]).includes("files"));
+  } finally {
+    await close();
+  }
+});
+
+test("getTorrentLocation returns the torrent's real name/downloadDir", async () => {
+  let receivedArgs;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get") {
+      receivedArgs = args;
+      return { torrents: [{ id: 7, name: "TDF-Stage18-SBS.mp4", downloadDir: "/downloads/complete" }] };
+    }
+    return {};
+  });
+  try {
+    const result = await getTorrentLocation({ url }, 7);
+    assert.deepEqual(result, { name: "TDF-Stage18-SBS.mp4", downloadDir: "/downloads/complete" });
+    assert.deepEqual(receivedArgs?.ids, [7]);
+  } finally {
+    await close();
+  }
+});
+
+test("getTorrentLocation returns null when Transmission doesn't report that id", async () => {
+  const { url, close } = await startFakeTransmissionRpc((method) => (method === "torrent-get" ? { torrents: [] } : {}));
+  try {
+    const result = await getTorrentLocation({ url }, 999);
+    assert.equal(result, null);
   } finally {
     await close();
   }

@@ -7,7 +7,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createApp, type ServerOptions } from "../src/server.js";
 import { buildSingleFileTorrent, buildMultiFileTorrent } from "./torrentFixtures.js";
 
-async function makeScratchServer() {
+async function makeScratchServer(downloadsPath?: string) {
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-config-"));
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-library-"));
   const configPath = join(configDir, "events.json");
@@ -22,7 +22,7 @@ async function makeScratchServer() {
     configPath,
     settingsPath,
     activityPath,
-    downloadsPath: "/nonexistent",
+    downloadsPath: downloadsPath ?? "/nonexistent",
     webui: { password: "correct-password" },
   };
 
@@ -261,5 +261,142 @@ test("GET /api/reseed/seeding returns seeding/paused torrents matched against th
   } finally {
     await closeApp();
     await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/add-to-library without Transmission configured returns 400", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/add-to-library`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 1 }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /isn't configured/i);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/add-to-library rejects a body without a numeric id", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/add-to-library`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /numeric id/i);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/add-to-library returns 404 when Transmission doesn't report that torrent id", async () => {
+  const { baseUrl, settingsPath, close: closeApp } = await makeScratchServer();
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) =>
+    method === "torrent-get" ? { torrents: [] } : {}
+  );
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/add-to-library`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 99 }),
+    });
+    assert.equal(res.status, 404);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/add-to-library refuses a torrent whose reported location resolves outside the downloads share", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const outsideDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-outside-"));
+  const { baseUrl, libraryRoot, settingsPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return { torrents: [{ id: 5, name: "sneaky.mp4", downloadDir: outsideDir }] };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/add-to-library`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 5 }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /outside the downloads share/);
+    // Confirm nothing was copied - the library should still be empty.
+    assert.deepEqual(await fs.readdir(libraryRoot), []);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/reseed/add-to-library runs a real seeding torrent through the normal ingestion pipeline", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const { baseUrl, libraryRoot, settingsPath, activityPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  await fs.writeFile(join(downloadsDir, "Tour-de-France-2026-Stage-18-SBS.mp4"), Buffer.alloc(1000));
+
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return {
+        torrents: [{ id: 3, name: "Tour-de-France-2026-Stage-18-SBS.mp4", downloadDir: downloadsDir }],
+      };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+
+    const res = await fetch(`${baseUrl}/api/reseed/add-to-library`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 3 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.results[0].status, "copied");
+
+    // handleTorrentDone auto-created a show and copied the file - same
+    // pipeline the webhook uses, so its own activity entry is what's
+    // recorded (this route doesn't write its own).
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.match(activity[0].lines.join("\n"), /auto-created show/i);
+
+    const showDirs = await fs.readdir(libraryRoot);
+    assert.ok(showDirs.length > 0, "expected an auto-created show folder in the library");
+  } finally {
+    await closeApp();
+    await closeTransmission();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
   }
 });

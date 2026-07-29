@@ -671,7 +671,22 @@ same way Preview does, so you can see at a glance which Plex file
 corresponds to which seeding torrent. This is a live query against
 Transmission and the library on every load/refresh, not a stored history,
 so it always reflects current reality (and costs one library walk each
-time you open or refresh it).
+time you open or refresh it). A search box filters the list by torrent
+name client-side, and the list itself is capped to a scrollable box, the
+same pattern the Events tab already uses for its own few-hundred-row table
+- fine even with several hundred seeding torrents.
+
+A torrent with an unmatched or ambiguous file - most often one that was
+never filed into Plex at all, or whose library copy is gone - gets an
+**Add to Plex library** button instead of (or alongside) a size match.
+Unlike Preview/Commit above, this doesn't try to size-match anything: it
+asks Transmission exactly where that torrent's data actually lives right
+now, then runs it through the *same* parse/match/copy pipeline the
+Transmission webhook and hot-folder ingestion already use - same
+auto-create-a-show behavior when nothing matches an existing event, same
+duplicate/resolution-upgrade handling, nothing new. The reported location
+is still confined to the downloads share (the same `isPathWithin` check
+the webhook itself uses), so this can't be pointed at anything outside it.
 
 ### 7. Optional: Discord notifications
 

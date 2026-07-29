@@ -102,6 +102,10 @@
   .events-table-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .events-table-scroll table { margin: 0; }
   .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
+  /* Same capped-scrollable-box idea as .events-table-scroll above, for the
+     Currently seeding list - a flat stack of blocks rather than a table, so
+     no sticky header to pin, just the height cap + its own scrollbar. */
+  .seeding-list-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 0 0.75rem; }
   .sortable-th { cursor: pointer; user-select: none; }
   .sortable-th:hover { opacity: 0.75; }
   .sort-arrow { display: inline-block; width: 0.9em; margin-left: 0.15em; opacity: 0.7; }
@@ -707,10 +711,15 @@
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
     Every torrent Transmission is currently seeding or has paused, each matched against
     your library by file size the same way Preview above does - not limited to torrents
-    reseeded through this tab. A blank match means nothing in the library is that exact
-    size right now.
+    reseeded through this tab. A torrent with an unmatched or ambiguous file offers an
+    <strong>Add to Plex library</strong> button, which runs it through the normal
+    parse/match/copy pipeline (same as a fresh download) rather than trying to match
+    it into place.
   </p>
-  <div id="seeding-list">Loading…</div>
+  <input type="text" id="seeding-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
+  <div class="seeding-list-scroll">
+    <div id="seeding-list">Loading…</div>
+  </div>
 </section>
 
 </div>
@@ -1770,29 +1779,84 @@ function renderReseedPlan(plan) {
   document.getElementById("reseed-preview-list").innerHTML = planFilesHtml(plan.files);
 }
 
+// Fetched once per load/refresh, filtered/rendered client-side on every
+// keystroke in the search box - same "fetch once, filter locally" pattern
+// as the Events tab's own search box (events/renderEvents), which already
+// proved out at 500+ rows there.
+let seedingTorrents = [];
+
 async function loadSeedingList() {
   const listEl = document.getElementById("seeding-list");
   try {
     const data = await api("/api/reseed/seeding");
-    if (data.torrents.length === 0) {
-      listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing is currently seeding or paused.</p>";
-      return;
-    }
-    listEl.innerHTML = data.torrents.map((t) => {
-      const statusLabel = t.status === 6 ? "Seeding" : "Paused";
-      const statusClass = t.status === 6 ? "ok" : "";
-      return `
-        <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
-          <div><strong>${esc(t.plan.torrentName)}</strong>
-            <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
-            &nbsp;${Math.round(t.percentDone * 100)}%
-          </div>
-          <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
-        </div>
-      `;
-    }).join("");
+    seedingTorrents = data.torrents;
+    renderSeedingList();
   } catch (err) {
     listEl.innerHTML = `<p class="status-msg err">Failed to load: ${esc(err.message)}</p>`;
+  }
+}
+
+function renderSeedingList() {
+  const listEl = document.getElementById("seeding-list");
+  if (seedingTorrents.length === 0) {
+    listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing is currently seeding or paused.</p>";
+    return;
+  }
+
+  const query = document.getElementById("seeding-search").value.trim().toLowerCase();
+  const filtered = query
+    ? seedingTorrents.filter((t) => t.plan.torrentName.toLowerCase().includes(query))
+    : seedingTorrents;
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<p style="opacity:0.7;">No seeding torrents match "${esc(query)}".</p>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered.map((t) => {
+    const statusLabel = t.status === 6 ? "Seeding" : "Paused";
+    const statusClass = t.status === 6 ? "ok" : "";
+    const needsAttention = t.plan.matchedCount < t.plan.files.length;
+    const addBtn = needsAttention
+      ? `<button type="button" data-add-to-library="${t.id}" style="margin-top:0.5rem;">Add to Plex library</button>`
+      : "";
+    return `
+      <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
+        <div><strong>${esc(t.plan.torrentName)}</strong>
+          <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
+          &nbsp;${Math.round(t.percentDone * 100)}%
+        </div>
+        <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
+        ${addBtn}
+        <div class="status-msg" data-add-to-library-status></div>
+      </div>
+    `;
+  }).join("");
+
+  listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
+    btn.addEventListener("click", () => addSeedingTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn));
+  });
+}
+
+/** Runs a seeding torrent Transmission already has through the normal parse/match/copy pipeline (see reseedApi.ts's /api/reseed/add-to-library) - for the case where the torrent's data was never filed into Plex at all, or the filed copy is gone, rather than the size-matching this tab otherwise relies on. */
+async function addSeedingTorrentToLibrary(id, btn) {
+  const itemEl = btn.closest(".seeding-item");
+  const statusEl = itemEl.querySelector("[data-add-to-library-status]");
+  btn.disabled = true;
+  statusEl.textContent = "Adding to Plex library…";
+  statusEl.className = "status-msg";
+  try {
+    const data = await api("/api/reseed/add-to-library", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    renderUploadResults(statusEl, data.results);
+    await loadActivity();
+    await loadSeedingList();
+  } catch (err) {
+    statusEl.textContent = `Failed: ${err.message}`;
+    statusEl.className = "status-msg err";
+    btn.disabled = false;
   }
 }
 
@@ -2355,6 +2419,7 @@ document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
     loadSeedingList
   );
 });
+document.getElementById("seeding-search").addEventListener("input", renderSeedingList);
 document.getElementById("clear-activity-btn").addEventListener("click", async () => {
   const btn = document.getElementById("clear-activity-btn");
   btn.disabled = true;
