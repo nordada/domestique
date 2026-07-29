@@ -156,9 +156,9 @@
   .categories-editor .cat-row input { flex: 1; }
   .categories-editor .cat-row input[name=episode] { flex: 0 0 4rem; }
   .hidden { display: none !important; }
-  #add-torrent-dropzone { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem; border: 1px dashed var(--border); border-radius: 8px; transition: border-color 0.15s, background 0.15s; }
-  #add-torrent-dropzone .dropzone-hint { font-size: 0.82rem; opacity: 0.6; }
-  #add-torrent-dropzone.dragover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  #add-torrent-dropzone, #reseed-dropzone { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem; border: 1px dashed var(--border); border-radius: 8px; transition: border-color 0.15s, background 0.15s; }
+  #add-torrent-dropzone .dropzone-hint, #reseed-dropzone .dropzone-hint { font-size: 0.82rem; opacity: 0.6; }
+  #add-torrent-dropzone.dragover, #reseed-dropzone.dragover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .activity-item { border-bottom: 1px solid var(--border); padding: 0.5rem 0; font-size: 0.85rem; }
   .activity-item:last-child { border-bottom: none; }
   .activity-item .meta { opacity: 0.6; font-size: 0.78rem; }
