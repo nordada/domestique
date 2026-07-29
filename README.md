@@ -630,11 +630,27 @@ that's called out in the result so you know to start it yourself.
 
 Staged files live in a hidden `.reseed-staging` folder inside `LIBRARY_ROOT`
 by default (override with a staging-directory path in the Settings tab's
-"Reseed from library" section if you'd rather use a separate volume) -
-hardlinked into place when possible (instant, no extra disk, since the
-staged path and the library file are the same inode), falling back to a
-real copy only if hardlinking isn't possible (staging directory on a
-different filesystem/device than the library).
+"Reseed from library" section if you'd rather use a separate volume).
+
+**How staging actually touches your files**: a matched file is
+**hardlinked**, not copied and not symlinked - the staged path and your
+Plex library path both point at the exact same data on disk (the same
+inode), the way a hardlink always works. That's meaningfully different
+from either alternative: unlike a copy, it's instant and uses no extra
+disk space regardless of file size, since there's still only one physical
+copy of the bytes; unlike a symlink, it can't dangle or break if a path
+moves, and Transmission sees a completely ordinary file at its expected
+size, not a redirect. Your original Plex library file is never renamed,
+moved, or modified - deleting the staged copy later (or the torrent from
+Transmission) doesn't touch it, since a hardlink is just one more
+reference to data that only actually goes away once every reference to it
+is gone. The one case this can't work: hardlinking requires the staged
+path and the library file to be on the **same filesystem/device**, which
+is exactly why the default staging location lives *inside* `LIBRARY_ROOT`
+rather than somewhere else. If you override it to a separate volume,
+hardlinking across filesystems isn't possible, so staging falls back to a
+real `fs.copyFile` instead - still correct, just an actual duplicate using
+real disk space, and slower for a large file.
 
 **Path consistency matters here too**, same class of requirement as
 `DOWNLOADS_DIR` in step 2 above: whatever directory this feature stages
