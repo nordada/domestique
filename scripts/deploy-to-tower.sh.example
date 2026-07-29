@@ -19,10 +19,13 @@ set -euo pipefail
 # directory-traversal x) to everyone on transfer prevents that without
 # stripping any executable bits.
 #
-# --exclude 'config/events.json': your server's copy is the live, user-edited
-# race list (grown via the web UI and auto-create, not the repo's shipped
-# starter default) - it should only ever be seeded once on first boot, same
-# as settings.json/activity.json, never overwritten by a code deploy.
+# --exclude 'config/events.json'/'settings.json'/'activity.json': your
+# server's copies are live state (the user-edited race list, live settings,
+# and activity history) - each should only ever be seeded once on first
+# boot, never overwritten by a code deploy. Don't drop these excludes even
+# if one of these files doesn't exist on your dev machine right now - if it
+# ever does (e.g. from local testing), a deploy would otherwise silently
+# overwrite your real server's copy with whatever's sitting locally.
 rsync -av \
   --chmod=ugo+rX \
   --exclude 'node_modules' \
@@ -31,4 +34,6 @@ rsync -av \
   --exclude '.DS_Store' \
   --exclude '.claude' \
   --exclude 'config/events.json' \
+  --exclude 'config/settings.json' \
+  --exclude 'config/activity.json' \
   ~/projects/domestique/ user@YOUR-SERVER-IP:/path/to/domestique/
