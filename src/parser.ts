@@ -107,8 +107,13 @@ export function parseName(rawInput: string): ParsedName {
   const isTeamPresentation = /team[-_. ]?presentation/.test(working);
   const isRoutePresentation = /route[-_. ]?presentation/.test(working);
 
-  // Year: no \b, since torrent names often glue it directly onto a prefix ("tdf2026-stage04...")
-  const yearExtraction = extractAndRemove(working, /(20\d{2})/);
+  // Year: no \b, since torrent names often glue it directly onto a prefix
+  // ("tdf2026-stage04..."). Covers 19xx too, not just 20xx - archival race
+  // footage (VHS/DVD rips from the 1990s, say) has a real, explicit year
+  // just as often as a modern release does; the original 20xx-only version
+  // of this regex would silently default a torrent's own genuine "1993" to
+  // the current year instead of ever matching it.
+  const yearExtraction = extractAndRemove(working, /((?:19|20)\d{2})/);
   working = yearExtraction.working;
   const yearWasExplicit = yearExtraction.match !== null;
   const year = yearWasExplicit
@@ -172,6 +177,20 @@ export function parseName(rawInput: string): ParsedName {
         working = discExtraction.working;
         if (discExtraction.match) {
           partNum = parseInt(discExtraction.match[1], 10);
+        } else {
+          // Raw DVD-Video rip naming: "VTS_01_2" is title-set 01, video
+          // segment 2 - old DVDs split one continuous title across several
+          // ~1GB VOB files purely due to filesystem size limits, so segment
+          // number is genuinely a part number (the title-set number itself
+          // is ignored - see fileops.ts's resolveSourceItems, which already
+          // filters out the "part 0" navigation-only .BUP/.IFO/VIDEO_TS.VOB
+          // files entirely before parsing ever sees them, so every VTS file
+          // that reaches here is real video content).
+          const vtsExtraction = extractAndRemove(working, /\bvts[-_. ]?0*(\d+)[-_. ]?0*(\d+)\b/i);
+          working = vtsExtraction.working;
+          if (vtsExtraction.match) {
+            partNum = parseInt(vtsExtraction.match[2], 10);
+          }
         }
       }
     }

@@ -67,3 +67,59 @@ test("a real multi-disc release (Giro 2005 (Complete), disc 1/2/3) files all thr
   assert.ok(destPaths.some((p) => p?.endsWith("pt02.avi")));
   assert.ok(destPaths.some((p) => p?.endsWith("pt03.avi")));
 });
+
+test("a real raw DVD-rip release (Giro di Italia 1993, VIDEO_TS structure) files correctly: real year, one show, junk skipped, VOB segments as parts", async () => {
+  const { opts, downloadsPath, libraryRoot } = await makeScratch();
+  // Same shape as the real incident, including the pre-existing show entry
+  // whose keywords didn't originally cover the uncontracted "di Italia"
+  // phrasing - this test uses the fixed keyword list directly.
+  await fs.writeFile(
+    opts.configPath,
+    JSON.stringify({
+      shows: [
+        { id: "giro-ditalia", folderName: "Giro D'Italia", matchKeywords: ["giro ditalia", "giro d italia", "giro di italia"], type: "stage-race" },
+      ],
+    }) + "\n",
+    "utf-8"
+  );
+
+  const folder = "Giro di Italia 1993";
+  const folderPath = join(downloadsPath, folder);
+  await fs.mkdir(folderPath, { recursive: true });
+  await fs.writeFile(join(folderPath, "VIDEO_TS.BUP"), "nav");
+  await fs.writeFile(join(folderPath, "VIDEO_TS.IFO"), "nav");
+  await fs.writeFile(join(folderPath, "VIDEO_TS.VOB"), "menu video");
+  await fs.writeFile(join(folderPath, "VTS_01_0.BUP"), "nav");
+  await fs.writeFile(join(folderPath, "VTS_01_0.IFO"), "nav");
+  for (let i = 1; i <= 5; i++) {
+    await fs.writeFile(join(folderPath, `VTS_01_${i}.VOB`), `segment ${i}`);
+  }
+
+  const results = await handleTorrentDone({ dir: downloadsPath, name: folder }, opts);
+
+  // Only the 5 real video segments were ever processed - the 5 junk
+  // navigation files never even reached the pipeline.
+  assert.equal(results.length, 5);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["copied", "copied", "copied", "copied", "copied"]
+  );
+
+  // One real show folder, no bogus auto-created "video-ts"/"vts" shows.
+  const showDirs = await fs.readdir(libraryRoot);
+  assert.deepEqual(showDirs, ["Giro D'Italia"]);
+
+  // Filed under the real 1993 season, not the current year.
+  const seasonDirs = await fs.readdir(join(libraryRoot, "Giro D'Italia"));
+  assert.deepEqual(seasonDirs, ["Season 1993"]);
+
+  const allEntries = await fs.readdir(join(libraryRoot, "Giro D'Italia", "Season 1993"));
+  const files = allEntries.filter((f) => f.endsWith(".vob")).sort();
+  assert.deepEqual(files, [
+    "Giro D'Italia - S1993E01 - pt01.vob",
+    "Giro D'Italia - S1993E01 - pt02.vob",
+    "Giro D'Italia - S1993E01 - pt03.vob",
+    "Giro D'Italia - S1993E01 - pt04.vob",
+    "Giro D'Italia - S1993E01 - pt05.vob",
+  ]);
+});

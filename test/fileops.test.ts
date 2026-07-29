@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { copyIntoLibrary, isPathWithin, type CopyOutcome } from "../src/fileops.js";
+import { copyIntoLibrary, isPathWithin, resolveSourceItems, type CopyOutcome } from "../src/fileops.js";
 
 async function makeScratch() {
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "bra-library-"));
@@ -43,6 +43,29 @@ test("isPathWithin allows the root itself and real subpaths, rejects siblings an
   // production, but it should still reject an escape if handed one raw.
   assert.equal(isPathWithin("/downloads/../etc/passwd", "/downloads"), false);
   assert.equal(isPathWithin("/downloads/../../etc/passwd", "/downloads"), false);
+});
+
+test("resolveSourceItems skips raw DVD navigation files (.BUP/.IFO, VIDEO_TS.VOB) entirely, real video (VTS_NN_MM.VOB) still comes through", async () => {
+  // Real incident: a dropped DVD-rip folder's VIDEO_TS.BUP/.IFO got treated
+  // as real content and auto-created their own bogus show ("...video-ts")
+  // instead of being recognized as non-video DVD navigation metadata.
+  const { sourceDir } = await makeScratch();
+  const folder = join(sourceDir, "Giro di Italia 1993");
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(join(folder, "VIDEO_TS.BUP"), "x");
+  await fs.writeFile(join(folder, "VIDEO_TS.IFO"), "x");
+  await fs.writeFile(join(folder, "VIDEO_TS.VOB"), "x");
+  await fs.writeFile(join(folder, "VTS_01_0.BUP"), "x");
+  await fs.writeFile(join(folder, "VTS_01_0.IFO"), "x");
+  await fs.writeFile(join(folder, "VTS_01_1.VOB"), "real video 1");
+  await fs.writeFile(join(folder, "VTS_01_2.VOB"), "real video 2");
+
+  const items = await resolveSourceItems(sourceDir, "Giro di Italia 1993");
+  assert.equal(items.length, 2, "only the two real VOB segments should come through");
+  const names = items.map((i) => i.sourceFile.split("/").pop()).sort();
+  assert.deepEqual(names, ["VTS_01_1.VOB", "VTS_01_2.VOB"]);
+  assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_1.VOB"))?.parsed.partNum, 1);
+  assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_2.VOB"))?.parsed.partNum, 2);
 });
 
 test("quality-aware copy: multi-part same-resolution files land normally, no review suffix", async () => {

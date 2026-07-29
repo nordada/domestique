@@ -51,12 +51,30 @@ async function pathExists(path: string): Promise<boolean> {
 
 const VIDEO_EXT_FALLBACK = "mp4";
 
+// Raw DVD-Video rip structure, per the DVD-Video spec: .BUP/.IFO are
+// navigation/backup metadata, never playable video, and VIDEO_TS.VOB (no
+// title-set number) is exclusively the disc's menu/intro video - real
+// content only ever lives in VTS_NN_MM.VOB (title-set domain). Skipped
+// entirely here rather than archived as bogus "episodes" - see the real
+// incident this fixed, where VIDEO_TS.BUP/IFO got auto-created into their
+// own garbage show ("giro-di-italia-video-ts") instead of being recognized
+// as non-content.
+const DVD_NAVIGATION_EXTENSIONS = new Set(["bup", "ifo"]);
+
+function isDvdNavigationFile(filename: string): boolean {
+  const ext = extname(filename).slice(1).toLowerCase();
+  if (DVD_NAVIGATION_EXTENSIONS.has(ext)) return true;
+  return /^video_ts\.vob$/i.test(filename);
+}
+
 /**
  * Given the directory Transmission downloaded into and the torrent's name,
  * figures out whether it's a single file or a folder of files, and returns
  * one SourceItem per file to archive. For folders, each file is parsed using
  * its own name merged with the folder's name (see parser.mergeParsed) since
- * part/stage info lives on the individual filenames in this library.
+ * part/stage info lives on the individual filenames in this library. Raw
+ * DVD-Video navigation files (see isDvdNavigationFile) are skipped entirely,
+ * never even reaching the parser.
  */
 export async function resolveSourceItems(
   torrentDir: string,
@@ -75,7 +93,7 @@ export async function resolveSourceItems(
   const entries = await fs.readdir(topLevelPath, { withFileTypes: true });
   const items: SourceItem[] = [];
   for (const entry of entries) {
-    if (!entry.isFile()) continue;
+    if (!entry.isFile() || isDvdNavigationFile(entry.name)) continue;
     const ext = extname(entry.name).slice(1).toLowerCase() || VIDEO_EXT_FALLBACK;
     const nameNoExt = basename(entry.name, extname(entry.name));
     const fileParsed = parseName(nameNoExt);

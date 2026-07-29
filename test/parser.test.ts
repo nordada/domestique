@@ -32,6 +32,15 @@ test("falls back to the current year when none is present", () => {
   assert.deepEqual(p.tokens.sort(), ["sbs", "tdf"]);
 });
 
+test("extracts a 19xx year, not just 20xx - regression test for real archival footage silently defaulting to the current year", () => {
+  // This exact bug happened for real: "Giro di Italia 1993" (a real folder
+  // name, a genuine explicit year) got parsed as yearWasExplicit:false,
+  // year:<current year>, because the year regex only ever matched 20xx.
+  const p = parseName("Giro di Italia 1993");
+  assert.equal(p.yearWasExplicit, true);
+  assert.equal(p.year, 1993);
+});
+
 test("extracts resolution when present, null when absent", () => {
   const withRes = parseName(REAL_SOURCE_NAMES.tdfStage01Part1);
   assert.equal(withRes.resolution, 720);
@@ -103,6 +112,19 @@ test("extracts 'CD N' the same way, another common legacy multi-disc naming conv
   const p = parseName("Old Race 2005 CD2.avi");
   assert.equal(p.partNum, 2);
   assert.ok(!p.tokens.includes("cd"));
+});
+
+test("extracts VTS_NN_MM (raw DVD-Video rip naming) as a bare part number, using the segment number and ignoring the title-set number", () => {
+  // Real-world case: a DVD rip's video content is split across
+  // VTS_01_1.VOB through VTS_01_5.VOB (an old DVD file-size-limit
+  // artifact - one continuous title, several sequential segments), which
+  // otherwise all parse to the identical show/episode identity, exactly
+  // the same collision class as the Disc N / CD N fix above.
+  const seg1 = parseName("VTS_01_1");
+  const seg5 = parseName("VTS_01_5");
+  assert.equal(seg1.partNum, 1);
+  assert.equal(seg5.partNum, 5);
+  assert.ok(!seg1.tokens.includes("vts"));
 });
 
 test("aliases Italian singular 'donna' to the canonical 'donne' config already uses", () => {

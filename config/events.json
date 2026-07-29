@@ -16,7 +16,7 @@
     { "id": "fleche-wallonne-femmes", "folderName": "Fleche Wallonne Femmes", "matchKeywords": ["fleche wallonne feminine","fleche wallonne femmes","fleche wallonne women"], "type": "one-day" },
     { "id": "gent-wevelgem", "folderName": "Gent-Wevelgem", "matchKeywords": ["gent wevelgem","ghent wevelgem"], "type": "one-day" },
     { "id": "gent-wevelgem-women", "folderName": "Gent-Wevelgem Women", "matchKeywords": ["gent wevelgem women","ghent wevelgem women","gent wevelgem vrouwen"], "type": "one-day" },
-    { "id": "giro-ditalia", "folderName": "Giro D'Italia", "matchKeywords": ["giro ditalia","giro d italia"], "type": "stage-race" },
+    { "id": "giro-ditalia", "folderName": "Giro D'Italia", "matchKeywords": ["giro ditalia","giro d italia","giro di italia"], "type": "stage-race" },
     { "id": "giro-ditalia-highlights", "folderName": "Giro D'Italia HIGHLIGHTS", "filenamePrefix": "Giro D'Italia", "matchKeywords": ["giro ditalia","giro d italia"], "isHighlights": true, "type": "stage-race" },
     { "id": "giro-donne", "folderName": "Giro Donne", "matchKeywords": ["giro ditalia donne","giro donne"], "type": "stage-race" },
     { "id": "giro-donne-highlights", "folderName": "Giro Donne HIGHLIGHTS", "filenamePrefix": "Giro Donne", "matchKeywords": ["giro ditalia donne","giro donne"], "isHighlights": true, "type": "stage-race" },
