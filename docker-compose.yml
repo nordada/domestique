@@ -38,10 +38,18 @@ services:
       - "${PORT}:${PORT}"
     environment:
       LIBRARY_ROOT: ${LIBRARY_ROOT}
-      CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
-      SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH}
-      ACTIVITY_PATH: ${ACTIVITY_CONTAINER_PATH}
-      DEDUPE_STATE_PATH: ${DEDUPE_STATE_CONTAINER_PATH}
+      # Defaulted (:-...) rather than required, unlike LIBRARY_ROOT above -
+      # a real incident on upgrade: an existing .env predating a new
+      # container-path var (DEDUPE_STATE_CONTAINER_PATH) left it unset,
+      # which docker-compose expands to an empty string, producing an
+      # "invalid spec: ./config/dedupe-state.json:: empty section between
+      # colons" failure. These defaults match .env.example's own values, so
+      # an existing install missing any of these on upgrade just falls back
+      # to what a fresh install would already use, instead of failing.
+      CONFIG_PATH: ${CONFIG_CONTAINER_PATH:-/app/config/events.json}
+      SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH:-/app/config/settings.json}
+      ACTIVITY_PATH: ${ACTIVITY_CONTAINER_PATH:-/app/config/activity.json}
+      DEDUPE_STATE_PATH: ${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
       PORT: "${PORT}"
       # Optional Plex/Discord/hot-folder integrations - safe to leave unset,
       # the app just disables each feature when its required vars aren't all
@@ -97,7 +105,10 @@ services:
       # Plex library root (read-write: this is where renamed files land).
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
       # Config file bind-mounted so you can edit show mappings without rebuilding the image.
-      - ./config/events.json:${CONFIG_CONTAINER_PATH}
+      # Defaulted (:-...), same reasoning as the environment: block above -
+      # an unset var here produces an "empty section between colons" bind-
+      # mount failure, not a silent no-op, so these can't be left required.
+      - ./config/events.json:${CONFIG_CONTAINER_PATH:-/app/config/events.json}
       # Plex/Discord/hot-folder settings, editable live via the web UI's
       # Settings panel - bind-mounted so edits (and the one-time seed from
       # the PLEX_*/DISCORD_*/HOTFOLDER_* env vars above) persist across
@@ -110,21 +121,21 @@ services:
       # gotcha), which the app can't clean up from inside the container
       # (it's the actual mount point). Avoid it entirely with `touch
       # config/settings.json` before your first `docker compose up` here.
-      - ./config/settings.json:${SETTINGS_CONTAINER_PATH}
+      - ./config/settings.json:${SETTINGS_CONTAINER_PATH:-/app/config/settings.json}
       # Recent-activity log (Home tab / Discord messages), bind-mounted so it
       # survives container recreation and restarts - previously in-memory
       # only, so a restart (e.g. a scheduled appdata-backup plugin stopping
       # and starting all containers) silently wiped it. Same first-run
       # gotcha as settings.json above: `touch config/activity.json` before
       # your first `docker compose up` here.
-      - ./config/activity.json:${ACTIVITY_CONTAINER_PATH}
+      - ./config/activity.json:${ACTIVITY_CONTAINER_PATH:-/app/config/activity.json}
       # Records where a deduped torrent's data lived before Dedupe relinked
       # it (see seeding.ts's findOrphanOriginal) - Transmission itself
       # forgets a torrent's previous location once relocated, so this has
       # to be Domestique's own persisted state instead of a live query.
       # Same first-run gotcha as settings.json/activity.json above: `touch
       # config/dedupe-state.json` before your first `docker compose up` here.
-      - ./config/dedupe-state.json:${DEDUPE_STATE_CONTAINER_PATH}
+      - ./config/dedupe-state.json:${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.
