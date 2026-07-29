@@ -296,6 +296,8 @@ export interface TransmissionTorrentDetail {
   files: TransmissionFileEntry[];
   /** Where Transmission currently has this torrent's data - used by src/seeding.ts to compute each matched file's real on-disk path for the storage-status (hardlink vs duplicate) check, and by src/dedupe.ts to know where to revert to if a dedupe's verify comes back dirty. */
   downloadDir: string;
+  /** Total uploaded/downloaded ratio - Transmission's own RPC special-cases -1 (not available) and -2 (infinite, e.g. a seed-only/injected torrent with 0 recorded downloaded bytes). Passed straight through to the UI (see seeding.ts's SeedingTorrent.ratio) rather than reinterpreted here. */
+  uploadRatio: number;
 }
 
 /**
@@ -314,7 +316,7 @@ export async function getAllTorrentsWithFiles(
   const data = await rpcCall(
     config,
     "torrent-get",
-    { fields: ["id", "name", "status", "percentDone", "files", "downloadDir"] },
+    { fields: ["id", "name", "status", "percentDone", "files", "downloadDir", "uploadRatio"] },
     timeoutMs
   );
   return (data.arguments?.torrents ?? []) as TransmissionTorrentDetail[];

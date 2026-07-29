@@ -585,3 +585,52 @@ test("untracked collision: with no broadcaster known on the new item either, it'
   assertSkipped(result);
   assert.equal(result.reason, "destination already exists");
 });
+
+test("libraryFileMode \"hardlink\": the library file is a real hardlink to the source, not a copy", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const src = await makeSourceFile(sourceDir, "plain.mp4", "hardlink me");
+
+  const outcome = await copyIntoLibrary(
+    src,
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    null,
+    null,
+    false,
+    "hardlink"
+  );
+  assertCopied(outcome);
+  assert.equal(outcome.method, "hardlink");
+
+  const [srcStat, destStat] = await Promise.all([fs.stat(src), fs.stat(outcome.destPath)]);
+  assert.equal(srcStat.ino, destStat.ino);
+});
+
+test("libraryFileMode \"hardlink\" falls back to a real copy on EXDEV (cross-filesystem), reporting method: \"copy\"", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const src = await makeSourceFile(sourceDir, "plain.mp4", "copy me instead");
+
+  const exdevError = Object.assign(new Error("cross-device link"), { code: "EXDEV" });
+  const outcome = await copyIntoLibrary(
+    src,
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    null,
+    null,
+    false,
+    "hardlink",
+    { link: async () => { throw exdevError; } }
+  );
+  assertCopied(outcome);
+  assert.equal(outcome.method, "copy");
+
+  const [srcStat, destStat] = await Promise.all([fs.stat(src), fs.stat(outcome.destPath)]);
+  assert.notEqual(srcStat.ino, destStat.ino);
+  assert.equal(await fs.readFile(outcome.destPath, "utf-8"), "copy me instead");
+});

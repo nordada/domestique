@@ -407,6 +407,7 @@ test("getAllTorrentsWithFiles requests every torrent (no ids filter) and returns
     assert.equal(receivedArgs?.ids, undefined);
     assert.ok((receivedArgs?.fields as string[]).includes("files"));
     assert.ok((receivedArgs?.fields as string[]).includes("downloadDir"));
+    assert.ok((receivedArgs?.fields as string[]).includes("uploadRatio"));
   } finally {
     await close();
   }

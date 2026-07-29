@@ -114,6 +114,20 @@ export interface Settings {
    * slower).
    */
   reseedStagingDir: string | null;
+  /**
+   * Controls how a normal ingestion (webhook/hot-folder/upload/add-to-
+   * library) materializes a file in the library - see copyIntoLibrary in
+   * fileops.ts. "copy" (default) is the original, decoupled behavior: the
+   * downloads-share copy and the library copy are genuinely separate
+   * bytes, at the cost of double disk space per torrent (exactly what the
+   * Dedupe feature exists to reclaim after the fact). "hardlink" saves
+   * that space from the start instead - safe to delete around later (a
+   * hardlink is just one more directory entry; removing one never affects
+   * the other as long as any reference remains, the same reasoning Dedupe
+   * itself already relies on), but falls back to a real copy on EXDEV
+   * (downloads share and library on different filesystems/disks).
+   */
+  libraryFileMode: "copy" | "hardlink";
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -155,6 +169,7 @@ function seedFromEnv(libraryRoot: string): Settings {
     // No env-var seeding precedent - new feature, same reasoning already
     // used for transmission/indexer above.
     reseedStagingDir: null,
+    libraryFileMode: "copy",
   };
 }
 
@@ -185,6 +200,7 @@ function normalizeSettings(input: unknown, appLibraryRoot: string): Settings {
     loginLockoutThreshold: normalizeLoginLockoutThreshold(raw.loginLockoutThreshold),
     loginLockoutSeconds: normalizeLoginLockoutSeconds(raw.loginLockoutSeconds),
     reseedStagingDir: normalizeReseedStagingDir(raw.reseedStagingDir),
+    libraryFileMode: normalizeLibraryFileMode(raw.libraryFileMode),
   };
 }
 
@@ -192,6 +208,10 @@ function normalizeReseedStagingDir(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeLibraryFileMode(input: unknown): "copy" | "hardlink" {
+  return input === "hardlink" ? "hardlink" : "copy";
 }
 
 /** The one place "null override -> default" is resolved, reused by both the reseed API and the settings-panel display (see webui.ts's maskSettings). */

@@ -353,6 +353,17 @@ test("saveSettings defaults reseedStagingDir to null and round-trips a blank str
   );
 });
 
+test("saveSettings defaults libraryFileMode to \"copy\" and only accepts the literal \"hardlink\" as the other valid value", async () => {
+  const scratch = await makeScratchDir();
+  const settingsPath = join(scratch, "settings.json");
+
+  assert.equal(saveSettings({}, "/library", settingsPath).libraryFileMode, "copy");
+  assert.equal(saveSettings({ libraryFileMode: "hardlink" }, "/library", settingsPath).libraryFileMode, "hardlink");
+  // Anything else (typo, stale/removed value, wrong type) falls back to the safe default rather than erroring.
+  assert.equal(saveSettings({ libraryFileMode: "move" }, "/library", settingsPath).libraryFileMode, "copy");
+  assert.equal(saveSettings({ libraryFileMode: 123 }, "/library", settingsPath).libraryFileMode, "copy");
+});
+
 test("resolveReseedStagingRoot falls back to a hidden subfolder of the library root when unset", () => {
   const settings = fullSettingsFixture();
   assert.equal(resolveReseedStagingRoot({ ...settings, reseedStagingDir: null }, "/library"), "/library/.reseed-staging");
@@ -379,5 +390,6 @@ function fullSettingsFixture() {
     loginLockoutThreshold: 5,
     loginLockoutSeconds: 60,
     reseedStagingDir: null,
+    libraryFileMode: "copy",
   };
 }

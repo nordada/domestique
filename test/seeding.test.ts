@@ -56,6 +56,7 @@ test("listSeedingTorrents includes seeding (6) and paused/stopped (0) torrents, 
               name: "Paris-Roubaix-2026-SBS.mp4",
               status: 6,
               percentDone: 1,
+              uploadRatio: 2.5,
               files: [{ name: "Paris-Roubaix-2026-SBS.mp4", length: 1000, bytesCompleted: 1000 }],
             },
             {
@@ -77,6 +78,7 @@ test("listSeedingTorrents includes seeding (6) and paused/stopped (0) torrents, 
       const matched = result.find((t) => t.id === 1);
       assert.equal(matched?.plan.matchedCount, 1);
       assert.equal(matched?.plan.files[0].candidate, join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"));
+      assert.equal(matched?.ratio, 2.5);
       const unmatched = result.find((t) => t.id === 2);
       assert.equal(unmatched?.plan.unmatchedCount, 1);
     } finally {

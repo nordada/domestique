@@ -72,6 +72,8 @@ export interface SeedingTorrent {
    * it straight through with no translation.
    */
   orphanOriginal: OrphanOriginal | null;
+  /** Transmission's own uploadRatio, passed straight through - see transmission.ts's TransmissionTorrentDetail.uploadRatio for its -1/-2 special-case meanings. Formatting (N/A, infinity) is a display concern, left to the UI. */
+  ratio: number;
 }
 
 export type StorageStatus = "deduped" | "duplicate" | "mixed" | "n/a";
@@ -188,6 +190,7 @@ export async function listSeedingTorrents(
         status: t.status,
         percentDone: t.percentDone,
         percentComplete: computePercentComplete(t.files),
+        ratio: t.uploadRatio,
         plan,
         storageStatus,
         orphanOriginal: storageStatus === "deduped" ? await findOrphanOriginal(plan, downloadsPath) : null,

@@ -309,6 +309,7 @@ test("GET /api/settings starts fully masked/disabled, and PUT saves + masks secr
       loginLockoutSeconds: 60,
       reseedStagingDir: "",
       reseedStagingDirResolved: join(libraryRoot, ".reseed-staging"),
+      libraryFileMode: "copy",
     });
 
     const putRes = await fetch(`${baseUrl}/api/settings`, {

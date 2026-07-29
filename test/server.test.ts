@@ -46,6 +46,24 @@ test("handleTorrentDone's per-file warning combines a namer warning with the rea
   assert.match(second[0].warning ?? "", /destination already exists/i);
 });
 
+test("with libraryFileMode \"hardlink\", handleTorrentDone files a real hardlink end-to-end, not a copy", async () => {
+  const { opts, libraryRoot, downloadsPath } = await makeScratch();
+  await fs.writeFile(
+    opts.settingsPath,
+    JSON.stringify({ plex: null, discord: null, hotfolder: null, libraryFileMode: "hardlink" }) + "\n",
+    "utf-8"
+  );
+  const name = "TDF-2026-Stage05.mp4";
+  const sourcePath = join(downloadsPath, name);
+  await fs.writeFile(sourcePath, Buffer.alloc(50));
+
+  const results = await handleTorrentDone({ dir: downloadsPath, name }, opts);
+  assert.equal(results[0].status, "copied");
+
+  const [sourceStat, destStat] = await Promise.all([fs.stat(sourcePath), fs.stat(results[0].destPath!)]);
+  assert.equal(sourceStat.ino, destStat.ino);
+});
+
 test("a real multi-disc release (Giro 2005 (Complete), disc 1/2/3) files all three discs distinctly, no collision or Force needed", async () => {
   const { opts, downloadsPath } = await makeScratch();
   const folder = "Giro 2005 (Complete)";

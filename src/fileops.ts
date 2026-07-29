@@ -129,8 +129,17 @@ export async function resolveSourceItems(
 }
 
 export type CopyOutcome =
-  | { status: "copied"; destPath: string; warning?: string }
+  | { status: "copied"; destPath: string; warning?: string; method: "hardlink" | "copy" }
   | { status: "skipped"; destPath: string; reason: string };
+
+function isExdev(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "EXDEV";
+}
+
+/** Narrow dependency-injection seam, same idiom as reseedStage.ts's StageDeps - exists only so the EXDEV fallback (unreproducible on a real single-filesystem CI box) can be exercised in a test. Every real caller omits this. */
+export interface CopyIntoLibraryDeps {
+  link?: typeof fs.link;
+}
 
 const META_FILENAME = ".archiver-meta.json";
 
@@ -240,7 +249,9 @@ export async function copyIntoLibrary(
   episode: number,
   resolution: number | null,
   broadcaster: string | null,
-  force = false
+  force = false,
+  fileMode: "copy" | "hardlink" = "copy",
+  deps: CopyIntoLibraryDeps = {}
 ): Promise<CopyOutcome> {
   const destDirAbs = join(libraryRoot, destDir);
   const destPath = join(destDirAbs, destFilename);
@@ -330,9 +341,26 @@ export async function copyIntoLibrary(
   }
 
   await fs.mkdir(destDirAbs, { recursive: true });
-  const tmpPath = `${finalDestPath}.tmp`;
-  await fs.copyFile(sourceFile, tmpPath);
-  await fs.rename(tmpPath, finalDestPath);
+  const doLink = deps.link ?? fs.link;
+  let method: "hardlink" | "copy" = "copy";
+  if (fileMode === "hardlink") {
+    try {
+      await doLink(sourceFile, finalDestPath);
+      method = "hardlink";
+    } catch (err) {
+      if (!isExdev(err)) throw err;
+      // Cross-filesystem (downloads share and library on separate disks/
+      // pools) - fall back to a real copy, same as reseedStage.ts's
+      // identical constraint. The caller (server.ts) surfaces this in its
+      // summary when it happens, so choosing hardlink mode and silently
+      // getting full-duplicate behavior anyway is never invisible.
+    }
+  }
+  if (method === "copy") {
+    const tmpPath = `${finalDestPath}.tmp`;
+    await fs.copyFile(sourceFile, tmpPath);
+    await fs.rename(tmpPath, finalDestPath);
+  }
 
   const newBroadcasters =
     broadcaster && !existingBroadcasters.includes(broadcaster)
@@ -349,8 +377,8 @@ export async function copyIntoLibrary(
   }
 
   return warning
-    ? { status: "copied", destPath: finalDestPath, warning }
-    : { status: "copied", destPath: finalDestPath };
+    ? { status: "copied", destPath: finalDestPath, warning, method }
+    : { status: "copied", destPath: finalDestPath, method };
 }
 
 /**

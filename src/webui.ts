@@ -259,6 +259,7 @@ function maskSettings(settings: Settings, libraryRoot: string) {
     // the same way other optional path fields do elsewhere in this file.
     reseedStagingDir: settings.reseedStagingDir ?? "",
     reseedStagingDirResolved: resolveReseedStagingRoot(settings, libraryRoot),
+    libraryFileMode: settings.libraryFileMode,
   };
 }
 
@@ -628,6 +629,7 @@ export async function handleWebUiRequest(
         loginLockoutThreshold?: number;
         loginLockoutSeconds?: number;
         reseedStagingDir?: string;
+        libraryFileMode?: string;
       };
 
       // A field only overwrites its stored secret when the caller actually
@@ -662,6 +664,7 @@ export async function handleWebUiRequest(
             loginLockoutThreshold: payload.loginLockoutThreshold,
             loginLockoutSeconds: payload.loginLockoutSeconds,
             reseedStagingDir: payload.reseedStagingDir,
+            libraryFileMode: payload.libraryFileMode,
           },
           opts.libraryRoot,
           opts.settingsPath

@@ -119,13 +119,21 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
       plan.episode,
       item.parsed.resolution,
       item.parsed.broadcaster,
-      force
+      force,
+      settings.libraryFileMode
     );
 
     if (outcome.status === "copied" && outcome.warning) {
       console.warn(`[quality] ${outcome.warning}`);
       reviewWorthy = true;
       summaryLines.push(`⚠️ ${outcome.warning}`);
+    }
+
+    if (outcome.status === "copied" && settings.libraryFileMode === "hardlink" && outcome.method === "copy") {
+      const note = `hardlink not possible for "${item.sourceFile}" (different filesystem than the library) - copied instead.`;
+      console.log(`[library-file-mode] ${note}`);
+      reviewWorthy = true;
+      summaryLines.push(`ℹ️ ${note}`);
     }
 
     if (outcome.status === "copied") {

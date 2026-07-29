@@ -21,8 +21,10 @@ didn't know held one.
 - Matches it against a configurable list of races/shows - auto-creating a
   best-guess entry if nothing matches, so nothing silently falls on the
   floor
-- Copies (never moves or deletes) the file into place, so Transmission's
-  seeding is never affected
+- Files it into place without ever moving or deleting the original - by
+  default a real copy (so Transmission's seeding is completely decoupled
+  from the library), with an optional hardlink mode that saves the doubled
+  disk space instead (see "Library filing" in Settings)
 - Recognizes duplicate, upgraded-resolution, and alternate-broadcaster
   releases of the same race, filing them alongside the original instead of
   overwriting or guessing wrong
@@ -722,21 +724,34 @@ disagree, both are shown side by side with a note explaining why, rather
 than silently picking one - the "on disk" figure is the one that actually
 matters when deciding whether it's safe to remove a torrent's data.
 
-Above the list, two pill badges summarize what's worth a look: how many
-torrents **need attention** (an unmatched or ambiguous file, or a
-percentage mismatch) versus how many are **fully matched** with nothing
-to flag - each hidden when its own count is zero, so a completely clean
-list shows only the green badge. The **Sort** control next to them
-defaults to "Needs attention first," so the torrents actually worth
-looking at surface at the top instead of getting lost among everything
-that's already fine; switching to "Name (A-Z)" sorts the list plainly
-alphabetically instead.
+Above the list, four pill badges summarize what's worth a look, each
+hidden when its own count is zero: how many torrents **need attention**
+(an unmatched or ambiguous file, a percentage mismatch, or an unreclaimed
+orphaned original - see Dedupe below) versus how many are **fully
+matched**, and separately, how many are already **🔗 deduped** versus
+still **📦 duplicated** - an at-a-glance view of how much of the seeding
+backlog still costs double disk without opening every item. The **Sort**
+control next to them defaults to "Needs attention first," so the torrents
+actually worth looking at surface at the top instead of getting lost among
+everything that's already fine; switching to "Name (A-Z)" sorts the list
+plainly alphabetically instead. Each entry also shows Transmission's own
+seeding **ratio** (uploaded/downloaded) next to its on-disk percentage -
+`N/A` when Transmission hasn't got a real figure yet (e.g. still checking),
+`∞` for a seed-only/injected torrent with nothing recorded as downloaded.
 
-Normal ingestion always copies a torrent's data into the library rather
-than hardlinking it (see "How staging actually touches your files" above -
+By default, normal ingestion always copies a torrent's data into the
+library rather than hardlinking it (see "How staging actually touches your
+files" above -
 that's specific to reseed staging, not the normal copy pipeline), so every
 torrent filed the ordinary way costs disk space twice: once in the
-downloads share, once again in the library. A fully-matched, still-duplicated entry
+downloads share, once again in the library. Set **File mode** to
+"Hardlink" under Settings -> Library filing to save that space from the
+start instead of running Dedupe after the fact - falls back to a real copy
+when the downloads share and library are on different filesystems
+(reported in the activity log, not silent), and is exactly as safe to
+delete around later as a post-hoc Dedupe is, for the same reason: a
+hardlink is just one more reference to the same data, and removing one
+copy never affects any other reference that still exists. A fully-matched, still-duplicated entry
 shows a **📦 Duplicated** chip and a **Dedupe (reclaim disk space)**
 button (a two-click confirm, same arm-then-confirm pattern as Remove &
 delete files, just accent-colored instead of red since nothing is deleted

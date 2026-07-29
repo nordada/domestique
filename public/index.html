@@ -146,6 +146,7 @@
   .seeding-summary-badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid; }
   .seeding-summary-badge.err { color: var(--err); border-color: var(--err); }
   .seeding-summary-badge.ok { color: var(--ok); border-color: var(--ok); }
+  .seeding-summary-badge.neutral { opacity: 0.75; border-color: var(--border); }
   button:hover { opacity: 0.85; }
   h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
   h3:first-child { margin-top: 0; }
@@ -731,6 +732,8 @@
   <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
     <span id="seeding-summary-attention" class="seeding-summary-badge err" style="display:none;"></span>
     <span id="seeding-summary-ok" class="seeding-summary-badge ok" style="display:none;"></span>
+    <span id="seeding-summary-deduped" class="seeding-summary-badge ok" style="display:none;"></span>
+    <span id="seeding-summary-duplicated" class="seeding-summary-badge neutral" style="display:none;"></span>
     <label style="display:flex; align-items:center; gap:0.4rem; margin-left:auto; font-size:0.85rem; opacity:0.85; flex:0 0 auto;">
       Sort
       <select id="seeding-sort">
@@ -916,6 +919,28 @@
   </div>
 
   <div class="subtab-panel hidden" id="settings-subtab-reseed">
+    <h3>Library filing</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      How a normal completed download gets filed into your Plex library
+      (the Transmission webhook, hot-folder, upload, and "Add to Plex
+      library" all go through this). "Dual copies" is the original,
+      decoupled behavior - the downloads-share file and the library file
+      are genuinely separate bytes, at the cost of double disk space per
+      torrent (the reason the Reseed tab's Dedupe feature exists). "Hardlink"
+      saves that space from the start instead - safe to delete around later
+      (a hardlink is just one more reference to the same data; removing one
+      copy never affects the other as long as any reference remains, the
+      same reasoning Dedupe itself already relies on), but falls back to a
+      real copy when the downloads share and library are on different
+      filesystems - reported in the activity log when that happens, not
+      silent.
+    </p>
+    <label><span>File mode</span>
+      <select id="s-library-file-mode">
+        <option value="copy">Dual copies (default)</option>
+        <option value="hardlink">Hardlink (saves disk space)</option>
+      </select>
+    </label>
     <h3>Reseed from library</h3>
     <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
       Where staged (hardlinked, falling back to copied when necessary) files
@@ -1343,6 +1368,7 @@ async function loadSettingsPanel() {
     updateCoverArtSwatches();
     document.getElementById("s-reseed-staging-dir").value = s.reseedStagingDir;
     document.getElementById("s-reseed-staging-dir").placeholder = s.reseedStagingDirResolved;
+    document.getElementById("s-library-file-mode").value = s.libraryFileMode;
     document.getElementById("s-webhook-secret").placeholder = s.webhookSecretSet ? "already set, leave blank to keep" : "not set";
     document.getElementById("s-lockout-threshold").value = s.loginLockoutThreshold;
     document.getElementById("s-lockout-seconds").value = s.loginLockoutSeconds;
@@ -1389,6 +1415,7 @@ async function saveSettingsPanel() {
     loginLockoutThreshold: parseInt(document.getElementById("s-lockout-threshold").value, 10) || 5,
     loginLockoutSeconds: parseInt(document.getElementById("s-lockout-seconds").value, 10) || 60,
     reseedStagingDir: document.getElementById("s-reseed-staging-dir").value.trim(),
+    libraryFileMode: document.getElementById("s-library-file-mode").value,
   };
 
   const plexToken = document.getElementById("s-plex-token").value;
@@ -1792,6 +1819,13 @@ function formatBytes(n) {
   return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/** Transmission's own RPC special-cases for uploadRatio: -1 = not available (e.g. still downloading), -2 = infinite (uploaded something with 0 recorded downloaded bytes - a seed-only/injected torrent). Anything else is a normal upload/download ratio. */
+function formatRatio(r) {
+  if (r === -1) return "N/A";
+  if (r === -2) return "∞";
+  return r.toFixed(2);
+}
+
 function planFilesHtml(files) {
   return files.map((f) => {
     const icon = f.status === "matched" ? "✅" : f.status === "ambiguous" ? "⚠️" : "❌";
@@ -1858,11 +1892,15 @@ function renderSeedingList() {
   const listEl = document.getElementById("seeding-list");
   const attentionBadge = document.getElementById("seeding-summary-attention");
   const okBadge = document.getElementById("seeding-summary-ok");
+  const dedupedBadge = document.getElementById("seeding-summary-deduped");
+  const duplicatedBadge = document.getElementById("seeding-summary-duplicated");
 
   if (seedingTorrents.length === 0) {
     listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing is currently seeding or paused.</p>";
     attentionBadge.style.display = "none";
     okBadge.style.display = "none";
+    dedupedBadge.style.display = "none";
+    duplicatedBadge.style.display = "none";
     return;
   }
 
@@ -1872,6 +1910,16 @@ function renderSeedingList() {
   attentionBadge.style.display = attentionCount > 0 ? "inline-block" : "none";
   okBadge.textContent = `✅ ${okCount} fully matched`;
   okBadge.style.display = okCount > 0 ? "inline-block" : "none";
+
+  // At-a-glance view of how much of the seeding backlog is already
+  // deduped vs. still costing double disk - independent of the
+  // needs-attention pair above (storageStatus isn't a correctness signal).
+  const dedupedCount = seedingTorrents.filter((t) => t.storageStatus === "deduped").length;
+  const duplicatedCount = seedingTorrents.filter((t) => t.storageStatus === "duplicate").length;
+  dedupedBadge.textContent = `🔗 ${dedupedCount} deduped`;
+  dedupedBadge.style.display = dedupedCount > 0 ? "inline-block" : "none";
+  duplicatedBadge.textContent = `📦 ${duplicatedCount} duplicated`;
+  duplicatedBadge.style.display = duplicatedCount > 0 ? "inline-block" : "none";
 
   const query = document.getElementById("seeding-search").value.trim().toLowerCase();
   const filtered = query
@@ -1943,7 +1991,7 @@ function renderSeedingList() {
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
         <div><strong>${esc(t.plan.torrentName)}</strong>
           <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
-          &nbsp;${percentOnDisk}% on disk${mismatchNote}${storageChip}
+          &nbsp;${percentOnDisk}% on disk${mismatchNote}&nbsp;&middot; Ratio: ${formatRatio(t.ratio)}${storageChip}
         </div>
         ${orphanNote}
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
