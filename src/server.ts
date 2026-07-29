@@ -130,11 +130,20 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
       `[${outcome.status}] ${item.sourceFile} -> ${plan.destDir}/${plan.destFilename}`
     );
 
+    // Both a namer-level warning (plan.warning, e.g. "no year found,
+    // defaulted") and a copy-level one (the quality-upgrade warning, or the
+    // skip reason) can legitimately apply to the same file at once - `??`
+    // here used to silently drop whichever one lost, most confusingly the
+    // *skip reason itself* on a skipped file that also happened to trigger
+    // a namer warning, which read as "skipped: no year found" with no way
+    // to tell why it was actually skipped. Both are kept now.
     results.push({
       sourceFile: item.sourceFile,
       status: outcome.status,
       destPath: outcome.destPath,
-      warning: plan.warning ?? (outcome.status === "copied" ? outcome.warning : outcome.reason),
+      warning: [plan.warning, outcome.status === "copied" ? outcome.warning : outcome.reason]
+        .filter(Boolean)
+        .join("; ") || undefined,
     });
   }
 

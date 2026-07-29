@@ -717,6 +717,7 @@
     it into place.
   </p>
   <input type="text" id="seeding-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
+  <div id="seeding-action-status" class="status-msg"></div>
   <div class="seeding-list-scroll">
     <div id="seeding-list">Loading…</div>
   </div>
@@ -1817,7 +1818,7 @@ function renderSeedingList() {
     const statusClass = t.status === 6 ? "ok" : "";
     const needsAttention = t.plan.matchedCount < t.plan.files.length;
     const addBtn = needsAttention
-      ? `<button type="button" data-add-to-library="${t.id}" style="margin-top:0.5rem;">Add to Plex library</button>`
+      ? `<button type="button" data-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" style="margin-top:0.5rem;">Add to Plex library</button>`
       : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
@@ -1827,22 +1828,33 @@ function renderSeedingList() {
         </div>
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
         ${addBtn}
-        <div class="status-msg" data-add-to-library-status></div>
       </div>
     `;
   }).join("");
 
   listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
-    btn.addEventListener("click", () => addSeedingTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn));
+    btn.addEventListener("click", () =>
+      addSeedingTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn.dataset.torrentName, btn)
+    );
   });
 }
 
-/** Runs a seeding torrent Transmission already has through the normal parse/match/copy pipeline (see reseedApi.ts's /api/reseed/add-to-library) - for the case where the torrent's data was never filed into Plex at all, or the filed copy is gone, rather than the size-matching this tab otherwise relies on. */
-async function addSeedingTorrentToLibrary(id, btn) {
-  const itemEl = btn.closest(".seeding-item");
-  const statusEl = itemEl.querySelector("[data-add-to-library-status]");
+/**
+ * Runs a seeding torrent Transmission already has through the normal
+ * parse/match/copy pipeline (see reseedApi.ts's /api/reseed/add-to-library)
+ * - for the case where the torrent's data was never filed into Plex at
+ * all, or the filed copy is gone, rather than the size-matching this tab
+ * otherwise relies on. The result is shown in the section-level
+ * #seeding-action-status, not inline in the (about to be replaced) list
+ * item - loadSeedingList() below does a full re-render of #seeding-list to
+ * reflect the new match state, which would otherwise wipe out a
+ * message shown inside that same container before there was any chance to
+ * read it.
+ */
+async function addSeedingTorrentToLibrary(id, torrentName, btn) {
+  const statusEl = document.getElementById("seeding-action-status");
   btn.disabled = true;
-  statusEl.textContent = "Adding to Plex library…";
+  statusEl.textContent = `Adding "${torrentName}" to Plex library…`;
   statusEl.className = "status-msg";
   try {
     const data = await api("/api/reseed/add-to-library", {
@@ -1851,10 +1863,11 @@ async function addSeedingTorrentToLibrary(id, btn) {
       body: JSON.stringify({ id }),
     });
     renderUploadResults(statusEl, data.results);
+    statusEl.textContent = `"${torrentName}":\n${statusEl.textContent}`;
     await loadActivity();
     await loadSeedingList();
   } catch (err) {
-    statusEl.textContent = `Failed: ${err.message}`;
+    statusEl.textContent = `Failed to add "${torrentName}": ${err.message}`;
     statusEl.className = "status-msg err";
     btn.disabled = false;
   }
