@@ -21,7 +21,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
 import { listSeedingTorrents } from "./seeding.js";
-import { getTorrentLocation } from "./transmission.js";
+import { getTorrentLocation, removeTorrentAndData } from "./transmission.js";
 import { isPathWithin } from "./fileops.js";
 import { recordActivity } from "./activity.js";
 import { readBody, readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
@@ -133,6 +133,61 @@ export async function handleReseedRequest(
       sendJson(res, 200, { ok: true, results });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to add to library: ${err}` });
+    }
+    return true;
+  }
+
+  /**
+   * Removes a torrent from Transmission and deletes its downloaded data
+   * (see transmission.ts's removeTorrentAndData) - the Currently seeding
+   * list's "Remove & delete files" action, for a torrent that's stuck, a
+   * duplicate, or just no longer wanted. Deliberately Transmission-only:
+   * never touches anything already filed in the Plex library, matching
+   * this app's standing rule that nothing in the library is ever
+   * auto-deleted. The client gates this behind its own confirm() dialog
+   * before ever sending the request, since it's irreversible.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/remove") {
+    let payload: { id?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.id !== "number") {
+      sendJson(res, 400, { ok: false, error: "body must include a numeric id" });
+      return true;
+    }
+
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    if (!settings.transmission) {
+      sendJson(res, 400, {
+        ok: false,
+        error: "Transmission isn't configured - set its RPC URL in Settings before removing torrents.",
+      });
+      return true;
+    }
+
+    try {
+      const location = await getTorrentLocation(settings.transmission, payload.id);
+      if (!location) {
+        sendJson(res, 404, { ok: false, error: `Transmission doesn't report a torrent with id ${payload.id}` });
+        return true;
+      }
+      await removeTorrentAndData(settings.transmission, payload.id);
+      recordActivity(
+        {
+          timestamp: new Date().toISOString(),
+          torrentName: location.name,
+          lines: [`🗑️ removed "${location.name}" from Transmission and deleted its downloaded data.`],
+          reviewWorthy: false,
+        },
+        opts.activityPath
+      );
+      sendJson(res, 200, { ok: true, name: location.name });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to remove torrent: ${err}` });
     }
     return true;
   }

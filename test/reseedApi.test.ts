@@ -459,3 +459,95 @@ test("POST /api/reseed/add-to-library with force:true bypasses a duplicate-desti
     await fs.rm(downloadsDir, { recursive: true, force: true });
   }
 });
+
+test("POST /api/reseed/remove without Transmission configured returns 400", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/remove`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 1 }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /isn't configured/i);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/remove rejects a body without a numeric id", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/remove`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/remove returns 404 when Transmission doesn't report that torrent id", async () => {
+  const { baseUrl, settingsPath, close: closeApp } = await makeScratchServer();
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) =>
+    method === "torrent-get" ? { torrents: [] } : {}
+  );
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/remove`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 42 }),
+    });
+    assert.equal(res.status, 404);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/remove calls torrent-remove with delete-local-data and logs an activity entry with the real torrent name", async () => {
+  const { baseUrl, settingsPath, activityPath, close: closeApp } = await makeScratchServer();
+  let receivedArgs;
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get") return { torrents: [{ id: 8, name: "Vuelta-2026-Stage-3", downloadDir: "/downloads" }] };
+    if (method === "torrent-remove") {
+      receivedArgs = args;
+      return {};
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/remove`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 8 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.name, "Vuelta-2026-Stage-3");
+    assert.deepEqual(receivedArgs, { ids: [8], "delete-local-data": true });
+
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activity[0].torrentName, "Vuelta-2026-Stage-3");
+    assert.match(activity[0].lines.join("\n"), /removed.*deleted its downloaded data/i);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+  }
+});

@@ -700,6 +700,15 @@ of skipping, gated behind a confirmation dialog since it's a deliberate
 override. It never overwrites anything: the existing file stays exactly
 as it was, and the forced copy always lands at a distinct filename.
 
+Every entry also has a **Remove & delete files** button, for a torrent
+that's stuck, a duplicate, or just no longer worth keeping. This is a
+Transmission-only action (`torrent-remove` with `delete-local-data`) -
+it removes the torrent and deletes its downloaded data from disk, but
+never touches anything already filed in your Plex library, and never
+could, since it's a completely separate tree Transmission doesn't know
+the path to. Irreversible, gated behind a confirmation dialog that spells
+out exactly what it does before anything happens.
+
 ### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after

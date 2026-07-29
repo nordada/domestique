@@ -1821,13 +1821,11 @@ function renderSeedingList() {
     const statusLabel = t.status === 6 ? "Seeding" : "Paused";
     const statusClass = t.status === 6 ? "ok" : "";
     const needsAttention = t.plan.matchedCount < t.plan.files.length;
-    const actions = needsAttention
+    const matchButtons = needsAttention
       ? `
-        <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
           <button type="button" data-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Add to Plex library</button>
           <button type="button" class="icon-btn subtle" data-force-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" title="Force file as new version - bypasses the &quot;already have this release&quot; check">${ICON_HAMMER}</button>
-        </div>
-      `
+        `
       : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
@@ -1836,10 +1834,19 @@ function renderSeedingList() {
           &nbsp;${Math.round(t.percentDone * 100)}%
         </div>
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
-        ${actions}
+        <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
+          ${matchButtons}
+          <button type="button" class="danger" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Remove &amp; delete files</button>
+        </div>
       </div>
     `;
   }).join("");
+
+  listEl.querySelectorAll("[data-remove-torrent]").forEach((btn) => {
+    btn.addEventListener("click", () =>
+      removeSeedingTorrent(parseInt(btn.dataset.removeTorrent, 10), btn.dataset.torrentName, btn)
+    );
+  });
 
   listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
     btn.addEventListener("click", () =>
@@ -1892,6 +1899,41 @@ async function addSeedingTorrentToLibrary(id, torrentName, btn, force) {
     await loadSeedingList();
   } catch (err) {
     statusEl.textContent = `Failed to add "${torrentName}": ${err.message}`;
+    statusEl.className = "status-msg err";
+    btn.disabled = false;
+  }
+}
+
+/**
+ * Removes a torrent from Transmission and deletes its downloaded data from
+ * disk (see reseedApi.ts's /api/reseed/remove) - for a torrent that's
+ * stuck, a duplicate, or just no longer wanted. Irreversible and
+ * deliberately Transmission-only (never touches anything already filed in
+ * the Plex library), both spelled out in the confirm() dialog before this
+ * ever sends a request.
+ */
+async function removeSeedingTorrent(id, torrentName, btn) {
+  const proceed = confirm(
+    `Permanently remove "${torrentName}" from Transmission and delete its downloaded data from disk? This cannot be undone. It does NOT touch anything already filed in your Plex library.`
+  );
+  if (!proceed) return;
+
+  const statusEl = document.getElementById("seeding-action-status");
+  btn.disabled = true;
+  statusEl.textContent = `Removing "${torrentName}" from Transmission…`;
+  statusEl.className = "status-msg";
+  try {
+    await api("/api/reseed/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    statusEl.textContent = `"${torrentName}" removed from Transmission and its downloaded data deleted.`;
+    statusEl.className = "status-msg ok";
+    await loadActivity();
+    await loadSeedingList();
+  } catch (err) {
+    statusEl.textContent = `Failed to remove "${torrentName}": ${err.message}`;
     statusEl.className = "status-msg err";
     btn.disabled = false;
   }
@@ -2450,6 +2492,13 @@ document.getElementById("refresh-activity-btn").addEventListener("click", () => 
   );
 });
 document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
+  // Manual refresh is a deliberate "clean slate" action - unlike the
+  // automatic refresh after Add/Force/Remove (which deliberately leaves
+  // #seeding-action-status alone so its result stays readable), clear it
+  // here so old action results don't linger indefinitely.
+  const statusEl = document.getElementById("seeding-action-status");
+  statusEl.textContent = "";
+  statusEl.className = "status-msg";
   refreshWithFeedback(
     document.getElementById("refresh-seeding-btn"),
     document.getElementById("seeding-refresh-flash"),

@@ -345,3 +345,19 @@ export async function getTorrentLocation(
   const match = torrents.find((t) => t.id === id);
   return match ? { name: match.name, downloadDir: match.downloadDir } : null;
 }
+
+/**
+ * Removes a torrent from Transmission and deletes its downloaded data from
+ * disk (RPC `torrent-remove` with `delete-local-data: true`) - the
+ * Currently seeding list's "Remove & delete files" action, for a torrent
+ * that's stuck, a duplicate, or just no longer wanted. Deliberately
+ * Transmission-only: this never touches anything already filed in the
+ * Plex library (a completely separate tree it doesn't even know the path
+ * of), matching this app's standing "nothing in the library is ever
+ * auto-deleted" rule elsewhere - only the torrent's own download-dir copy
+ * is affected. Irreversible, so the caller (reseedApi.ts) gates this
+ * behind the client's own confirm() dialog before ever sending the request.
+ */
+export async function removeTorrentAndData(config: TransmissionConfig, id: number, timeoutMs = 10000): Promise<void> {
+  await rpcCall(config, "torrent-remove", { ids: [id], "delete-local-data": true }, timeoutMs);
+}

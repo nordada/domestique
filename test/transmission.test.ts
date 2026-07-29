@@ -10,6 +10,7 @@ import {
   startTorrent,
   getAllTorrentsWithFiles,
   getTorrentLocation,
+  removeTorrentAndData,
   transmissionWebUrl,
 } from "../src/transmission.js";
 
@@ -434,4 +435,25 @@ test("getTorrentLocation returns null when Transmission doesn't report that id",
   } finally {
     await close();
   }
+});
+
+test("removeTorrentAndData sends torrent-remove with delete-local-data:true for the given id", async () => {
+  let receivedMethod;
+  let receivedArgs;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    receivedMethod = method;
+    receivedArgs = args;
+    return {};
+  });
+  try {
+    await removeTorrentAndData({ url }, 7);
+    assert.equal(receivedMethod, "torrent-remove");
+    assert.deepEqual(receivedArgs, { ids: [7], "delete-local-data": true });
+  } finally {
+    await close();
+  }
+});
+
+test("removeTorrentAndData throws when Transmission is unreachable", async () => {
+  await assert.rejects(() => removeTorrentAndData({ url: "http://127.0.0.1:1" }, 7, 500));
 });
