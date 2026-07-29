@@ -50,6 +50,7 @@ services:
       SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH:-/app/config/settings.json}
       ACTIVITY_PATH: ${ACTIVITY_CONTAINER_PATH:-/app/config/activity.json}
       DEDUPE_STATE_PATH: ${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
+      TORRENT_REGISTRY_DIR: ${TORRENT_REGISTRY_CONTAINER_PATH:-/app/config/torrent-registry}
       PORT: "${PORT}"
       # Optional Plex/Discord/hot-folder integrations - safe to leave unset,
       # the app just disables each feature when its required vars aren't all
@@ -136,6 +137,13 @@ services:
       # Same first-run gotcha as settings.json/activity.json above: `touch
       # config/dedupe-state.json` before your first `docker compose up` here.
       - ./config/dedupe-state.json:${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
+      # Durable copy of every .torrent successfully staged through the Reseed
+      # tab (see torrentRegistry.ts) - lets you download it back later and
+      # skip re-processing it on a repeat batch drop. A directory mount, not
+      # a single file, so there's no first-run empty-directory gotcha like
+      # the file mounts above: Docker creating a directory here is exactly
+      # what's wanted.
+      - ./config/torrent-registry:${TORRENT_REGISTRY_CONTAINER_PATH:-/app/config/torrent-registry}
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.

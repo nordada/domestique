@@ -11,13 +11,13 @@
 # don't change behavior on upgrade.
 #
 # What gets chowned automatically: only the config dir(s) holding
-# events.json/settings.json/activity.json/dedupe-state.json - tiny, so doing
-# it every boot is cheap, and settings.json MUST be owned by the app user
-# (the app enforces owner-only 0600 on it). The library and downloads
-# mounts are deliberately never touched: they can be terabytes, and
-# ownership there is the host's business - see the README's "Running as a
-# non-root user" section for the one-time chown an existing install needs
-# before switching PUID on.
+# events.json/settings.json/activity.json/dedupe-state.json, plus the
+# torrent-registry directory - tiny, so doing it every boot is cheap, and
+# settings.json MUST be owned by the app user (the app enforces owner-only
+# 0600 on it). The library and downloads mounts are deliberately never
+# touched: they can be terabytes, and ownership there is the host's
+# business - see the README's "Running as a non-root user" section for the
+# one-time chown an existing install needs before switching PUID on.
 set -e
 
 if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}" ]; then
@@ -25,6 +25,8 @@ if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}" ]; then
   for f in "${CONFIG_PATH:-/app/config/events.json}" "${SETTINGS_PATH:-/app/config/settings.json}" "${ACTIVITY_PATH:-/app/config/activity.json}" "${DEDUPE_STATE_PATH:-/app/config/dedupe-state.json}"; do
     chown -R "$PUID:$PGID" "$(dirname "$f")" 2>/dev/null || true
   done
+  # A directory itself, not a file - dirname would chown its parent instead.
+  chown -R "$PUID:$PGID" "${TORRENT_REGISTRY_DIR:-/app/config/torrent-registry}" 2>/dev/null || true
   exec su-exec "$PUID:$PGID" "$@"
 fi
 

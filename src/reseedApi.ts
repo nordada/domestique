@@ -24,10 +24,14 @@ import { previewReseed, commitReseed } from "./reseed.js";
 import { listSeedingTorrents } from "./seeding.js";
 import { commitDedupe } from "./dedupe.js";
 import { recordDedupeOriginal, clearDedupeOriginal } from "./dedupeState.js";
-import { getTorrentLocation, removeTorrentAndData } from "./transmission.js";
+import { getTorrentLocation, removeTorrentAndData, getAllTorrentsWithFiles } from "./transmission.js";
 import { isPathWithin } from "./fileops.js";
 import { recordActivity } from "./activity.js";
 import { readBody, readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
+import { parseTorrentFile } from "./torrentFile.js";
+import { buildSizeIndex } from "./libraryIndex.js";
+import { buildReseedPlan } from "./reseedMatch.js";
+import { registerTorrent, isRegistered, listRegistry, getRegisteredTorrentBuf } from "./torrentRegistry.js";
 import type { ServerOptions } from "./server.js";
 import type { ProcessTorrentDone } from "./upload.js";
 
@@ -47,11 +51,14 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
  * below), /api/reseed/dedupe (converts a full-duplicate seeding torrent into
  * a hardlink-backed one - see dedupe.ts) and /api/reseed/delete-original
  * (the explicit follow-up that removes the now-orphaned original download-
- * folder copy), all backing the Reseed tab. Same "return true if handled"
- * contract as upload.ts/coverArt.ts, so webui.ts's dispatch chain stays
- * flat. Sits outside handleWebUiRequest's own try/catch (same as those two
- * sibling modules), so body-size and processing errors are handled here
- * directly rather than bubbling up.
+ * folder copy), and the /api/reseed/registry family (check/list/download -
+ * see torrentRegistry.ts) that tracks every .torrent successfully staged
+ * through commit so a repeat drag of the same batch doesn't have to
+ * re-walk the library for ones already handled, all backing the Reseed
+ * tab. Same "return true if handled" contract as upload.ts/coverArt.ts, so
+ * webui.ts's dispatch chain stays flat. Sits outside handleWebUiRequest's
+ * own try/catch (same as those two sibling modules), so body-size and
+ * processing errors are handled here directly rather than bubbling up.
  */
 export async function handleReseedRequest(
   req: IncomingMessage,
@@ -332,6 +339,132 @@ export async function handleReseedRequest(
     return true;
   }
 
+  /**
+   * Cheap pre-check for the batch queue (see processReseedBatch in
+   * public/index.html) - parses the .torrent (no library walk, no
+   * Transmission call) and reports whether it's already registered, so a
+   * repeat drag of an already-processed batch can skip the expensive
+   * preview/commit cycle entirely instead of just relying on Transmission's
+   * own (harmless but slower) duplicate detection.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/registry/check") {
+    let torrentBuf: Buffer;
+    try {
+      torrentBuf = await readBodyBuffer(req, TORRENT_BODY_LIMIT_BYTES);
+    } catch (err) {
+      if (err instanceof BodyTooLargeError) {
+        res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+        return true;
+      }
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    try {
+      const meta = parseTorrentFile(torrentBuf);
+      const alreadyRegistered = await isRegistered(meta.name, opts.torrentRegistryDir);
+      sendJson(res, 200, { ok: true, torrentName: meta.name, alreadyRegistered });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+    }
+    return true;
+  }
+
+  /**
+   * Lists every torrent ever successfully staged through Reseed (see
+   * torrentRegistry.ts), cross-referenced live against the current library
+   * and current Transmission state - never persisted/cached data for
+   * either of those, since a registered torrent can independently drift in
+   * or out of both over time (e.g. removed from Transmission after
+   * seeding, or filed into Plex and later cleaned up). Works even without
+   * Transmission configured - it just reports every entry as not-in-
+   * Transmission rather than erroring, since the Plex-side info is still
+   * meaningful on its own.
+   */
+  if (req.method === "GET" && url.pathname === "/api/reseed/registry") {
+    try {
+      const entries = await listRegistry(opts.torrentRegistryDir);
+      const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+      const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
+      const sizeIndex = await buildSizeIndex(opts.libraryRoot, { excludeDirs: [stagingRoot] });
+
+      let liveNames = new Set<string>();
+      if (settings.transmission) {
+        try {
+          const liveTorrents = await getAllTorrentsWithFiles(settings.transmission);
+          liveNames = new Set(liveTorrents.map((t) => t.name));
+        } catch (err) {
+          console.warn(`[reseed-registry] failed to fetch live Transmission torrents: ${err}`);
+        }
+      }
+
+      const torrents = await Promise.all(
+        entries.map(async (entry) => {
+          let inPlex = false;
+          try {
+            const buf = await getRegisteredTorrentBuf(entry.torrentName, opts.torrentRegistryDir);
+            if (buf) {
+              const meta = parseTorrentFile(buf);
+              const plan = buildReseedPlan(meta, sizeIndex);
+              inPlex = plan.files.length > 0 && plan.matchedCount === plan.files.length;
+            }
+          } catch {
+            // A saved .torrent that no longer parses cleanly (shouldn't
+            // happen - this app wrote it - but stay defensive) just
+            // reports as not-found-in-Plex rather than failing the list.
+          }
+          return {
+            torrentName: entry.torrentName,
+            sizeBytes: entry.sizeBytes,
+            addedAt: entry.addedAt,
+            inPlex,
+            inTransmission: liveNames.has(entry.torrentName),
+          };
+        })
+      );
+
+      sendJson(res, 200, {
+        ok: true,
+        torrents,
+        summary: {
+          total: torrents.length,
+          inPlexCount: torrents.filter((t) => t.inPlex).length,
+          inTransmissionCount: torrents.filter((t) => t.inTransmission).length,
+        },
+      });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to list torrent registry: ${err}` });
+    }
+    return true;
+  }
+
+  /**
+   * Serves a previously-registered .torrent's raw bytes back for download.
+   * `name` is client-supplied but never trusted directly - torrentRegistry.ts's
+   * getRegisteredTorrentBuf confines it to the registry directory internally
+   * and returns null (rather than throwing) for anything that doesn't
+   * resolve safely there, so a path-traversal attempt just 404s the same
+   * as a genuinely unknown name.
+   */
+  if (req.method === "GET" && url.pathname === "/api/reseed/registry/download") {
+    const name = url.searchParams.get("name");
+    if (!name) {
+      sendJson(res, 400, { ok: false, error: "missing name query parameter" });
+      return true;
+    }
+    const buf = await getRegisteredTorrentBuf(name, opts.torrentRegistryDir);
+    if (!buf) {
+      sendJson(res, 404, { ok: false, error: `no registered torrent named "${name}"` });
+      return true;
+    }
+    res.writeHead(200, {
+      "Content-Type": "application/x-bittorrent",
+      "Content-Disposition": `attachment; filename="${name.replace(/"/g, "")}.torrent"`,
+    });
+    res.end(buf);
+    return true;
+  }
+
   const knownPaths = new Set(["/api/reseed/preview", "/api/reseed/commit"]);
   if (req.method !== "POST" || !knownPaths.has(url.pathname)) return false;
 
@@ -383,6 +516,15 @@ export async function handleReseedRequest(
       lines.push(
         `✅ staged ${result.stagedFiles.length}/${result.files.length} file(s) for "${result.torrentName}".`
       );
+      // Registers the raw .torrent for later download/reference and so a
+      // repeat batch drop can skip it via /api/reseed/registry/check -
+      // recorded on any real stage, not just a fully-clean one, since
+      // "staged" already means something real was committed.
+      try {
+        await registerTorrent(result.torrentName, torrentBuf, opts.torrentRegistryDir);
+      } catch (err) {
+        console.warn(`[torrent-registry] failed to register "${result.torrentName}": ${err}`);
+      }
       if (result.ambiguousCount > 0) {
         lines.push(
           `⚠️ ${result.ambiguousCount} file(s) had multiple same-size candidates in the library - not guessed, left unstaged.`

@@ -14,3 +14,7 @@ config/activity.json
 # Records deduped torrents' pre-relink locations (see src/dedupeState.ts) -
 # runtime state, same as activity.json above, not something to track in git.
 config/dedupe-state.json
+# Durable copy of every .torrent successfully staged through the Reseed tab
+# (see src/torrentRegistry.ts) - runtime state, host-specific, not something
+# to track in git.
+config/torrent-registry/

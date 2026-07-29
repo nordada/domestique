@@ -719,6 +719,32 @@
   <div id="reseed-batch-list"></div>
 </section>
 
+<section id="torrent-registry-section">
+  <div class="toolbar">
+    <h2 style="margin:0">Torrent registry</h2>
+    <div class="row" style="flex:0 0 auto; gap:0.4rem; align-items:center;">
+      <button type="button" class="icon-btn subtle" id="refresh-registry-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <span class="refresh-flash" id="registry-refresh-flash"></span>
+    </div>
+  </div>
+  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+    Every .torrent successfully staged through Reseed above gets a durable copy
+    saved here, so you can download it again later and so re-dropping the same
+    batch skips anything already handled instead of re-walking the library for
+    it. Plex/Transmission columns are checked live every time this loads - a
+    torrent can leave either system independently of the other over time, so
+    neither column is authoritative over the other, this is just a record of
+    what's been fed through Reseed.
+  </p>
+  <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
+    <span id="registry-summary-total" class="seeding-summary-badge neutral" style="display:none;"></span>
+    <span id="registry-summary-plex" class="seeding-summary-badge ok" style="display:none;"></span>
+    <span id="registry-summary-transmission" class="seeding-summary-badge ok" style="display:none;"></span>
+  </div>
+  <input type="text" id="registry-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
+  <div id="registry-list">Loading…</div>
+</section>
+
 <section id="seeding-section">
   <div class="toolbar">
     <h2 style="margin:0">Currently seeding</h2>
@@ -1817,6 +1843,77 @@ async function uploadFolder(fileList) {
 
 let lastReseedFile = null;
 let lastReseedPlan = null;
+let torrentRegistry = [];
+
+async function loadTorrentRegistry() {
+  const listEl = document.getElementById("registry-list");
+  try {
+    const data = await api("/api/reseed/registry");
+    torrentRegistry = data.torrents;
+    renderTorrentRegistry();
+  } catch (err) {
+    listEl.innerHTML = `<p class="status-msg err">Failed to load: ${esc(err.message)}</p>`;
+  }
+}
+
+function renderTorrentRegistry() {
+  const listEl = document.getElementById("registry-list");
+  const totalBadge = document.getElementById("registry-summary-total");
+  const plexBadge = document.getElementById("registry-summary-plex");
+  const transmissionBadge = document.getElementById("registry-summary-transmission");
+
+  if (torrentRegistry.length === 0) {
+    listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing registered yet - staging a torrent through Reseed above will save a copy here.</p>";
+    totalBadge.style.display = "none";
+    plexBadge.style.display = "none";
+    transmissionBadge.style.display = "none";
+    return;
+  }
+
+  totalBadge.textContent = `${torrentRegistry.length} total`;
+  totalBadge.style.display = "inline-block";
+  plexBadge.textContent = `${torrentRegistry.filter((t) => t.inPlex).length} in Plex`;
+  plexBadge.style.display = "inline-block";
+  transmissionBadge.textContent = `${torrentRegistry.filter((t) => t.inTransmission).length} in Transmission`;
+  transmissionBadge.style.display = "inline-block";
+
+  const query = document.getElementById("registry-search").value.trim().toLowerCase();
+  const filtered = query
+    ? torrentRegistry.filter((t) => t.torrentName.toLowerCase().includes(query))
+    : torrentRegistry.slice();
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<p style="opacity:0.7;">No registered torrents match "${esc(query)}".</p>`;
+    return;
+  }
+  filtered.sort((a, b) => a.torrentName.localeCompare(b.torrentName));
+
+  listEl.innerHTML = `
+    <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+      <thead>
+        <tr style="text-align:left; border-bottom:1px solid var(--border);">
+          <th style="padding:0.35rem 0.5rem 0.35rem 0;">Name</th>
+          <th style="padding:0.35rem 0.5rem;">Size</th>
+          <th style="padding:0.35rem 0.5rem;">Added</th>
+          <th style="padding:0.35rem 0.5rem;">Plex</th>
+          <th style="padding:0.35rem 0.5rem;">Transmission</th>
+          <th style="padding:0.35rem 0 0.35rem 0.5rem;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filtered.map((t) => `
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.35rem 0.5rem 0.35rem 0;">${esc(t.torrentName)}</td>
+            <td style="padding:0.35rem 0.5rem; white-space:nowrap;">${formatBytes(t.sizeBytes)}</td>
+            <td style="padding:0.35rem 0.5rem; white-space:nowrap;">${esc(new Date(t.addedAt).toLocaleDateString())}</td>
+            <td style="padding:0.35rem 0.5rem;">${t.inPlex ? "✅" : "❌"}</td>
+            <td style="padding:0.35rem 0.5rem;">${t.inTransmission ? "✅" : "❌"}</td>
+            <td style="padding:0.35rem 0 0.35rem 0.5rem; white-space:nowrap;"><a href="/api/reseed/registry/download?name=${encodeURIComponent(t.torrentName)}">Download</a></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
 
 function formatBytes(n) {
   if (n === 0) return "0 B";
@@ -2335,7 +2432,10 @@ async function commitReseedFile() {
     statusEl.textContent = lines.join("\n");
     statusEl.className = `status-msg ${ok ? "ok" : "err"}`;
     await loadActivity();
-    if (data.result.staged) await loadSeedingList();
+    if (data.result.staged) {
+      await loadSeedingList();
+      await loadTorrentRegistry();
+    }
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -2383,6 +2483,21 @@ async function processReseedBatch(files) {
     itemEl.textContent = `Checking "${file.name}"…`;
     listEl.appendChild(itemEl);
 
+    // Cheap registry pre-check before the expensive preview (a full library
+    // walk) - the whole point of the registry at 1,500-torrent scale is
+    // skipping a repeat drop's already-handled files without re-walking the
+    // library for each one. Fails open into the normal preview flow if the
+    // check itself errors, rather than blocking a real reseed attempt.
+    let alreadyRegistered = false;
+    try {
+      const checkData = await api("/api/reseed/registry/check", { method: "POST", body: file });
+      alreadyRegistered = checkData.alreadyRegistered;
+    } catch {}
+    if (alreadyRegistered) {
+      itemEl.innerHTML = `<strong>${esc(file.name)}</strong><div class="status-msg" style="display:block; margin-top:0.25rem;">Already in the registry - skipped.</div>`;
+      continue;
+    }
+
     let plan;
     try {
       const data = await api("/api/reseed/preview", { method: "POST", body: file });
@@ -2419,6 +2534,7 @@ async function processReseedBatch(files) {
   statusEl.textContent = `Done - processed ${files.length} file(s).`;
   await loadActivity();
   await loadSeedingList();
+  await loadTorrentRegistry();
 }
 
 async function commitBatchItem(file, itemEl) {
@@ -2829,6 +2945,14 @@ document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
 });
 document.getElementById("seeding-search").addEventListener("input", renderSeedingList);
 document.getElementById("seeding-sort").addEventListener("change", renderSeedingList);
+document.getElementById("refresh-registry-btn").addEventListener("click", () => {
+  refreshWithFeedback(
+    document.getElementById("refresh-registry-btn"),
+    document.getElementById("registry-refresh-flash"),
+    loadTorrentRegistry
+  );
+});
+document.getElementById("registry-search").addEventListener("input", renderTorrentRegistry);
 document.getElementById("clear-reseed-btn").addEventListener("click", () => {
   clearReseedResults();
   const flashEl = document.getElementById("reseed-clear-flash");
@@ -3020,6 +3144,7 @@ loadEvents();
 loadActivity();
 loadFullActivityLog();
 loadSeedingList();
+loadTorrentRegistry();
 </script>
 </body>
 </html>

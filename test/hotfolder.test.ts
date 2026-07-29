@@ -152,6 +152,7 @@ function makeOpts(libraryRoot: string, configPath: string, settingsPath: string)
   // write into this repo's own config/ files.
   const activityPath = join(dirname(configPath), "activity.json");
   const dedupeStatePath = join(dirname(configPath), "dedupe-state.json");
+  const torrentRegistryDir = join(dirname(configPath), "torrent-registry");
   return {
     port: 0,
     libraryRoot,
@@ -160,6 +161,7 @@ function makeOpts(libraryRoot: string, configPath: string, settingsPath: string)
     activityPath,
     downloadsPath: "/nonexistent",
     dedupeStatePath,
+    torrentRegistryDir,
     webui: null,
   };
 }

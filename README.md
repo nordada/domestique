@@ -797,6 +797,28 @@ on setups where Transmission's actual per-torrent download directory is a
 subfolder of the wider share (e.g. a `complete` subfolder distinct from
 the share root) rather than the share root itself.
 
+**Torrent registry**: every `.torrent` successfully staged through Preview/
+Commit above (single-file or batch) gets a durable copy saved to
+`config/torrent-registry/`, visible in its own section of the Reseed tab.
+This solves two things at once: you can download a previously-reseeded
+`.torrent` back later if you need it again, and dropping the same batch of
+files a second time (easy to do by accident at a few hundred/thousand
+files) skips anything already registered before it ever walks the library
+for it, rather than re-running the full Preview/Commit cycle for free. A
+torrent that never matched anything (nothing staged) is deliberately *not*
+registered, since that's exactly what you'd still want to revisit.
+
+The section's three pill badges and per-row Plex/Transmission columns are a
+**live check every time it loads**, not stored state - a registered torrent
+can independently leave Transmission (removed after seeding) or leave Plex
+(cleaned up) without the other changing, so neither column is authoritative
+over the other; this is only ever a record of "this went through Reseed at
+some point," cross-referenced against current reality on each view. **This
+only records going forward from the moment it ships** - the same one-time
+limitation as `config/dedupe-state.json` above - so anything reseeded
+before this feature existed won't retroactively appear here; nothing forces
+re-adding it, this only affects whether the registry shows/skips it.
+
 ### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after
@@ -972,6 +994,14 @@ so tweaking it doesn't require a rebuild.
   re-hardlinking an already-hardlinked torrent is a safe no-op, and doing
   so records the original location this time, making the button appear
   correctly afterward.
+- **The torrent registry only records `.torrent` files staged going
+  forward, from the moment `config/torrent-registry/` is introduced.**
+  Anything reseeded before this feature existed (including via a batch drop
+  processed before it shipped) has no entry, won't appear in the registry
+  view, and won't be caught by the skip-already-registered check on a
+  repeat drop - Transmission's own duplicate detection is still what
+  protects against actually re-adding it, just without the pre-check
+  savings. No backfill is planned; nothing forces re-adding these torrents.
 
 ## Security posture
 
@@ -1046,8 +1076,9 @@ run-as-root behavior, so upgrades don't change anything until you opt in.
 
 What happens at startup with `PUID` set: the entrypoint fixes ownership of
 the bind-mounted config files (`events.json`, `settings.json`,
-`activity.json`, `dedupe-state.json`), which are tiny and must be writable
-by the app, then drops privileges before Node starts. The library and downloads mounts are deliberately never
+`activity.json`, `dedupe-state.json`) and the `torrent-registry/` directory,
+which are tiny and must be writable by the app, then drops privileges
+before Node starts. The library and downloads mounts are deliberately never
 chowned automatically (they can be terabytes, and ownership there is your
 call), which leads to the one manual step:
 

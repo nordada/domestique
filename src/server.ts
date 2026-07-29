@@ -30,6 +30,7 @@ import { generateCoverArt, refreshPlexForShows } from "./coverArt.js";
 import { sendDiscordNotification } from "./discord.js";
 import { recordActivity, DEFAULT_ACTIVITY_PATH } from "./activity.js";
 import { DEFAULT_DEDUPE_STATE_PATH } from "./dedupeState.js";
+import { DEFAULT_TORRENT_REGISTRY_DIR } from "./torrentRegistry.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
 import { readBody, BodyTooLargeError } from "./body.js";
 
@@ -51,6 +52,8 @@ export interface ServerOptions {
   downloadsPath: string;
   /** Where dedupeState.ts persists each deduped torrent's original download-folder location - see seeding.ts's findOrphanOriginal for why this can't just be reconstructed live from Transmission. */
   dedupeStatePath: string;
+  /** Directory torrentRegistry.ts saves a copy of every successfully-staged Reseed .torrent into - see reseedApi.ts's /api/reseed/registry routes. */
+  torrentRegistryDir: string;
   webui: WebUiConfig | null;
 }
 
@@ -439,6 +442,7 @@ export function optionsFromEnv(): ServerOptions {
   const settingsPath = process.env.SETTINGS_PATH || DEFAULT_SETTINGS_PATH;
   const activityPath = process.env.ACTIVITY_PATH || DEFAULT_ACTIVITY_PATH;
   const dedupeStatePath = process.env.DEDUPE_STATE_PATH || DEFAULT_DEDUPE_STATE_PATH;
+  const torrentRegistryDir = process.env.TORRENT_REGISTRY_DIR || DEFAULT_TORRENT_REGISTRY_DIR;
   // Fixed by convention (see docker-compose.yml's DOWNLOADS_DIR mount and
   // the README) rather than DOWNLOADS_DIR itself, which is only ever a host
   // path - DOWNLOADS_PATH lets this be overridden if that mount target
@@ -451,5 +455,15 @@ export function optionsFromEnv(): ServerOptions {
 
   const webui = webUiConfigFromEnv();
 
-  return { port, libraryRoot, configPath, settingsPath, activityPath, downloadsPath, dedupeStatePath, webui };
+  return {
+    port,
+    libraryRoot,
+    configPath,
+    settingsPath,
+    activityPath,
+    downloadsPath,
+    dedupeStatePath,
+    torrentRegistryDir,
+    webui,
+  };
 }
