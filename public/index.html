@@ -138,6 +138,9 @@
      see armDangerButton() - deliberately loud (solid fill, bold) since a
      second click on it is irreversible. */
   button.danger.armed { background: var(--err); color: #fff; border-color: var(--err); font-weight: 700; }
+  .seeding-summary-badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid; }
+  .seeding-summary-badge.err { color: var(--err); border-color: var(--err); }
+  .seeding-summary-badge.ok { color: var(--ok); border-color: var(--ok); }
   button:hover { opacity: 0.85; }
   h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
   h3:first-child { margin-top: 0; }
@@ -720,6 +723,17 @@
     parse/match/copy pipeline (same as a fresh download) rather than trying to match
     it into place.
   </p>
+  <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
+    <span id="seeding-summary-attention" class="seeding-summary-badge err" style="display:none;"></span>
+    <span id="seeding-summary-ok" class="seeding-summary-badge ok" style="display:none;"></span>
+    <label style="display:flex; align-items:center; gap:0.4rem; margin-left:auto; font-size:0.85rem; opacity:0.85; flex:0 0 auto;">
+      Sort
+      <select id="seeding-sort">
+        <option value="attention">Needs attention first</option>
+        <option value="name">Name (A-Z)</option>
+      </select>
+    </label>
+  </div>
   <input type="text" id="seeding-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
   <div id="seeding-action-status" class="status-msg"></div>
   <div class="seeding-list-scroll">
@@ -1818,21 +1832,56 @@ async function loadSeedingList() {
   }
 }
 
+/**
+ * The broad "something here is worth a look" signal used for the summary
+ * badges and the attention-first sort - a superset of the narrower,
+ * per-item needsAttention below (which only covers file-matching and
+ * drives whether Add/Force show, since those are the only two things with
+ * an actual fix-it button). This one also counts a Transmission/on-disk
+ * percentage mismatch, since that's just as worth flagging even though
+ * there's nothing to click to "fix" it here.
+ */
+function torrentNeedsAttention(t) {
+  return t.plan.matchedCount < t.plan.files.length || Math.abs(t.percentComplete - t.percentDone) > 0.01;
+}
+
 function renderSeedingList() {
   const listEl = document.getElementById("seeding-list");
+  const attentionBadge = document.getElementById("seeding-summary-attention");
+  const okBadge = document.getElementById("seeding-summary-ok");
+
   if (seedingTorrents.length === 0) {
     listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing is currently seeding or paused.</p>";
+    attentionBadge.style.display = "none";
+    okBadge.style.display = "none";
     return;
   }
+
+  const attentionCount = seedingTorrents.filter(torrentNeedsAttention).length;
+  const okCount = seedingTorrents.length - attentionCount;
+  attentionBadge.textContent = `⚠️ ${attentionCount} need${attentionCount === 1 ? "s" : ""} attention`;
+  attentionBadge.style.display = attentionCount > 0 ? "inline-block" : "none";
+  okBadge.textContent = `✅ ${okCount} fully matched`;
+  okBadge.style.display = okCount > 0 ? "inline-block" : "none";
 
   const query = document.getElementById("seeding-search").value.trim().toLowerCase();
   const filtered = query
     ? seedingTorrents.filter((t) => t.plan.torrentName.toLowerCase().includes(query))
-    : seedingTorrents;
+    : seedingTorrents.slice();
   if (filtered.length === 0) {
     listEl.innerHTML = `<p style="opacity:0.7;">No seeding torrents match "${esc(query)}".</p>`;
     return;
   }
+
+  const sortMode = document.getElementById("seeding-sort").value;
+  filtered.sort((a, b) => {
+    if (sortMode === "attention") {
+      const aAttn = torrentNeedsAttention(a);
+      const bAttn = torrentNeedsAttention(b);
+      if (aAttn !== bAttn) return aAttn ? -1 : 1;
+    }
+    return a.plan.torrentName.localeCompare(b.plan.torrentName);
+  });
 
   listEl.innerHTML = filtered.map((t) => {
     const statusLabel = t.status === 6 ? "Seeding" : "Paused";
@@ -2567,6 +2616,7 @@ document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
   );
 });
 document.getElementById("seeding-search").addEventListener("input", renderSeedingList);
+document.getElementById("seeding-sort").addEventListener("change", renderSeedingList);
 document.getElementById("clear-activity-btn").addEventListener("click", async () => {
   const btn = document.getElementById("clear-activity-btn");
   btn.disabled = true;

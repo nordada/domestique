@@ -723,6 +723,16 @@ disagree, both are shown side by side with a note explaining why, rather
 than silently picking one - the "on disk" figure is the one that actually
 matters when deciding whether it's safe to remove a torrent's data.
 
+Above the list, two pill badges summarize what's worth a look: how many
+torrents **need attention** (an unmatched or ambiguous file, or a
+percentage mismatch) versus how many are **fully matched** with nothing
+to flag - each hidden when its own count is zero, so a completely clean
+list shows only the green badge. The **Sort** control next to them
+defaults to "Needs attention first," so the torrents actually worth
+looking at surface at the top instead of getting lost among everything
+that's already fine; switching to "Name (A-Z)" sorts the list plainly
+alphabetically instead.
+
 ### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after
