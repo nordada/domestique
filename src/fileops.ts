@@ -74,7 +74,9 @@ function isDvdNavigationFile(filename: string): boolean {
  * its own name merged with the folder's name (see parser.mergeParsed) since
  * part/stage info lives on the individual filenames in this library. Raw
  * DVD-Video navigation files (see isDvdNavigationFile) are skipped entirely,
- * never even reaching the parser.
+ * never even reaching the parser. A "VIDEO_TS" subfolder, if present, is
+ * folded in alongside the top level's own files - otherwise this is
+ * single-level only, deliberately not a general recursive walk.
  */
 export async function resolveSourceItems(
   torrentDir: string,
@@ -90,15 +92,35 @@ export async function resolveSourceItems(
   }
 
   const folderParsed = parseName(torrentName);
-  const entries = await fs.readdir(topLevelPath, { withFileTypes: true });
+  const topEntries = await fs.readdir(topLevelPath, { withFileTypes: true });
+  const fileEntries: { name: string; dir: string }[] = topEntries
+    .filter((e) => e.isFile())
+    .map((e) => ({ name: e.name, dir: topLevelPath }));
+
+  // Some DVD-rip releases keep the standard DVD-Video folder layout - a
+  // "VIDEO_TS" subfolder holding the navigation/video files - rather than
+  // flattening them straight into the release folder (both shapes show up
+  // in the wild for the exact same kind of release). Folded in alongside
+  // whatever's already at the top level, not instead of it, so a stray nfo/
+  // poster sitting next to a real VIDEO_TS folder still gets picked up too.
+  // Only this one well-defined DVD-spec folder name is special-cased -
+  // deliberately not a general recursive-subfolder walk, which would be a
+  // much bigger change than anything evidenced so far.
+  const videoTsDir = topEntries.find((e) => e.isDirectory() && e.name.toUpperCase() === "VIDEO_TS");
+  if (videoTsDir) {
+    const videoTsPath = join(topLevelPath, videoTsDir.name);
+    const videoTsEntries = await fs.readdir(videoTsPath, { withFileTypes: true });
+    fileEntries.push(...videoTsEntries.filter((e) => e.isFile()).map((e) => ({ name: e.name, dir: videoTsPath })));
+  }
+
   const items: SourceItem[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || isDvdNavigationFile(entry.name)) continue;
-    const ext = extname(entry.name).slice(1).toLowerCase() || VIDEO_EXT_FALLBACK;
-    const nameNoExt = basename(entry.name, extname(entry.name));
+  for (const { name, dir } of fileEntries) {
+    if (isDvdNavigationFile(name)) continue;
+    const ext = extname(name).slice(1).toLowerCase() || VIDEO_EXT_FALLBACK;
+    const nameNoExt = basename(name, extname(name));
     const fileParsed = parseName(nameNoExt);
     items.push({
-      sourceFile: join(topLevelPath, entry.name),
+      sourceFile: join(dir, name),
       parsed: mergeParsed(folderParsed, fileParsed),
       ext,
     });

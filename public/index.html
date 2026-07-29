@@ -1773,10 +1773,23 @@ function planFilesHtml(files) {
   return files.map((f) => {
     const icon = f.status === "matched" ? "✅" : f.status === "ambiguous" ? "⚠️" : "❌";
     let detail = "";
-    if (f.status === "matched" && f.candidate) detail = ` &mdash; ${esc(f.candidate)}`;
-    else if (f.status === "ambiguous") detail = ` &mdash; ${f.candidates.length} same-size candidates in the library, not guessed`;
-    else if (f.status === "unmatched") detail = " &mdash; no library file this size";
-    return `<div>${icon} ${esc(f.relativePath)} (${formatBytes(f.length)})${detail}</div>`;
+    let candidateList = "";
+    if (f.status === "matched" && f.candidate) {
+      detail = ` &mdash; ${esc(f.candidate)}`;
+    } else if (f.status === "ambiguous") {
+      // Previously just showed the count ("3 same-size candidates") with no
+      // way to see which files those actually are - the data was already
+      // in the API response, just never rendered, so there was no way to
+      // tell a genuine duplicate apart from an unrelated same-size
+      // coincidence without going and searching the library by hand.
+      detail = ` &mdash; ${f.candidates.length} same-size candidate(s) in the library, not guessed:`;
+      candidateList = f.candidates
+        .map((c) => `<div style="margin-left:1.5rem; opacity:0.8;">${esc(c)}</div>`)
+        .join("");
+    } else if (f.status === "unmatched") {
+      detail = " &mdash; no library file this size";
+    }
+    return `<div>${icon} ${esc(f.relativePath)} (${formatBytes(f.length)})${detail}</div>${candidateList}`;
   }).join("");
 }
 

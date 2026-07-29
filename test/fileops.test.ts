@@ -68,6 +68,62 @@ test("resolveSourceItems skips raw DVD navigation files (.BUP/.IFO, VIDEO_TS.VOB
   assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_2.VOB"))?.parsed.partNum, 2);
 });
 
+test("resolveSourceItems folds in a VIDEO_TS subfolder's files when the release keeps the standard DVD folder layout instead of flattening it", async () => {
+  // Real incident, a second variant of the same underlying release shape:
+  // some DVD rips flatten VIDEO_TS.BUP/VTS_01_N.VOB straight into the
+  // release folder (the 1993 case above); others keep the real DVD-Video
+  // folder layout, a "VIDEO_TS" subfolder one level deeper. Without this,
+  // the whole release found zero files - everything sat one level below
+  // where the single-level scan ever looked.
+  const { sourceDir } = await makeScratch();
+  const folder = join(sourceDir, "1985 Giro d'Italia");
+  const videoTs = join(folder, "VIDEO_TS");
+  await fs.mkdir(videoTs, { recursive: true });
+  await fs.writeFile(join(videoTs, "VIDEO_TS.BUP"), "x");
+  await fs.writeFile(join(videoTs, "VIDEO_TS.IFO"), "x");
+  await fs.writeFile(join(videoTs, "VIDEO_TS.VOB"), "x");
+  await fs.writeFile(join(videoTs, "VTS_01_0.BUP"), "x");
+  await fs.writeFile(join(videoTs, "VTS_01_1.VOB"), "real video 1");
+  await fs.writeFile(join(videoTs, "VTS_01_2.VOB"), "real video 2");
+  // A file sitting at the TOP level too, alongside VIDEO_TS - confirms it's
+  // folded in, not used instead of the top level.
+  await fs.writeFile(join(folder, "cover.jpg"), "x");
+
+  const items = await resolveSourceItems(sourceDir, "1985 Giro d'Italia");
+  const names = items.map((i) => i.sourceFile.split("/").pop()).sort();
+  assert.deepEqual(names, ["VTS_01_1.VOB", "VTS_01_2.VOB", "cover.jpg"]);
+  assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_1.VOB"))?.parsed.partNum, 1);
+});
+
+test("resolveSourceItems ignores an unrelated VIDEO_RM folder (a DVD recorder's own temp/system files, not video) sitting alongside a real VIDEO_TS one", async () => {
+  // Real-world case: some standalone-DVD-recorder rips carry a second
+  // "VIDEO_RM" folder (PVR_TEMP.USR/DVD_REC.USR - recorder housekeeping,
+  // never content, confirmed by their tiny sizes too) next to the real
+  // VIDEO_TS folder. Only "VIDEO_TS" is ever descended into, so VIDEO_RM's
+  // junk is never even read, let alone archived.
+  const { sourceDir } = await makeScratch();
+  const folder = join(sourceDir, "Giro D'Italia History 1909-1993");
+  const videoRm = join(folder, "VIDEO_RM");
+  const videoTs = join(folder, "VIDEO_TS");
+  await fs.mkdir(videoRm, { recursive: true });
+  await fs.mkdir(videoTs, { recursive: true });
+  await fs.writeFile(join(videoRm, "VIDEO_RM.DAT"), "x");
+  await fs.writeFile(join(videoRm, "VIDEO_RM.BUP"), "x");
+  await fs.writeFile(join(videoRm, "PVR_TEMP.USR"), "x");
+  await fs.writeFile(join(videoRm, "VIDEO_RM.IFO"), "x");
+  await fs.writeFile(join(videoRm, "DVD_REC.USR"), "x");
+  await fs.writeFile(join(videoTs, "VTS_01_1.VOB"), "real segment 1");
+  await fs.writeFile(join(videoTs, "VTS_01_2.VOB"), "real segment 2");
+
+  const items = await resolveSourceItems(sourceDir, "Giro D'Italia History 1909-1993");
+  const names = items.map((i) => i.sourceFile.split("/").pop()).sort();
+  assert.deepEqual(names, ["VTS_01_1.VOB", "VTS_01_2.VOB"]);
+  // A year range ("1909-1993") extracts its first/leftmost year - the only
+  // date-like anchor available for a multi-decade compilation like this.
+  assert.equal(items[0].parsed.year, 1909);
+  assert.equal(items[0].parsed.yearWasExplicit, true);
+});
+
 test("quality-aware copy: multi-part same-resolution files land normally, no review suffix", async () => {
   const { libraryRoot, sourceDir } = await makeScratch();
   const destDir = "TestShow/Season 2026";

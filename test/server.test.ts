@@ -123,3 +123,40 @@ test("a real raw DVD-rip release (Giro di Italia 1993, VIDEO_TS structure) files
     "Giro D'Italia - S1993E01 - pt05.vob",
   ]);
 });
+
+test("a real DVD-rip release that keeps the standard VIDEO_TS folder layout (1985 Giro d'Italia) files correctly too, not just the flattened 1993 shape", async () => {
+  const { opts, downloadsPath, libraryRoot } = await makeScratch();
+  await fs.writeFile(
+    opts.configPath,
+    JSON.stringify({
+      shows: [
+        { id: "giro-ditalia", folderName: "Giro D'Italia", matchKeywords: ["giro ditalia", "giro d italia", "giro di italia"], type: "stage-race" },
+      ],
+    }) + "\n",
+    "utf-8"
+  );
+
+  const folder = "1985 Giro d'Italia";
+  const videoTsPath = join(downloadsPath, folder, "VIDEO_TS");
+  await fs.mkdir(videoTsPath, { recursive: true });
+  await fs.writeFile(join(videoTsPath, "VIDEO_TS.BUP"), "nav");
+  await fs.writeFile(join(videoTsPath, "VIDEO_TS.IFO"), "nav");
+  await fs.writeFile(join(videoTsPath, "VIDEO_TS.VOB"), "menu video");
+  await fs.writeFile(join(videoTsPath, "VTS_01_0.BUP"), "nav");
+  await fs.writeFile(join(videoTsPath, "VTS_01_0.IFO"), "nav");
+  for (let i = 1; i <= 5; i++) {
+    await fs.writeFile(join(videoTsPath, `VTS_01_${i}.VOB`), `segment ${i}`);
+  }
+
+  const results = await handleTorrentDone({ dir: downloadsPath, name: folder }, opts);
+  assert.equal(results.length, 5, "only the 5 real video segments, nested a level deeper, should be processed");
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["copied", "copied", "copied", "copied", "copied"]
+  );
+
+  const showDirs = await fs.readdir(libraryRoot);
+  assert.deepEqual(showDirs, ["Giro D'Italia"]);
+  const seasonDirs = await fs.readdir(join(libraryRoot, "Giro D'Italia"));
+  assert.deepEqual(seasonDirs, ["Season 1985"]);
+});
