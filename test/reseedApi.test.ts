@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createServer as createHttpServer } from "node:http";
 import { createApp, type ServerOptions } from "../src/server.js";
 import { buildSingleFileTorrent, buildMultiFileTorrent } from "./torrentFixtures.js";
+import { getDedupeOriginal, recordDedupeOriginal } from "../src/dedupeState.js";
 
 async function makeScratchServer(downloadsPath?: string) {
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-config-"));
@@ -13,6 +14,7 @@ async function makeScratchServer(downloadsPath?: string) {
   const configPath = join(configDir, "events.json");
   const settingsPath = join(configDir, "settings.json");
   const activityPath = join(configDir, "activity.json");
+  const dedupeStatePath = join(configDir, "dedupe-state.json");
   await fs.writeFile(configPath, JSON.stringify({ shows: [] }) + "\n", "utf-8");
   await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
 
@@ -23,6 +25,7 @@ async function makeScratchServer(downloadsPath?: string) {
     settingsPath,
     activityPath,
     downloadsPath: downloadsPath ?? "/nonexistent",
+    dedupeStatePath,
     webui: { password: "correct-password" },
   };
 
@@ -37,6 +40,7 @@ async function makeScratchServer(downloadsPath?: string) {
     libraryRoot,
     settingsPath,
     activityPath,
+    dedupeStatePath,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -584,7 +588,8 @@ test("POST /api/reseed/dedupe rejects a body without a numeric id", async () => 
 
 test("POST /api/reseed/dedupe hardlinks a full-duplicate torrent to the library, verifies clean, and logs success", async () => {
   const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
-  const { baseUrl, libraryRoot, settingsPath, activityPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  const { baseUrl, libraryRoot, settingsPath, activityPath, dedupeStatePath, close: closeApp } =
+    await makeScratchServer(downloadsDir);
   const libraryFile = join(libraryRoot, "Il Lombardia - S2026E01.mp4");
   await fs.writeFile(libraryFile, Buffer.alloc(1000));
   await fs.writeFile(join(downloadsDir, "Il-Lombardia-2026.mp4"), Buffer.alloc(1000));
@@ -629,6 +634,14 @@ test("POST /api/reseed/dedupe hardlinks a full-duplicate torrent to the library,
     const stagedPath = join(body.result.perTorrentDir, "Il-Lombardia-2026.mp4");
     const [stagedStat, libraryStat] = await Promise.all([fs.stat(stagedPath), fs.stat(libraryFile)]);
     assert.equal(stagedStat.ino, libraryStat.ino);
+
+    // The real bug this closes: without this recorded entry, a later list
+    // load has no way to know where "Il-Lombardia-2026.mp4"'s data used to
+    // live, since Transmission itself forgets once torrent-set-location moves it.
+    assert.deepEqual(getDedupeOriginal("Il-Lombardia-2026.mp4", dedupeStatePath), {
+      dir: downloadsDir,
+      name: "Il-Lombardia-2026.mp4",
+    });
 
     const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
     assert.equal(activity[0].reviewWorthy, false);
@@ -724,11 +737,15 @@ test("POST /api/reseed/delete-original refuses a path outside the downloads shar
   }
 });
 
-test("POST /api/reseed/delete-original deletes the file and logs an activity entry", async () => {
+test("POST /api/reseed/delete-original deletes the file, logs an activity entry, and clears the recorded dedupeState entry", async () => {
   const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
-  const { baseUrl, activityPath, close } = await makeScratchServer(downloadsDir);
+  const { baseUrl, activityPath, dedupeStatePath, close } = await makeScratchServer(downloadsDir);
   const filePath = join(downloadsDir, "Il-Lombardia-2026.mp4");
   await fs.writeFile(filePath, Buffer.alloc(1000));
+  // Simulates a prior successful dedupe having recorded this - the delete
+  // route should clear it so a future, unrelated torrent reusing this name
+  // never gets misled by a stale entry.
+  recordDedupeOriginal("Il-Lombardia-2026.mp4", { dir: downloadsDir, name: "Il-Lombardia-2026.mp4" }, dedupeStatePath);
   try {
     const res = await fetch(`${baseUrl}/api/reseed/delete-original`, {
       method: "POST",
@@ -739,6 +756,7 @@ test("POST /api/reseed/delete-original deletes the file and logs an activity ent
     const body = await res.json();
     assert.equal(body.ok, true);
     await assert.rejects(() => fs.stat(filePath));
+    assert.equal(getDedupeOriginal("Il-Lombardia-2026.mp4", dedupeStatePath), undefined);
 
     const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
     assert.match(activity[0].lines.join("\n"), /deleted the now-deduped original/i);

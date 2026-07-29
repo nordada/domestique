@@ -33,6 +33,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
   const configPath = join(configDir, "events.json");
   const settingsPath = join(configDir, "settings.json");
   const activityPath = join(configDir, "activity.json");
+  const dedupeStatePath = join(configDir, "dedupe-state.json");
   await fs.writeFile(
     configPath,
     JSON.stringify({
@@ -51,6 +52,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     settingsPath,
     activityPath,
     downloadsPath: "/nonexistent",
+    dedupeStatePath,
     webui,
   };
 

@@ -1821,6 +1821,7 @@ function formatBytes(n) {
 
 /** Transmission's own RPC special-cases for uploadRatio: -1 = not available (e.g. still downloading), -2 = infinite (uploaded something with 0 recorded downloaded bytes - a seed-only/injected torrent). Anything else is a normal upload/download ratio. */
 function formatRatio(r) {
+  if (typeof r !== "number" || Number.isNaN(r)) return "N/A";
   if (r === -1) return "N/A";
   if (r === -2) return "∞";
   return r.toFixed(2);
@@ -1999,7 +2000,7 @@ function renderSeedingList() {
           ${matchButtons}
           ${dedupeButton}
           ${deleteOrphanButton}
-          <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}">Remove &amp; delete files</button>
+          <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}" title="Transmission-only: removes this torrent and deletes its downloaded data from Transmission. Never touches anything already filed in your Plex library.">Remove &amp; delete files</button>
         </div>
       </div>
     `;

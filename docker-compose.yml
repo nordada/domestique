@@ -41,6 +41,7 @@ services:
       CONFIG_PATH: ${CONFIG_CONTAINER_PATH}
       SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH}
       ACTIVITY_PATH: ${ACTIVITY_CONTAINER_PATH}
+      DEDUPE_STATE_PATH: ${DEDUPE_STATE_CONTAINER_PATH}
       PORT: "${PORT}"
       # Optional Plex/Discord/hot-folder integrations - safe to leave unset,
       # the app just disables each feature when its required vars aren't all
@@ -117,6 +118,13 @@ services:
       # gotcha as settings.json above: `touch config/activity.json` before
       # your first `docker compose up` here.
       - ./config/activity.json:${ACTIVITY_CONTAINER_PATH}
+      # Records where a deduped torrent's data lived before Dedupe relinked
+      # it (see seeding.ts's findOrphanOriginal) - Transmission itself
+      # forgets a torrent's previous location once relocated, so this has
+      # to be Domestique's own persisted state instead of a live query.
+      # Same first-run gotcha as settings.json/activity.json above: `touch
+      # config/dedupe-state.json` before your first `docker compose up` here.
+      - ./config/dedupe-state.json:${DEDUPE_STATE_CONTAINER_PATH}
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.

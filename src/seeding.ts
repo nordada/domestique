@@ -21,6 +21,8 @@ import { join } from "node:path";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
 import { getAllTorrentsWithFiles, type TransmissionConfig } from "./transmission.js";
+import { getDedupeOriginal } from "./dedupeState.js";
+import { isPathWithin } from "./fileops.js";
 
 // From Transmission's RPC spec (tr_torrent_activity): 0 = stopped (what
 // Transmission's own UI calls "paused"), 6 = seeding. Deliberately narrower
@@ -129,22 +131,47 @@ async function computeStorageStatus(plan: ReseedPlan, downloadDir: string): Prom
  * still be sitting, if its "Delete original copy" step was never run or
  * failed (see dedupe.ts/reseedApi.ts's delete-original route) - never a
  * broad search across the downloads share, deliberately, so this can never
- * suggest deleting an unrelated same-size file. `relativePath` already
- * includes the torrent's own name as its first path segment (the same
- * convention every other reseed/dedupe path already relies on), so
- * `join(downloadsPath, file.relativePath)` is exactly where each file would
- * live if it were still there - no folder-structure guessing involved.
- * Only reports a candidate when EVERY matched file is confirmed present at
- * its exact expected byte size - a partial/resized leftover is left alone
- * rather than guessed at, same rigor this app applies everywhere before an
- * action that leads to a deletion.
+ * suggest deleting an unrelated same-size file.
+ *
+ * The base directory comes from dedupeState.ts's recorded original location
+ * (captured by commitDedupe at the one moment it's knowable - Transmission
+ * itself forgets a torrent's previous downloadDir the instant a dedupe
+ * relocates it via torrent-set-location, so there's no live RPC query that
+ * could recover it afterward). A real bug lived here before this comment:
+ * this used to assume the app's static DOWNLOADS_PATH setting directly was
+ * where a torrent's original files sat, which silently missed anything
+ * whose actual Transmission download-dir was a subfolder of that (e.g.
+ * DOWNLOADS_PATH=/downloads but Transmission's own downloadDir was really
+ * /downloads/complete - a completely normal setup). No recorded entry
+ * means no orphan to report - never falls back to guessing.
+ *
+ * `relativePath` already includes the torrent's own name as its first path
+ * segment (the same convention every other reseed/dedupe path relies on),
+ * so `join(record.dir, file.relativePath)` is exactly where each file would
+ * live if it were still there. Only reports a candidate when EVERY matched
+ * file is confirmed present at its exact expected byte size - a partial/
+ * resized leftover is left alone rather than guessed at, same rigor this
+ * app applies everywhere before an action that leads to a deletion.
  */
-async function findOrphanOriginal(plan: ReseedPlan, downloadsPath: string): Promise<OrphanOriginal | null> {
+async function findOrphanOriginal(
+  plan: ReseedPlan,
+  downloadsPath: string,
+  dedupeStatePath: string
+): Promise<OrphanOriginal | null> {
+  const record = getDedupeOriginal(plan.torrentName, dedupeStatePath);
+  if (!record) return null;
+  // Defensive sanity check on recorded state, same "confine before trusting
+  // a filesystem path" posture this app applies to client-supplied paths -
+  // Transmission's own downloadDir is never client input, but it's still
+  // worth confirming it actually is where we expect before treating it as
+  // authoritative.
+  if (!isPathWithin(record.dir, downloadsPath)) return null;
+
   let totalBytes = 0;
   for (const file of plan.files) {
     if (!file.candidate) continue; // zero-length match - nothing physical to confirm
     try {
-      const info = await stat(join(downloadsPath, file.relativePath));
+      const info = await stat(join(record.dir, file.relativePath));
       if (info.size !== file.length) return null;
       totalBytes += file.length;
     } catch {
@@ -152,7 +179,10 @@ async function findOrphanOriginal(plan: ReseedPlan, downloadsPath: string): Prom
     }
   }
   if (totalBytes === 0) return null; // nothing but zero-length entries - nothing to reclaim
-  return { dir: downloadsPath, name: plan.torrentName, totalBytes };
+  // record.name (captured at dedupe time), not plan.torrentName (Transmission's
+  // current live name) - the on-disk file/folder's actual name reflects
+  // whatever was true when it was downloaded, not any later rename.
+  return { dir: record.dir, name: record.name, totalBytes };
 }
 
 /**
@@ -169,7 +199,8 @@ export async function listSeedingTorrents(
   transmissionConfig: TransmissionConfig,
   libraryRoot: string,
   stagingRoot: string,
-  downloadsPath: string
+  downloadsPath: string,
+  dedupeStatePath: string
 ): Promise<SeedingTorrent[]> {
   const torrents = await getAllTorrentsWithFiles(transmissionConfig);
   const relevant = torrents.filter((t) => SEEDING_OR_PAUSED.has(t.status));
@@ -193,7 +224,8 @@ export async function listSeedingTorrents(
         ratio: t.uploadRatio,
         plan,
         storageStatus,
-        orphanOriginal: storageStatus === "deduped" ? await findOrphanOriginal(plan, downloadsPath) : null,
+        orphanOriginal:
+          storageStatus === "deduped" ? await findOrphanOriginal(plan, downloadsPath, dedupeStatePath) : null,
       };
     })
   );

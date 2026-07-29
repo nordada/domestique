@@ -11,3 +11,6 @@ config/settings.json
 # Runtime activity log, host-specific and constantly changing - not
 # something to track in git, unlike config/events.json.
 config/activity.json
+# Records deduped torrents' pre-relink locations (see src/dedupeState.ts) -
+# runtime state, same as activity.json above, not something to track in git.
+config/dedupe-state.json

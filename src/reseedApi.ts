@@ -23,6 +23,7 @@ import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
 import { listSeedingTorrents } from "./seeding.js";
 import { commitDedupe } from "./dedupe.js";
+import { recordDedupeOriginal, clearDedupeOriginal } from "./dedupeState.js";
 import { getTorrentLocation, removeTorrentAndData } from "./transmission.js";
 import { isPathWithin } from "./fileops.js";
 import { recordActivity } from "./activity.js";
@@ -71,7 +72,13 @@ export async function handleReseedRequest(
     }
     const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
     try {
-      const torrents = await listSeedingTorrents(settings.transmission, opts.libraryRoot, stagingRoot, opts.downloadsPath);
+      const torrents = await listSeedingTorrents(
+        settings.transmission,
+        opts.libraryRoot,
+        stagingRoot,
+        opts.downloadsPath,
+        opts.dedupeStatePath
+      );
       sendJson(res, 200, { ok: true, torrents });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to list seeding torrents: ${err}` });
@@ -240,6 +247,9 @@ export async function handleReseedRequest(
         );
       } else if (result.staged) {
         lines.push(`🔗 deduped "${result.plan.torrentName}" - Transmission verified 100% against the library copy.`);
+        if (result.originalLocation) {
+          recordDedupeOriginal(result.plan.torrentName, result.originalLocation, opts.dedupeStatePath);
+        }
       } else {
         lines.push(
           `⚠️ dedupe of "${result.plan.torrentName}" failed verify (${
@@ -298,6 +308,10 @@ export async function handleReseedRequest(
     try {
       const info = await stat(targetPath);
       await rm(targetPath, { recursive: true });
+      // Clears the recorded original-location entry too (see dedupeState.ts)
+      // - keyed by torrent name, so a stale entry could otherwise mislead
+      // orphan-detection for a future, unrelated torrent reusing this name.
+      clearDedupeOriginal(payload.name, opts.dedupeStatePath);
       recordActivity(
         {
           timestamp: new Date().toISOString(),

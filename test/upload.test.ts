@@ -38,6 +38,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     settingsPath,
     activityPath: join(configDir, "activity.json"),
     downloadsPath: "/nonexistent",
+    dedupeStatePath: join(configDir, "dedupe-state.json"),
     webui,
   };
 

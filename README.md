@@ -512,15 +512,16 @@ and these env vars are ignored on every later boot. Delete
 `config/settings.json` if you want `.env` to reseed it fresh.
 
 **Before your very first `docker compose up` here**, run `touch
-config/settings.json config/activity.json` (unlike `config/events.json`,
-neither of these ships in the repo). Skipping this is harmless on most
-setups, but if nothing exists at that path on the host yet, Docker creates
-an empty *directory* there instead of a file - a well-known bind-mount
-gotcha the app can't clean up on its own, since by then it's the
-container's actual mount point. If you hit this (crash-looping with an
-`EBUSY`-related error mentioning `settings.json` or `activity.json`), stop
-the container, `rmdir` the affected path on the host, `touch` an empty file
-in its place, then start it again.
+config/settings.json config/activity.json config/dedupe-state.json`
+(unlike `config/events.json`, none of these ship in the repo). Skipping
+this is harmless on most setups, but if nothing exists at that path on the
+host yet, Docker creates an empty *directory* there instead of a file - a
+well-known bind-mount gotcha the app can't clean up on its own, since by
+then it's the container's actual mount point. If you hit this
+(crash-looping with an `EBUSY`-related error mentioning `settings.json`,
+`activity.json`, or `dedupe-state.json`), stop the container, `rmdir` the
+affected path on the host, `touch` an empty file in its place, then start
+it again.
 
 By default Plex only notices new files on its own scan schedule. Set these
 in `.env` to have the archiver tell Plex to rescan just the one season
@@ -786,6 +787,16 @@ it only ever checks the one exact path a torrent's own files would still
 be sitting at, matched by both name and byte-exact size, never a size
 match against something unrelated elsewhere in the share.
 
+That exact path comes from `config/dedupe-state.json`, recorded the moment
+Dedupe succeeds - Transmission itself forgets a torrent's previous
+download location the instant it's relocated, so there's no live way to
+recover it afterward without this. This also means the check is never a
+guess based on where your downloads share happens to be mounted: it's the
+literal path Transmission reported right before the relink, which matters
+on setups where Transmission's actual per-torrent download directory is a
+subfolder of the wider share (e.g. a `complete` subfolder distinct from
+the share root) rather than the share root itself.
+
 ### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after
@@ -952,6 +963,15 @@ so tweaking it doesn't require a rebuild.
   because the check is narrow (the one exact path that torrent's own files
   would occupy, not a broad search) rather than because the bytes are
   independently confirmed.
+- **Orphan detection only records a torrent's original location going
+  forward, from the moment `config/dedupe-state.json` is introduced.** A
+  torrent already deduped before that file existed (or before an upgrade
+  that added this feature) has no recorded entry yet, so its "Delete
+  original copy" button won't appear even if the original file is still
+  genuinely sitting there. The fix is simple: click Dedupe on it again -
+  re-hardlinking an already-hardlinked torrent is a safe no-op, and doing
+  so records the original location this time, making the button appear
+  correctly afterward.
 
 ## Security posture
 
@@ -1026,8 +1046,8 @@ run-as-root behavior, so upgrades don't change anything until you opt in.
 
 What happens at startup with `PUID` set: the entrypoint fixes ownership of
 the bind-mounted config files (`events.json`, `settings.json`,
-`activity.json`), which are tiny and must be writable by the app, then
-drops privileges before Node starts. The library and downloads mounts are deliberately never
+`activity.json`, `dedupe-state.json`), which are tiny and must be writable
+by the app, then drops privileges before Node starts. The library and downloads mounts are deliberately never
 chowned automatically (they can be terabytes, and ownership there is your
 call), which leads to the one manual step:
 

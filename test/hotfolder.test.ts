@@ -147,10 +147,21 @@ async function makeScratch() {
 }
 
 function makeOpts(libraryRoot: string, configPath: string, settingsPath: string): ServerOptions {
-  // Scratch path in the same temp config dir - never the real DEFAULT_ACTIVITY_PATH,
-  // which would otherwise write into this repo's own config/activity.json.
+  // Scratch paths in the same temp config dir - never the real
+  // DEFAULT_ACTIVITY_PATH/DEFAULT_DEDUPE_STATE_PATH, which would otherwise
+  // write into this repo's own config/ files.
   const activityPath = join(dirname(configPath), "activity.json");
-  return { port: 0, libraryRoot, configPath, settingsPath, activityPath, downloadsPath: "/nonexistent", webui: null };
+  const dedupeStatePath = join(dirname(configPath), "dedupe-state.json");
+  return {
+    port: 0,
+    libraryRoot,
+    configPath,
+    settingsPath,
+    activityPath,
+    downloadsPath: "/nonexistent",
+    dedupeStatePath,
+    webui: null,
+  };
 }
 
 async function writeMinimalConfig(configPath: string) {

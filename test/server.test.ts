@@ -12,6 +12,7 @@ async function makeScratch() {
   const configPath = join(configDir, "events.json");
   const settingsPath = join(configDir, "settings.json");
   const activityPath = join(configDir, "activity.json");
+  const dedupeStatePath = join(configDir, "dedupe-state.json");
   await fs.writeFile(configPath, JSON.stringify({ shows: [] }) + "\n", "utf-8");
   await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
 
@@ -22,6 +23,7 @@ async function makeScratch() {
     settingsPath,
     activityPath,
     downloadsPath,
+    dedupeStatePath,
     webui: null,
   };
   return { opts, libraryRoot, downloadsPath };
