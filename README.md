@@ -596,13 +596,12 @@ webhook safe to fire twice means it's safe to just retry it on the next
 poll.
 
 **Why this needs its own volume mount**: `DOWNLOADS_DIR` is bind-mounted
-read-only (`docker-compose.yml`) since the app should only ever *copy* from
-Transmission's share, never touch it. The hot folder needs to *move* files
-(into its `processed/` subfolder), so `docker-compose.yml` layers a second,
-more specific read-write mount for just `${DOWNLOADS_DIR}/domestique` on
-top of the read-only one - the rest of the Transmission share stays
-untouched and read-only. Don't merge these two mounts back into one; that
-would make the whole downloads share writable.
+read-write in `docker-compose.yml` (see "Dedupe" under Currently seeding,
+below, for why - it wasn't always). The hot folder specifically needs to
+*move* files (into its own `processed/` subfolder), so `docker-compose.yml`
+still layers a second, more specific mount for just
+`${DOWNLOADS_DIR}/domestique` on top of the main one, kept for its own
+isolation even though both are read-write now.
 
 ### 6. Optional: reseed from your Plex library
 
@@ -744,7 +743,10 @@ directory the reseed feature uses, repoints Transmission at it, and forces
 a real re-verify there - if that verify comes back clean, the chip flips
 to **🔗 Deduped** and a **Delete original copy** button appears (the same
 two-click confirm as Remove & delete files) to reclaim the now-orphaned
-downloads-share copy. If verify *isn't* clean - an unlucky same-size,
+downloads-share copy - this specific action needs Domestique's own
+container to have write access to the downloads share (`DOWNLOADS_DIR` is
+mounted read-write in `docker-compose.yml` for exactly this reason);
+relinking and verifying themselves don't need it. If verify *isn't* clean - an unlucky same-size,
 different-content collision, the one failure mode this app's own
 size-only matching can't rule out - Transmission is automatically
 repointed back to the original location and re-verified there too, so a
@@ -905,6 +907,14 @@ so tweaking it doesn't require a rebuild.
   later remove the torrent from Transmission, delete
   `<staging dir>/<that torrent's folder>` by hand. Safe either way - it's
   only ever hardlinks or copies, never your library originals.
+- **Dedupe's "Delete original copy" needs the downloads share mounted
+  read-write** (`docker-compose.yml`'s `DOWNLOADS_DIR` mount, or the CA
+  template's "Downloads Share" path) - it's the only action in the whole
+  app that ever writes to that share instead of just reading from it. If
+  you'd rather keep that share read-only, add `:ro` back to the mount; the
+  Dedupe relink-and-verify step still works fine either way, only the
+  optional delete-the-original follow-up needs it, and fails with a clear
+  `EROFS` error (not silently) if it's missing.
 
 ## Security posture
 
@@ -993,10 +1003,13 @@ chown -R 99:100 /mnt/user/media/bike-racing      # your LIBRARY_ROOT
 chown -R 99:100 /mnt/user/downloads/domestique   # hot-folder, if used
 ```
 
-The main `/downloads` mount is read-only and needs no ownership change, as
-long as the files are readable by the chosen user (on a default Unraid
-share they are). A fresh install needs none of this: every file gets
-created by the right user from the start.
+The main `/downloads` mount needs no ownership change for normal ingestion
+to keep working, as long as the files are readable by the chosen user (on
+a default Unraid share they are) - only the optional "Delete original
+copy" action (see Dedupe, under Currently seeding) needs write access
+there too, and only for whatever specific files you choose to delete
+through it. A fresh install needs none of this: every file gets created by
+the right user from the start.
 
 ## Testing
 

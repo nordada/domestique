@@ -309,7 +309,11 @@ export async function handleReseedRequest(
       );
       sendJson(res, 200, { ok: true });
     } catch (err) {
-      sendJson(res, 500, { ok: false, error: `Failed to delete "${payload.name}": ${err}` });
+      const hint =
+        (err as NodeJS.ErrnoException)?.code === "EROFS"
+          ? " - the downloads share is mounted read-only; this is the one action in the app that needs it writable (see docker-compose.yml's DOWNLOADS_DIR mount, or the CA template's \"Downloads Share\" path)."
+          : "";
+      sendJson(res, 500, { ok: false, error: `Failed to delete "${payload.name}": ${err}${hint}` });
     }
     return true;
   }

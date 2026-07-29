@@ -53,8 +53,6 @@ services:
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_SECTION_ID: ${PLEX_SECTION_ID:-}
       PLEX_LIBRARY_ROOT: ${PLEX_LIBRARY_ROOT:-}
-      # See the read-write bind mount below: hot-folder ingestion needs its
-      # own mount because the main /downloads mount above is read-only.
       HOTFOLDER_DIR: ${HOTFOLDER_DIR:-}
       HOTFOLDER_POLL_INTERVAL_MS: ${HOTFOLDER_POLL_INTERVAL_MS:-}
       HOTFOLDER_STABLE_POLLS: ${HOTFOLDER_STABLE_POLLS:-}
@@ -76,16 +74,24 @@ services:
       PUID: ${PUID:-}
       PGID: ${PGID:-}
     volumes:
-      # Transmission's completed-downloads share (read-only: we only copy from here).
-      # Mounted at /downloads to match Transmission's own internal path.
-      - ${DOWNLOADS_DIR}:/downloads:ro
-      # Hot-folder drop zone (read-write, unlike the mount above): a more
-      # specific bind mount layered on top of the read-only one, so ONLY
-      # this subtree is writable - needed to move processed originals into
-      # its own processed/ subfolder. Only takes effect if HOTFOLDER_DIR is
-      # set to this same path in .env; otherwise it's just an unused empty
-      # directory. Do NOT merge this into the read-only mount above - that
-      # would make the whole Transmission share writable.
+      # Transmission's completed-downloads share. Mounted at /downloads to
+      # match Transmission's own internal path. Read-write: the normal
+      # ingestion pipeline only ever copies FROM here, but the Reseed tab's
+      # Dedupe feature deletes a torrent's original download-folder copy
+      # once it's confirmed hardlinked to the library instead (a deliberate,
+      # explicit, two-click-confirmed action - see the README's "Currently
+      # seeding" section). Was read-only before that feature existed; if
+      # you'd rather keep this share fully read-only and just skip Dedupe's
+      # delete step, add ":ro" back here - "Delete original copy" will then
+      # fail with EROFS instead (relinking/verifying itself doesn't need
+      # write access here, only that one explicit follow-up action does).
+      - ${DOWNLOADS_DIR}:/downloads
+      # Hot-folder drop zone: a more specific bind mount layered on top of
+      # the one above, kept for its own isolation (only this subtree needs
+      # to exist/be written to for hot-folder ingestion's processed/
+      # subfolder) even though both are read-write now. Only takes effect
+      # if HOTFOLDER_DIR is set to this same path in .env; otherwise it's
+      # just an unused empty directory.
       - ${DOWNLOADS_DIR}/domestique:/downloads/domestique
       # Plex library root (read-write: this is where renamed files land).
       - ${LIBRARY_ROOT}:${LIBRARY_ROOT}
