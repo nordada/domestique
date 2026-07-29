@@ -685,7 +685,13 @@
 <div id="tab-reseed" class="tab-panel hidden">
 
 <section id="reseed-section">
-  <h2>Reseed from library</h2>
+  <div class="toolbar">
+    <h2 style="margin:0">Reseed from library</h2>
+    <div class="row" style="flex:0 0 auto; gap:0.4rem; align-items:center;">
+      <button type="button" class="icon-btn subtle" id="clear-reseed-btn" title="Clear results"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <span class="refresh-flash" id="reseed-clear-flash"></span>
+    </div>
+  </div>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
     Drop a .torrent file for something your tracker says needs seeds. This checks
     whether its content already exists somewhere in your library under a different
@@ -2233,6 +2239,28 @@ async function removeSeedingTorrent(id, torrentName, percentOnDisk, btn) {
   }
 }
 
+/**
+ * Resets the whole Reseed tab back to empty - both the single-file preview
+ * state and the batch queue's results list, whichever was last used (they
+ * share this one section). A completed batch's "no matches found - skipped"
+ * lines otherwise linger indefinitely until the next drop overwrites them;
+ * this lets that be cleared on its own, without needing to drop a new
+ * batch just to get a clean slate.
+ */
+function clearReseedResults() {
+  lastReseedFile = null;
+  lastReseedPlan = null;
+  document.getElementById("reseed-preview-status").textContent = "";
+  document.getElementById("reseed-preview-status").className = "status-msg";
+  document.getElementById("reseed-preview-list").innerHTML = "";
+  document.getElementById("reseed-commit-btn").classList.add("hidden");
+  document.getElementById("reseed-commit-status").textContent = "";
+  document.getElementById("reseed-commit-status").className = "status-msg";
+  document.getElementById("reseed-batch-status").classList.add("hidden");
+  document.getElementById("reseed-batch-status").textContent = "";
+  document.getElementById("reseed-batch-list").innerHTML = "";
+}
+
 async function previewReseedFile(file) {
   lastReseedFile = file;
   lastReseedPlan = null;
@@ -2801,6 +2829,13 @@ document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
 });
 document.getElementById("seeding-search").addEventListener("input", renderSeedingList);
 document.getElementById("seeding-sort").addEventListener("change", renderSeedingList);
+document.getElementById("clear-reseed-btn").addEventListener("click", () => {
+  clearReseedResults();
+  const flashEl = document.getElementById("reseed-clear-flash");
+  flashEl.textContent = "Cleared";
+  clearTimeout(flashEl._clearTimer);
+  flashEl._clearTimer = setTimeout(() => { flashEl.textContent = ""; }, 1500);
+});
 document.getElementById("clear-activity-btn").addEventListener("click", async () => {
   const btn = document.getElementById("clear-activity-btn");
   btn.disabled = true;
