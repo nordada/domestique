@@ -294,6 +294,8 @@ export interface TransmissionTorrentDetail {
   status: number;
   percentDone: number;
   files: TransmissionFileEntry[];
+  /** Where Transmission currently has this torrent's data - used by src/seeding.ts to compute each matched file's real on-disk path for the storage-status (hardlink vs duplicate) check, and by src/dedupe.ts to know where to revert to if a dedupe's verify comes back dirty. */
+  downloadDir: string;
 }
 
 /**
@@ -312,7 +314,7 @@ export async function getAllTorrentsWithFiles(
   const data = await rpcCall(
     config,
     "torrent-get",
-    { fields: ["id", "name", "status", "percentDone", "files"] },
+    { fields: ["id", "name", "status", "percentDone", "files", "downloadDir"] },
     timeoutMs
   );
   return (data.arguments?.torrents ?? []) as TransmissionTorrentDetail[];
@@ -360,4 +362,33 @@ export async function getTorrentLocation(
  */
 export async function removeTorrentAndData(config: TransmissionConfig, id: number, timeoutMs = 10000): Promise<void> {
   await rpcCall(config, "torrent-remove", { ids: [id], "delete-local-data": true }, timeoutMs);
+}
+
+/**
+ * Repoints a torrent's download-dir via RPC `torrent-set-location` with
+ * `move: false` - Transmission just updates its own record to point at
+ * `location`, trusting that the files are already there (they are, staged
+ * via reseedStage.ts's hardlink-with-copy-fallback before this is called -
+ * see src/dedupe.ts). Deliberately does NOT itself verify anything;
+ * `move: false` skips Transmission's own hash check, so a caller that needs
+ * the real safety backstop must follow this with verifyTorrent().
+ */
+export async function setTorrentLocation(
+  config: TransmissionConfig,
+  id: number,
+  location: string,
+  timeoutMs = 10000
+): Promise<void> {
+  await rpcCall(config, "torrent-set-location", { ids: [id], location, move: false }, timeoutMs);
+}
+
+/**
+ * Forces a fresh piece-hash check via RPC `torrent-verify` - the actual
+ * authoritative safety check after setTorrentLocation, mirroring the trust
+ * commitReseed already places in Transmission's own verify rather than this
+ * app's own size-only matching. Only kicks the check off; pollTorrentVerification
+ * (above) is what waits for it to settle.
+ */
+export async function verifyTorrent(config: TransmissionConfig, id: number, timeoutMs = 5000): Promise<void> {
+  await rpcCall(config, "torrent-verify", { ids: [id] }, timeoutMs);
 }

@@ -11,6 +11,8 @@ import {
   getAllTorrentsWithFiles,
   getTorrentLocation,
   removeTorrentAndData,
+  setTorrentLocation,
+  verifyTorrent,
   transmissionWebUrl,
 } from "../src/transmission.js";
 
@@ -404,6 +406,41 @@ test("getAllTorrentsWithFiles requests every torrent (no ids filter) and returns
     assert.deepEqual(result, torrents);
     assert.equal(receivedArgs?.ids, undefined);
     assert.ok((receivedArgs?.fields as string[]).includes("files"));
+    assert.ok((receivedArgs?.fields as string[]).includes("downloadDir"));
+  } finally {
+    await close();
+  }
+});
+
+test("setTorrentLocation sends torrent-set-location with move:false", async () => {
+  let receivedMethod;
+  let receivedArgs;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    receivedMethod = method;
+    receivedArgs = args;
+    return {};
+  });
+  try {
+    await setTorrentLocation({ url }, 12, "/library/.reseed-staging/Some Torrent");
+    assert.equal(receivedMethod, "torrent-set-location");
+    assert.deepEqual(receivedArgs, { ids: [12], location: "/library/.reseed-staging/Some Torrent", move: false });
+  } finally {
+    await close();
+  }
+});
+
+test("verifyTorrent sends torrent-verify with the given id", async () => {
+  let receivedMethod;
+  let receivedArgs;
+  const { url, close } = await startFakeTransmissionRpc((method, args) => {
+    receivedMethod = method;
+    receivedArgs = args;
+    return {};
+  });
+  try {
+    await verifyTorrent({ url }, 12);
+    assert.equal(receivedMethod, "torrent-verify");
+    assert.deepEqual(receivedArgs, { ids: [12] });
   } finally {
     await close();
   }

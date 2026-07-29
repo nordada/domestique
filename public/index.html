@@ -1904,15 +1904,31 @@ function renderSeedingList() {
     const mismatchNote = mismatch
       ? `<span title="Transmission's own percentDone only counts files it considers &quot;wanted&quot; - a torrent with deselected files can report 100% there while having nothing on disk."> (Transmission reports ${Math.round(t.percentDone * 100)}% - some files may be deselected)</span>`
       : "";
+    // Purely informational, independent of the needs-attention badges above
+    // - a full duplicate isn't "wrong", just an opportunity to reclaim disk
+    // space via Dedupe below. "n/a" (not a full match) renders nothing.
+    const storageChip = {
+      deduped:
+        '<span title="This torrent\'s data is hardlinked to its Plex library copy - already deduped, zero extra disk." style="opacity:0.75; font-size:0.8rem; margin-left:0.5rem;">🔗 Deduped</span>',
+      duplicate:
+        '<span title="This torrent\'s data is a separate full copy from its Plex library match - Dedupe below would reclaim this disk space." style="opacity:0.75; font-size:0.8rem; margin-left:0.5rem;">📦 Duplicated</span>',
+      mixed:
+        '<span title="Some of this multi-file torrent\'s data is hardlinked to the library, some isn\'t." style="opacity:0.75; font-size:0.8rem; margin-left:0.5rem;">🔀 Partially deduped</span>',
+    }[t.storageStatus] || "";
+    const dedupeButton =
+      t.storageStatus === "duplicate"
+        ? `<button type="button" data-dedupe="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Dedupe (reclaim disk space)</button>`
+        : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
         <div><strong>${esc(t.plan.torrentName)}</strong>
           <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
-          &nbsp;${percentOnDisk}% on disk${mismatchNote}
+          &nbsp;${percentOnDisk}% on disk${mismatchNote}${storageChip}
         </div>
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
         <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
           ${matchButtons}
+          ${dedupeButton}
           <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}">Remove &amp; delete files</button>
         </div>
       </div>
@@ -1947,6 +1963,100 @@ function renderSeedingList() {
       if (proceed) addSeedingTorrentToLibrary(parseInt(btn.dataset.forceAddToLibrary, 10), torrentName, btn, true);
     });
   });
+
+  listEl.querySelectorAll("[data-dedupe]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const torrentName = btn.dataset.torrentName;
+      const proceed = confirm(
+        `This relinks "${torrentName}" to its Plex library copy and asks Transmission to re-verify it there. If verify comes back clean, the completed-folder copy becomes safe to delete separately (a follow-up button will appear). If verify fails, Transmission is automatically reverted to its original location - nothing is deleted either way. Continue?`
+      );
+      if (proceed) dedupeSeedingTorrent(parseInt(btn.dataset.dedupe, 10), torrentName, btn);
+    });
+  });
+}
+
+/**
+ * Converts a full-duplicate seeding torrent into a hardlink-backed one (see
+ * reseedApi.ts's /api/reseed/dedupe and dedupe.ts's commitDedupe) - relinks
+ * its matched files to the Plex library copy and asks Transmission to
+ * re-verify against them. Deliberately does NOT delete anything itself: on
+ * a clean verify, a follow-up "Delete original copy" button is appended
+ * into #seeding-action-status (two-click arm/confirm, same as Remove &
+ * delete files) so removing the now-orphaned completed-folder file stays a
+ * separate, explicit action. A failed verify means commitDedupe already
+ * auto-reverted Transmission back to its original location server-side -
+ * nothing here is broken, just reported.
+ */
+async function dedupeSeedingTorrent(id, torrentName, btn) {
+  const statusEl = document.getElementById("seeding-action-status");
+  btn.disabled = true;
+  statusEl.textContent = `Relinking "${torrentName}" to its Plex library copy and asking Transmission to re-verify…`;
+  statusEl.className = "status-msg";
+  try {
+    const data = await api("/api/reseed/dedupe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const result = data.result;
+    if (result.staged) {
+      const totalBytes = result.plan.files.reduce((sum, f) => sum + f.length, 0);
+      statusEl.className = "status-msg ok";
+      statusEl.textContent = `"${torrentName}" is now deduped - Transmission verified 100% against the library copy.`;
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "danger";
+      delBtn.style.marginLeft = "0.75rem";
+      const delLabel = `Delete original copy (${formatBytes(totalBytes)})`;
+      delBtn.textContent = delLabel;
+      delBtn.addEventListener("click", () => {
+        armDangerButton(delBtn, delLabel, "CONFIRM", () =>
+          deleteOriginalCopy(result.originalLocation.dir, result.originalLocation.name, delBtn)
+        );
+      });
+      statusEl.appendChild(delBtn);
+      await loadActivity();
+      await loadSeedingList();
+    } else if (result.reverted) {
+      statusEl.className = "status-msg err";
+      statusEl.textContent = `⚠️ Dedupe of "${torrentName}" failed Transmission's verify and was automatically reverted - it's untouched, still seeding from its original location.`;
+      btn.disabled = false;
+      await loadActivity();
+    } else {
+      statusEl.className = "status-msg err";
+      statusEl.textContent = `"${torrentName}" isn't a full, unambiguous match against the library - can't dedupe.`;
+      btn.disabled = false;
+    }
+  } catch (err) {
+    statusEl.className = "status-msg err";
+    statusEl.textContent = `Failed to dedupe "${torrentName}": ${err.message}`;
+    btn.disabled = false;
+  }
+}
+
+/**
+ * Deletes the now-orphaned original download-folder copy of a torrent that
+ * was just successfully deduped (see dedupeSeedingTorrent above) - the
+ * explicit, separate follow-up step, never combined with dedupe itself.
+ * Reports failure on the button's own text rather than touching
+ * #seeding-action-status, since this button lives inside that same element
+ * and overwriting its textContent would delete the button out from under
+ * its own click handler.
+ */
+async function deleteOriginalCopy(dir, name, btn) {
+  btn.disabled = true;
+  try {
+    await api("/api/reseed/delete-original", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir, name }),
+    });
+    btn.textContent = "Deleted";
+    await loadActivity();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = `Delete failed: ${err.message}`;
+  }
 }
 
 /**

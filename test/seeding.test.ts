@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, link, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listSeedingTorrents } from "../src/seeding.js";
@@ -185,6 +185,91 @@ test("listSeedingTorrents never walks the library at all when nothing is seeding
     }
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+  }
+});
+
+test("listSeedingTorrents computes storageStatus by comparing device+inode, not just size, between the on-disk file and its matched library candidate", async () => {
+  const libraryRoot = await makeLibrary();
+  const downloadsRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-downloads-"));
+  try {
+    // "deduped": the on-disk file is a real hardlink to the library file -
+    // same inode, zero extra disk.
+    const dedupedLibraryFile = join(libraryRoot, "Deduped - S2026E01.mp4");
+    await writeFile(dedupedLibraryFile, Buffer.alloc(1000));
+    await link(dedupedLibraryFile, join(downloadsRoot, "Deduped.mp4"));
+
+    // "duplicate": same size, but a genuinely separate file (different inode).
+    await writeFile(join(libraryRoot, "Duplicate - S2026E01.mp4"), Buffer.alloc(2000));
+    await writeFile(join(downloadsRoot, "Duplicate.mp4"), Buffer.alloc(2000));
+
+    // "mixed": a two-file torrent where one file is hardlinked and the other is a plain duplicate.
+    const mixedLibraryA = join(libraryRoot, "Mixed A - S2026E01.mp4");
+    const mixedLibraryB = join(libraryRoot, "Mixed B - S2026E01.mp4");
+    await writeFile(mixedLibraryA, Buffer.alloc(3000));
+    await writeFile(mixedLibraryB, Buffer.alloc(4000));
+    await mkdir(join(downloadsRoot, "Mixed Torrent"), { recursive: true });
+    await link(mixedLibraryA, join(downloadsRoot, "Mixed Torrent", "a.mp4"));
+    await writeFile(join(downloadsRoot, "Mixed Torrent", "b.mp4"), Buffer.alloc(4000));
+
+    // "n/a": nothing in the library matches this size at all - not a full match, no meaningful comparison.
+    await writeFile(join(downloadsRoot, "Unmatched.mp4"), Buffer.alloc(5000));
+
+    const { url, close } = await startFakeTransmissionRpc((method) => {
+      if (method === "torrent-get") {
+        return {
+          torrents: [
+            {
+              id: 1,
+              name: "Deduped.mp4",
+              status: 6,
+              percentDone: 1,
+              downloadDir: downloadsRoot,
+              files: [{ name: "Deduped.mp4", length: 1000, bytesCompleted: 1000 }],
+            },
+            {
+              id: 2,
+              name: "Duplicate.mp4",
+              status: 6,
+              percentDone: 1,
+              downloadDir: downloadsRoot,
+              files: [{ name: "Duplicate.mp4", length: 2000, bytesCompleted: 2000 }],
+            },
+            {
+              id: 3,
+              name: "Mixed Torrent",
+              status: 6,
+              percentDone: 1,
+              downloadDir: downloadsRoot,
+              files: [
+                { name: "Mixed Torrent/a.mp4", length: 3000, bytesCompleted: 3000 },
+                { name: "Mixed Torrent/b.mp4", length: 4000, bytesCompleted: 4000 },
+              ],
+            },
+            {
+              id: 4,
+              name: "Unmatched.mp4",
+              status: 6,
+              percentDone: 1,
+              downloadDir: downloadsRoot,
+              files: [{ name: "Unmatched.mp4", length: 5000, bytesCompleted: 5000 }],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    try {
+      const result = await listSeedingTorrents({ url }, libraryRoot, join(libraryRoot, ".reseed-staging"));
+      assert.equal(result.find((t) => t.id === 1)?.storageStatus, "deduped");
+      assert.equal(result.find((t) => t.id === 2)?.storageStatus, "duplicate");
+      assert.equal(result.find((t) => t.id === 3)?.storageStatus, "mixed");
+      assert.equal(result.find((t) => t.id === 4)?.storageStatus, "n/a");
+    } finally {
+      await close();
+    }
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadsRoot, { recursive: true, force: true });
   }
 });
 

@@ -17,10 +17,12 @@
  */
 
 import { join } from "node:path";
+import { stat, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
 import { listSeedingTorrents } from "./seeding.js";
+import { commitDedupe } from "./dedupe.js";
 import { getTorrentLocation, removeTorrentAndData } from "./transmission.js";
 import { isPathWithin } from "./fileops.js";
 import { recordActivity } from "./activity.js";
@@ -41,7 +43,10 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
  * paused, matched against the library - see listSeedingTorrents in
  * seeding.ts), and /api/reseed/add-to-library (runs a seeding torrent
  * Transmission already has through the normal ingestion pipeline - see
- * below), all backing the Reseed tab. Same "return true if handled"
+ * below), /api/reseed/dedupe (converts a full-duplicate seeding torrent into
+ * a hardlink-backed one - see dedupe.ts) and /api/reseed/delete-original
+ * (the explicit follow-up that removes the now-orphaned original download-
+ * folder copy), all backing the Reseed tab. Same "return true if handled"
  * contract as upload.ts/coverArt.ts, so webui.ts's dispatch chain stays
  * flat. Sits outside handleWebUiRequest's own try/catch (same as those two
  * sibling modules), so body-size and processing errors are handled here
@@ -188,6 +193,123 @@ export async function handleReseedRequest(
       sendJson(res, 200, { ok: true, name: location.name });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to remove torrent: ${err}` });
+    }
+    return true;
+  }
+
+  /**
+   * Converts a seeding torrent's data from a full duplicate (copied the
+   * normal way into both the downloads share and the library, see
+   * fileops.ts's copyIntoLibrary) into a hardlink-backed dedupe - see
+   * dedupe.ts's commitDedupe for the actual mechanics and safety net
+   * (automatic revert on anything but a clean verify). Deliberately does
+   * NOT delete the original download-folder copy itself - that's a
+   * separate, explicit follow-up action (/api/reseed/delete-original
+   * below), matching this app's standing "nothing is ever auto-deleted"
+   * rule everywhere else.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/dedupe") {
+    let payload: { id?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.id !== "number") {
+      sendJson(res, 400, { ok: false, error: "body must include a numeric id" });
+      return true;
+    }
+
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    if (!settings.transmission) {
+      sendJson(res, 400, {
+        ok: false,
+        error: "Transmission isn't configured - set its RPC URL in Settings before deduping.",
+      });
+      return true;
+    }
+    const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
+
+    try {
+      const result = await commitDedupe(payload.id, opts.libraryRoot, stagingRoot, settings.transmission);
+      const lines: string[] = [];
+      if (!result.staged && !result.reverted) {
+        lines.push(
+          `⚠️ "${result.plan.torrentName}" isn't a full, unambiguous match against the library - refusing to dedupe.`
+        );
+      } else if (result.staged) {
+        lines.push(`🔗 deduped "${result.plan.torrentName}" - Transmission verified 100% against the library copy.`);
+      } else {
+        lines.push(
+          `⚠️ dedupe of "${result.plan.torrentName}" failed verify (${
+            result.verify?.errorString || "incomplete"
+          }) - reverted back to its original location, untouched.`
+        );
+      }
+      recordActivity(
+        {
+          timestamp: new Date().toISOString(),
+          torrentName: result.plan.torrentName,
+          lines,
+          reviewWorthy: !result.staged,
+        },
+        opts.activityPath
+      );
+      sendJson(res, 200, { ok: true, result });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to dedupe: ${err}` });
+    }
+    return true;
+  }
+
+  /**
+   * Deletes a single file - only ever called by the UI right after a
+   * successful dedupe, targeting the original download-folder copy that
+   * dedupe's own response reported (see the "Delete original copy" button
+   * in public/index.html). Re-validated with the exact same isPathWithin
+   * confinement to the downloads share the webhook itself uses for a
+   * client-supplied dir/name - never blind-trusted, even though the client
+   * is only ever passing back a path this same API just handed it.
+   * Deliberately not routed through removeTorrentAndData: after a dedupe,
+   * Transmission's own record no longer points at this path at all (it's
+   * been relocated to the staging directory), so there's no torrent-remove
+   * call that would reach this specific orphaned file.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/delete-original") {
+    let payload: { dir?: unknown; name?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.dir !== "string" || typeof payload.name !== "string") {
+      sendJson(res, 400, { ok: false, error: "body must include dir and name" });
+      return true;
+    }
+
+    const targetPath = join(payload.dir, payload.name);
+    if (!isPathWithin(targetPath, opts.downloadsPath)) {
+      sendJson(res, 400, { ok: false, error: "dir/name must resolve inside the downloads share" });
+      return true;
+    }
+
+    try {
+      const info = await stat(targetPath);
+      await rm(targetPath, { recursive: true });
+      recordActivity(
+        {
+          timestamp: new Date().toISOString(),
+          torrentName: payload.name,
+          lines: [`🗑️ deleted the now-deduped original download-folder copy of "${payload.name}" (${info.size} bytes).`],
+          reviewWorthy: false,
+        },
+        opts.activityPath
+      );
+      sendJson(res, 200, { ok: true });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to delete "${payload.name}": ${err}` });
     }
     return true;
   }

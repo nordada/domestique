@@ -551,3 +551,199 @@ test("POST /api/reseed/remove calls torrent-remove with delete-local-data and lo
     await closeTransmission();
   }
 });
+
+test("POST /api/reseed/dedupe without Transmission configured returns 400", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/dedupe`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 1 }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /isn't configured/i);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/dedupe rejects a body without a numeric id", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/dedupe`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/dedupe hardlinks a full-duplicate torrent to the library, verifies clean, and logs success", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const { baseUrl, libraryRoot, settingsPath, activityPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  const libraryFile = join(libraryRoot, "Il Lombardia - S2026E01.mp4");
+  await fs.writeFile(libraryFile, Buffer.alloc(1000));
+  await fs.writeFile(join(downloadsDir, "Il-Lombardia-2026.mp4"), Buffer.alloc(1000));
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get") {
+      if (args?.ids === undefined) {
+        return {
+          torrents: [
+            {
+              id: 6,
+              name: "Il-Lombardia-2026.mp4",
+              status: 6,
+              percentDone: 1,
+              downloadDir: downloadsDir,
+              files: [{ name: "Il-Lombardia-2026.mp4", length: 1000, bytesCompleted: 1000 }],
+            },
+          ],
+        };
+      }
+      return { torrents: [{ id: 6, status: 6, error: 0, errorString: "", percentDone: 1 }] };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/dedupe`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 6 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.result.staged, true);
+    assert.deepEqual(body.result.originalLocation, { dir: downloadsDir, name: "Il-Lombardia-2026.mp4" });
+
+    const stagedPath = join(body.result.perTorrentDir, "Il-Lombardia-2026.mp4");
+    const [stagedStat, libraryStat] = await Promise.all([fs.stat(stagedPath), fs.stat(libraryFile)]);
+    assert.equal(stagedStat.ino, libraryStat.ino);
+
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activity[0].reviewWorthy, false);
+    assert.match(activity[0].lines.join("\n"), /deduped/i);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/reseed/dedupe refuses a torrent that isn't a full match, with no side effects, and logs it as review-worthy", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const { baseUrl, settingsPath, activityPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  await fs.writeFile(join(downloadsDir, "Nothing-Like-This.mp4"), Buffer.alloc(999999));
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get" && args?.ids === undefined) {
+      return {
+        torrents: [
+          {
+            id: 7,
+            name: "Nothing-Like-This.mp4",
+            status: 6,
+            percentDone: 1,
+            downloadDir: downloadsDir,
+            files: [{ name: "Nothing-Like-This.mp4", length: 999999, bytesCompleted: 999999 }],
+          },
+        ],
+      };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/dedupe`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 7 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.staged, false);
+    assert.equal(body.result.reverted, false);
+
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activity[0].reviewWorthy, true);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/reseed/delete-original rejects a body without dir/name", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/delete-original`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/delete-original refuses a path outside the downloads share", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const outsideDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-outside-"));
+  const { baseUrl, close } = await makeScratchServer(downloadsDir);
+  const outsideFile = join(outsideDir, "secret.txt");
+  await fs.writeFile(outsideFile, "should never be deleted");
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/delete-original`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ dir: outsideDir, name: "secret.txt" }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /resolve inside the downloads share/);
+    assert.equal(await fs.readFile(outsideFile, "utf-8"), "should never be deleted");
+  } finally {
+    await close();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/reseed/delete-original deletes the file and logs an activity entry", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const { baseUrl, activityPath, close } = await makeScratchServer(downloadsDir);
+  const filePath = join(downloadsDir, "Il-Lombardia-2026.mp4");
+  await fs.writeFile(filePath, Buffer.alloc(1000));
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/delete-original`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ dir: downloadsDir, name: "Il-Lombardia-2026.mp4" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    await assert.rejects(() => fs.stat(filePath));
+
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.match(activity[0].lines.join("\n"), /deleted the now-deduped original/i);
+  } finally {
+    await close();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+  }
+});

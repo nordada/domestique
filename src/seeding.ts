@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
 import { getAllTorrentsWithFiles, type TransmissionConfig } from "./transmission.js";
@@ -52,13 +54,58 @@ export interface SeedingTorrent {
   percentComplete: number;
   /** Size-matched against the *current* library, the same way reseedMatch.ts matches a torrent file's own expected layout - not persisted, not tied to whether this torrent was ever reseeded through this app. A torrent reseeded through the Reseed tab still resolves correctly here: its staged files live under the (excluded) staging directory, but the original library file it was hardlinked from is still found by the same size search. */
   plan: ReseedPlan;
+  /**
+   * Whether this torrent's on-disk data (wherever Transmission currently
+   * has it) is the same physical bytes as its matched library file(s), or a
+   * separate full duplicate - see dedupe.ts, whose whole point is
+   * converting "duplicate" into "deduped" on purpose. "n/a" when the plan
+   * isn't a full, unambiguous match (nothing meaningful to compare against),
+   * "mixed" for a multi-file torrent where only some files have been
+   * hand-relinked - reported honestly rather than collapsed into one bucket.
+   */
+  storageStatus: StorageStatus;
 }
+
+export type StorageStatus = "deduped" | "duplicate" | "mixed" | "n/a";
 
 function computePercentComplete(files: { length: number; bytesCompleted: number }[]): number {
   const totalLength = files.reduce((sum, f) => sum + f.length, 0);
   if (totalLength === 0) return 0;
   const totalCompleted = files.reduce((sum, f) => sum + f.bytesCompleted, 0);
   return totalCompleted / totalLength;
+}
+
+/**
+ * Compares each matched file's real on-disk bytes (at Transmission's own
+ * downloadDir) against the library file reseedMatch.ts found for it, via
+ * device+inode equality - the only reliable way to tell "this is the same
+ * hardlinked file" from "this happens to be the same size" without hashing
+ * file contents outright. A file that can't be stat'd (e.g. genuinely
+ * missing from downloadDir - a separate, already-surfaced problem via the
+ * percentComplete mismatch note) is conservatively treated as NOT deduped
+ * rather than silently skipped, since claiming "deduped" is a safety-
+ * relevant claim this app should never get wrong optimistically.
+ */
+async function computeStorageStatus(plan: ReseedPlan, downloadDir: string): Promise<StorageStatus> {
+  if (plan.matchedCount !== plan.files.length) return "n/a";
+
+  let anyDeduped = false;
+  let anyDuplicate = false;
+  for (const file of plan.files) {
+    if (!file.candidate) continue; // zero-length match - nothing physical to compare
+    try {
+      const [onDisk, library] = await Promise.all([stat(join(downloadDir, file.relativePath)), stat(file.candidate)]);
+      if (onDisk.dev === library.dev && onDisk.ino === library.ino) {
+        anyDeduped = true;
+      } else {
+        anyDuplicate = true;
+      }
+    } catch {
+      anyDuplicate = true;
+    }
+  }
+  if (anyDeduped && anyDuplicate) return "mixed";
+  return anyDeduped ? "deduped" : "duplicate";
 }
 
 /**
@@ -82,15 +129,21 @@ export async function listSeedingTorrents(
 
   const sizeIndex = await buildSizeIndex(libraryRoot, { excludeDirs: [stagingRoot] });
 
-  return relevant.map((t) => ({
-    id: t.id,
-    name: t.name,
-    status: t.status,
-    percentDone: t.percentDone,
-    percentComplete: computePercentComplete(t.files),
-    plan: buildReseedPlan(
-      { name: t.name, files: t.files.map((f) => ({ relativePath: f.name, length: f.length })) },
-      sizeIndex
-    ),
-  }));
+  return Promise.all(
+    relevant.map(async (t) => {
+      const plan = buildReseedPlan(
+        { name: t.name, files: t.files.map((f) => ({ relativePath: f.name, length: f.length })) },
+        sizeIndex
+      );
+      return {
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        percentDone: t.percentDone,
+        percentComplete: computePercentComplete(t.files),
+        plan,
+        storageStatus: await computeStorageStatus(plan, t.downloadDir),
+      };
+    })
+  );
 }

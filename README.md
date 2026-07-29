@@ -733,6 +733,27 @@ looking at surface at the top instead of getting lost among everything
 that's already fine; switching to "Name (A-Z)" sorts the list plainly
 alphabetically instead.
 
+Normal ingestion always copies a torrent's data into the library rather
+than hardlinking it (see "How staging actually touches your files" above -
+that's specific to reseed staging, not the normal copy pipeline), so every
+torrent filed the ordinary way costs disk space twice: once in the
+downloads share, once again in the library. A fully-matched, still-duplicated entry
+shows a **📦 Duplicated** chip and a **Dedupe (reclaim disk space)**
+button. Dedupe hardlinks the matched library file into the same staging
+directory the reseed feature uses, repoints Transmission at it, and forces
+a real re-verify there - if that verify comes back clean, the chip flips
+to **🔗 Deduped** and a **Delete original copy** button appears (the same
+two-click confirm as Remove & delete files) to reclaim the now-orphaned
+downloads-share copy. If verify *isn't* clean - an unlucky same-size,
+different-content collision, the one failure mode this app's own
+size-only matching can't rule out - Transmission is automatically
+repointed back to the original location and re-verified there too, so a
+torrent that was seeding fine before Dedupe can never end up broken by it;
+nothing is ever deleted unless the relink was actually confirmed good
+first. A multi-file torrent that's only partly relinked (by hand, outside
+this app) shows **🔀 Partially deduped** instead, with no action offered -
+only a full, unambiguous match is ever deduped automatically.
+
 ### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after
