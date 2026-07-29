@@ -677,18 +677,23 @@
     reseed. Matching here is size-only and can be wrong; Transmission's own
     piece-hash verify after Stage &amp; hand off is what actually confirms a real
     match, so always Preview first and check the verify percentage afterward.
+    Drop more than one .torrent at once to queue them: a torrent that matches
+    completely stages and hands off automatically, one at a time; anything
+    partial pauses the queue for your call before moving on.
   </p>
   <div id="reseed-dropzone">
-    <button class="primary" id="reseed-pick-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>Choose .torrent file…</button>
-    <span class="dropzone-hint">or drag a .torrent file here</span>
+    <button class="primary" id="reseed-pick-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>Choose .torrent file(s)…</button>
+    <span class="dropzone-hint">or drag .torrent file(s) here</span>
   </div>
-  <input type="file" id="reseed-file-input" class="hidden" accept=".torrent">
+  <input type="file" id="reseed-file-input" class="hidden" accept=".torrent" multiple>
   <div id="reseed-preview-status" class="status-msg"></div>
   <div id="reseed-preview-list" style="font-size:0.85rem; margin-top:0.5rem;"></div>
   <div class="actions">
     <button class="primary hidden" id="reseed-commit-btn">Stage &amp; hand to Transmission</button>
   </div>
   <div id="reseed-commit-status" class="status-msg"></div>
+  <div id="reseed-batch-status" class="status-msg hidden"></div>
+  <div id="reseed-batch-list"></div>
 </section>
 
 <section id="seeding-section">
@@ -1798,6 +1803,11 @@ async function previewReseedFile(file) {
   document.getElementById("reseed-commit-status").textContent = "";
   document.getElementById("reseed-commit-status").className = "status-msg";
   document.getElementById("reseed-preview-list").innerHTML = "";
+  // Batch mode and single-file mode share the same section - clear any
+  // leftover batch UI so switching back to a single file doesn't leave it
+  // visible alongside the new single-file state.
+  document.getElementById("reseed-batch-status").classList.add("hidden");
+  document.getElementById("reseed-batch-list").innerHTML = "";
   const statusEl = document.getElementById("reseed-preview-status");
   statusEl.textContent = `Checking "${file.name}" against the library…`;
   statusEl.className = "status-msg";
@@ -1814,6 +1824,35 @@ async function previewReseedFile(file) {
   }
 }
 
+/** Shared by the single-file and batch commit paths - turns a /api/reseed/commit result into display lines + an overall ok/err verdict, so the two UIs stay consistent instead of drifting. */
+function commitResultLines(r) {
+  const lines = [];
+  let ok = false;
+  if (!r.staged) {
+    lines.push(`No matches found for "${r.torrentName}" - nothing staged.`);
+  } else {
+    lines.push(`Staged ${r.stagedFiles.length}/${r.files.length} file(s) for "${r.torrentName}".`);
+    const verify = r.transmission && r.transmission.verify;
+    if (verify) {
+      if (verify.error) {
+        lines.push(`Transmission reports an error after verifying: ${verify.errorString}`);
+      } else if (verify.percentDone === 1) {
+        lines.push(
+          r.transmission.started
+            ? "Transmission verified 100% of this torrent's data and started seeding."
+            : "Transmission verified 100% of this torrent's data, but couldn't be started automatically - start it manually in Transmission."
+        );
+      } else {
+        lines.push(`Transmission verified only ${Math.round(verify.percentDone * 100)}% of this torrent's data - left paused for review.`);
+      }
+      ok = !verify.error && verify.percentDone === 1 && r.transmission.started;
+    } else {
+      lines.push("Added to Transmission, but couldn't confirm its verify result after polling - check Transmission directly.");
+    }
+  }
+  return { lines, ok };
+}
+
 async function commitReseedFile() {
   if (!lastReseedFile || !lastReseedPlan) return;
   if (lastReseedPlan.ambiguousCount > 0 || lastReseedPlan.unmatchedCount > 0) {
@@ -1827,39 +1866,129 @@ async function commitReseedFile() {
   statusEl.className = "status-msg";
   try {
     const data = await api("/api/reseed/commit", { method: "POST", body: lastReseedFile });
-    const r = data.result;
-    const lines = [];
-    let ok = false;
-    if (!r.staged) {
-      lines.push(`No matches found for "${r.torrentName}" - nothing staged.`);
-    } else {
-      lines.push(`Staged ${r.stagedFiles.length}/${r.files.length} file(s) for "${r.torrentName}".`);
-      const verify = r.transmission && r.transmission.verify;
-      if (verify) {
-        if (verify.error) {
-          lines.push(`Transmission reports an error after verifying: ${verify.errorString}`);
-        } else if (verify.percentDone === 1) {
-          lines.push(
-            r.transmission.started
-              ? "Transmission verified 100% of this torrent's data and started seeding."
-              : "Transmission verified 100% of this torrent's data, but couldn't be started automatically - start it manually in Transmission."
-          );
-        } else {
-          lines.push(`Transmission verified only ${Math.round(verify.percentDone * 100)}% of this torrent's data - left paused for review.`);
-        }
-        ok = !verify.error && verify.percentDone === 1 && r.transmission.started;
-      } else {
-        lines.push("Added to Transmission, but couldn't confirm its verify result after polling - check Transmission directly.");
-      }
-    }
+    const { lines, ok } = commitResultLines(data.result);
     statusEl.textContent = lines.join("\n");
     statusEl.className = `status-msg ${ok ? "ok" : "err"}`;
     await loadActivity();
-    if (r.staged) await loadSeedingList();
+    if (data.result.staged) await loadSeedingList();
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;
     statusEl.className = "status-msg err";
   }
+}
+
+/**
+ * Batch mode (2+ files dropped/picked at once): processes each torrent in
+ * sequence via the same /api/reseed/preview + /api/reseed/commit calls the
+ * single-file flow uses - a torrent that matches completely stages and
+ * hands off automatically, one at a time, so a pile of clean reseeds
+ * doesn't need a click each; anything partial (ambiguous/unmatched
+ * entries) pauses the whole queue and waits for an explicit "stage anyway"
+ * or "skip" on that one torrent before moving to the next, same judgment
+ * call the single-file flow's confirm() dialog asks for. A single dropped
+ * file never goes through this path at all - see previewReseedFile/
+ * commitReseedFile above, which still require an explicit Stage click
+ * even on a clean match.
+ */
+async function processReseedBatch(files) {
+  const statusEl = document.getElementById("reseed-batch-status");
+  const listEl = document.getElementById("reseed-batch-list");
+  statusEl.classList.remove("hidden");
+  statusEl.className = "status-msg";
+  listEl.innerHTML = "";
+
+  // Batch mode and single-file mode share the same section - clear the
+  // single-file UI so switching between them never leaves stale state
+  // from the other mode visible at the same time.
+  lastReseedFile = null;
+  lastReseedPlan = null;
+  document.getElementById("reseed-preview-status").textContent = "";
+  document.getElementById("reseed-preview-list").innerHTML = "";
+  document.getElementById("reseed-commit-status").textContent = "";
+  document.getElementById("reseed-commit-btn").classList.add("hidden");
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    statusEl.textContent = `Checking ${i + 1}/${files.length}: "${file.name}"…`;
+
+    const itemEl = document.createElement("div");
+    itemEl.style.marginBottom = "1rem";
+    itemEl.style.paddingBottom = "0.75rem";
+    itemEl.style.borderBottom = "1px solid var(--border)";
+    itemEl.textContent = `Checking "${file.name}"…`;
+    listEl.appendChild(itemEl);
+
+    let plan;
+    try {
+      const data = await api("/api/reseed/preview", { method: "POST", body: file });
+      plan = data.plan;
+    } catch (err) {
+      itemEl.innerHTML = `<strong>${esc(file.name)}</strong><div class="status-msg err" style="display:block; margin-top:0.25rem;">Preview failed: ${esc(err.message)}</div>`;
+      continue;
+    }
+
+    if (plan.matchedCount === 0) {
+      // Nothing stageable either way (commitReseed itself refuses to touch
+      // anything at matchedCount 0), so this always auto-skips rather than
+      // pausing - but say *why*, since "ambiguous, found candidates but
+      // couldn't pick one" reads very differently from "not in the library
+      // at all".
+      const reason =
+        plan.ambiguousCount > 0
+          ? `${plan.ambiguousCount} file(s) had multiple same-size candidates in the library, but nothing was unambiguous - skipped.`
+          : "No matches found in the library - skipped.";
+      itemEl.innerHTML = `<strong>${esc(plan.torrentName)}</strong><div class="status-msg" style="display:block; margin-top:0.25rem;">${esc(reason)}</div>`;
+      continue;
+    }
+
+    if (plan.matchedCount === plan.files.length) {
+      itemEl.innerHTML = `<strong>${esc(plan.torrentName)}</strong><div style="margin-top:0.25rem;">Full match (${plan.matchedCount}/${plan.files.length}) - staging…</div>`;
+      await commitBatchItem(file, itemEl);
+      continue;
+    }
+
+    statusEl.textContent = `Waiting for your decision on "${plan.torrentName}" (${i + 1}/${files.length})…`;
+    await pauseForBatchDecision(file, plan, itemEl);
+  }
+
+  statusEl.textContent = `Done - processed ${files.length} file(s).`;
+  await loadActivity();
+  await loadSeedingList();
+}
+
+async function commitBatchItem(file, itemEl) {
+  try {
+    const data = await api("/api/reseed/commit", { method: "POST", body: file });
+    const { lines, ok } = commitResultLines(data.result);
+    itemEl.innerHTML = `<strong>${esc(data.result.torrentName)}</strong><div class="status-msg ${ok ? "ok" : "err"}" style="display:block; margin-top:0.25rem;">${esc(lines.join("\n")).replace(/\n/g, "<br>")}</div>`;
+  } catch (err) {
+    itemEl.innerHTML = `<strong>${esc(file.name)}</strong><div class="status-msg err" style="display:block; margin-top:0.25rem;">Commit failed: ${esc(err.message)}</div>`;
+  }
+}
+
+/** Pauses the batch loop on one partial/ambiguous torrent until the user picks "stage anyway" or "skip" - the resolved Promise is what processReseedBatch awaits before moving to the next file. */
+function pauseForBatchDecision(file, plan, itemEl) {
+  return new Promise((resolve) => {
+    const summary = `${plan.matchedCount} matched, ${plan.ambiguousCount} ambiguous, ${plan.unmatchedCount} unmatched (of ${plan.files.length}).`;
+    itemEl.innerHTML = `
+      <strong>${esc(plan.torrentName)}</strong>
+      <div style="font-size:0.85rem; margin:0.35rem 0;">${esc(summary)}</div>
+      <div style="font-size:0.85rem; margin-bottom:0.5rem;">${planFilesHtml(plan.files)}</div>
+      <div class="row" style="gap:0.5rem; flex:0 0 auto;">
+        <button type="button" class="primary" data-action="commit">Stage anyway (partial)</button>
+        <button type="button" data-action="skip">Skip this one</button>
+      </div>
+    `;
+    itemEl.querySelector('[data-action="commit"]').addEventListener("click", async () => {
+      itemEl.innerHTML = `<strong>${esc(plan.torrentName)}</strong><div style="margin-top:0.25rem;">Staging…</div>`;
+      await commitBatchItem(file, itemEl);
+      resolve();
+    });
+    itemEl.querySelector('[data-action="skip"]').addEventListener("click", () => {
+      itemEl.innerHTML = `<strong>${esc(plan.torrentName)}</strong><div class="status-msg" style="display:block; margin-top:0.25rem;">Skipped.</div>`;
+      resolve();
+    });
+  });
 }
 
 async function addTorrentFiles(fileList) {
@@ -2337,9 +2466,17 @@ document.getElementById("upload-folder-input").addEventListener("change", (e) =>
   if (e.target.files.length > 0) uploadFolder(e.target.files);
   e.target.value = "";
 });
+// A single file keeps the deliberate explicit-Stage-click flow
+// (previewReseedFile/commitReseedFile); 2+ at once switches to the
+// auto-continuing queue (processReseedBatch) - see its own doc comment for
+// why the line is drawn there.
+function handleReseedFiles(files) {
+  if (files.length === 1) previewReseedFile(files[0]);
+  else if (files.length > 1) processReseedBatch(files);
+}
 document.getElementById("reseed-pick-btn").addEventListener("click", () => document.getElementById("reseed-file-input").click());
 document.getElementById("reseed-file-input").addEventListener("change", (e) => {
-  if (e.target.files.length > 0) previewReseedFile(e.target.files[0]);
+  handleReseedFiles(Array.from(e.target.files));
   e.target.value = "";
 });
 {
@@ -2361,7 +2498,7 @@ document.getElementById("reseed-file-input").addEventListener("change", (e) => {
     dragDepth = 0;
     dropzone.classList.remove("dragover");
     const files = Array.from(e.dataTransfer.files).filter((f) => f.name.toLowerCase().endsWith(".torrent"));
-    if (files.length > 0) previewReseedFile(files[0]);
+    handleReseedFiles(files);
   });
 }
 document.getElementById("reseed-commit-btn").addEventListener("click", commitReseedFile);
