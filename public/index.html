@@ -134,6 +134,10 @@
   button svg { flex: 0 0 auto; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   button.danger { color: var(--err); border-color: var(--err); }
+  /* The armed (post-first-click) state of a two-click danger confirm -
+     see armDangerButton() - deliberately loud (solid fill, bold) since a
+     second click on it is irreversible. */
+  button.danger.armed { background: var(--err); color: #fff; border-color: var(--err); font-weight: 700; }
   button:hover { opacity: 0.85; }
   h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
   h3:first-child { margin-top: 0; }
@@ -1860,21 +1864,24 @@ function renderSeedingList() {
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
         <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
           ${matchButtons}
-          <button type="button" class="danger" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}">Remove &amp; delete files</button>
+          <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}">Remove &amp; delete files</button>
         </div>
       </div>
     `;
   }).join("");
 
   listEl.querySelectorAll("[data-remove-torrent]").forEach((btn) => {
-    btn.addEventListener("click", () =>
-      removeSeedingTorrent(
-        parseInt(btn.dataset.removeTorrent, 10),
-        btn.dataset.torrentName,
-        parseInt(btn.dataset.percentOnDisk, 10),
-        btn
-      )
-    );
+    const originalLabel = btn.textContent;
+    btn.addEventListener("click", () => {
+      armDangerButton(btn, originalLabel, "CONFIRM", () =>
+        removeSeedingTorrent(
+          parseInt(btn.dataset.removeTorrent, 10),
+          btn.dataset.torrentName,
+          parseInt(btn.dataset.percentOnDisk, 10),
+          btn
+        )
+      );
+    });
   });
 
   listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
@@ -1941,15 +1948,40 @@ async function addSeedingTorrentToLibrary(id, torrentName, btn, force) {
  * the Plex library), both spelled out in the confirm() dialog before this
  * ever sends a request.
  */
-async function removeSeedingTorrent(id, torrentName, percentOnDisk, btn) {
-  const proceed = confirm(
-    `Permanently remove "${torrentName}" from Transmission and delete its downloaded data from disk (currently ${percentOnDisk}% of its bytes are actually present on disk)? This cannot be undone. It does NOT touch anything already filed in your Plex library.`
-  );
-  if (!proceed) return;
+/**
+ * Two-click confirm for an irreversible action, in place of a native
+ * confirm() popup: first click swaps the button to a loud "armed" state
+ * (see the .danger.armed CSS rule) showing confirmLabel; a second click
+ * while still armed actually runs onConfirm. Auto-disarms itself after
+ * DANGER_ARM_MS if no second click comes - an armed button must never
+ * stay armed indefinitely, since that would turn an accidental later
+ * click into an unintended irreversible action.
+ */
+const DANGER_ARM_MS = 4000;
 
+function armDangerButton(btn, originalLabel, confirmLabel, onConfirm) {
+  if (btn.dataset.armed === "1") {
+    clearTimeout(btn._disarmTimer);
+    disarmDangerButton(btn, originalLabel);
+    onConfirm();
+    return;
+  }
+  btn.dataset.armed = "1";
+  btn.textContent = confirmLabel;
+  btn.classList.add("armed");
+  btn._disarmTimer = setTimeout(() => disarmDangerButton(btn, originalLabel), DANGER_ARM_MS);
+}
+
+function disarmDangerButton(btn, originalLabel) {
+  btn.dataset.armed = "";
+  btn.textContent = originalLabel;
+  btn.classList.remove("armed");
+}
+
+async function removeSeedingTorrent(id, torrentName, percentOnDisk, btn) {
   const statusEl = document.getElementById("seeding-action-status");
   btn.disabled = true;
-  statusEl.textContent = `Removing "${torrentName}" from Transmission…`;
+  statusEl.textContent = `Removing "${torrentName}" from Transmission and deleting its downloaded data (${percentOnDisk}% of its bytes were on disk) - this does not touch anything already filed in your Plex library…`;
   statusEl.className = "status-msg";
   try {
     await api("/api/reseed/remove", {

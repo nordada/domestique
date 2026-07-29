@@ -706,9 +706,11 @@ Transmission-only action (`torrent-remove` with `delete-local-data`) -
 it removes the torrent and deletes its downloaded data from disk, but
 never touches anything already filed in your Plex library, and never
 could, since it's a completely separate tree Transmission doesn't know
-the path to. Irreversible, gated behind a confirmation dialog that spells
-out exactly what it does (including the real percentage below, not
-Transmission's own, see the next paragraph) before anything happens.
+the path to. Irreversible, so it's a two-click confirm rather than a
+single button press: the first click turns it into a loud red "CONFIRM"
+(auto-reverting after a few seconds if you don't follow through), and only
+a second click while it's in that state actually removes anything - no
+browser popup involved.
 
 **The percentage shown is deliberately not Transmission's own
 `percentDone`.** Transmission only counts files it considers "wanted"
