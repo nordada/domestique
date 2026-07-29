@@ -1001,6 +1001,10 @@ function esc(s) {
 const ICON_REFRESH = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 const ICON_CHECK_CIRCLE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+// Simple stroke-drawn hammer (handle + a tilted head near the top) rather
+// than a specific icon library's glyph - the "Force file as new version"
+// button on the Currently seeding list.
+const ICON_HAMMER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="15" y1="9" x2="6" y2="18"/><rect x="13" y="2.5" width="8" height="5" rx="1" transform="rotate(45 17 5)"/></svg>';
 
 function showTab(name) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
@@ -1817,8 +1821,13 @@ function renderSeedingList() {
     const statusLabel = t.status === 6 ? "Seeding" : "Paused";
     const statusClass = t.status === 6 ? "ok" : "";
     const needsAttention = t.plan.matchedCount < t.plan.files.length;
-    const addBtn = needsAttention
-      ? `<button type="button" data-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" style="margin-top:0.5rem;">Add to Plex library</button>`
+    const actions = needsAttention
+      ? `
+        <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
+          <button type="button" data-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Add to Plex library</button>
+          <button type="button" class="icon-btn subtle" data-force-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" title="Force file as new version - bypasses the &quot;already have this release&quot; check">${ICON_HAMMER}</button>
+        </div>
+      `
       : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
@@ -1827,15 +1836,24 @@ function renderSeedingList() {
           &nbsp;${Math.round(t.percentDone * 100)}%
         </div>
         <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
-        ${addBtn}
+        ${actions}
       </div>
     `;
   }).join("");
 
   listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
     btn.addEventListener("click", () =>
-      addSeedingTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn.dataset.torrentName, btn)
+      addSeedingTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn.dataset.torrentName, btn, false)
     );
+  });
+  listEl.querySelectorAll("[data-force-add-to-library]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const torrentName = btn.dataset.torrentName;
+      const proceed = confirm(
+        `This bypasses the "already have this release" check for "${torrentName}" and files it as a separate version regardless of what's already in the library. Only do this if you've confirmed the existing file is wrong or genuinely different. Continue?`
+      );
+      if (proceed) addSeedingTorrentToLibrary(parseInt(btn.dataset.forceAddToLibrary, 10), torrentName, btn, true);
+    });
   });
 }
 
@@ -1844,23 +1862,29 @@ function renderSeedingList() {
  * parse/match/copy pipeline (see reseedApi.ts's /api/reseed/add-to-library)
  * - for the case where the torrent's data was never filed into Plex at
  * all, or the filed copy is gone, rather than the size-matching this tab
- * otherwise relies on. The result is shown in the section-level
+ * otherwise relies on. `force` (the hammer-icon button, gated behind a
+ * confirm() above) bypasses the "already have this release" dedupe check
+ * and always files a distinctly-tagged copy - for when that check gets it
+ * wrong (e.g. the existing file shares a broadcaster tag but is actually a
+ * different release). The result is shown in the section-level
  * #seeding-action-status, not inline in the (about to be replaced) list
  * item - loadSeedingList() below does a full re-render of #seeding-list to
  * reflect the new match state, which would otherwise wipe out a
  * message shown inside that same container before there was any chance to
  * read it.
  */
-async function addSeedingTorrentToLibrary(id, torrentName, btn) {
+async function addSeedingTorrentToLibrary(id, torrentName, btn, force) {
   const statusEl = document.getElementById("seeding-action-status");
   btn.disabled = true;
-  statusEl.textContent = `Adding "${torrentName}" to Plex library…`;
+  statusEl.textContent = force
+    ? `Forcing "${torrentName}" into the Plex library as a new version…`
+    : `Adding "${torrentName}" to Plex library…`;
   statusEl.className = "status-msg";
   try {
     const data = await api("/api/reseed/add-to-library", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, force }),
     });
     renderUploadResults(statusEl, data.results);
     statusEl.textContent = `"${torrentName}":\n${statusEl.textContent}`;

@@ -58,7 +58,16 @@ export interface TorrentDonePayload {
   hash?: string;
 }
 
-export async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOptions) {
+/**
+ * `force`, when true, bypasses copyIntoLibrary's "destination already
+ * exists" skip for every file in this batch - the Reseed tab's "Force file
+ * as new version" action, a deliberate human override for the (fairly
+ * common) case where the heuristics conclude "same broadcaster, already
+ * have it" but the file is actually different. Always false for the
+ * webhook/hot-folder/upload paths, which never pass a third argument -
+ * only reachable via reseedApi.ts's /api/reseed/add-to-library.
+ */
+export async function handleTorrentDone(payload: TorrentDonePayload, opts: ServerOptions, force = false) {
   const results: Array<{
     sourceFile: string;
     status: string;
@@ -109,7 +118,8 @@ export async function handleTorrentDone(payload: TorrentDonePayload, opts: Serve
       plan.destFilename,
       plan.episode,
       item.parsed.resolution,
-      item.parsed.broadcaster
+      item.parsed.broadcaster,
+      force
     );
 
     if (outcome.status === "copied" && outcome.warning) {

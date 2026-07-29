@@ -92,6 +92,83 @@ test("quality-aware copy: exact duplicate destination is skipped", async () => {
   assert.match(second.reason, /already exists/);
 });
 
+test("force: bypasses the duplicate-destination skip and files a distinctly-tagged copy instead, without touching the original", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const first = await makeSourceFile(sourceDir, "a.mp4", "original bytes");
+  const second = await makeSourceFile(sourceDir, "b.mp4", "different bytes, same everything else");
+
+  const firstOutcome = await copyIntoLibrary(first, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null);
+  assertCopied(firstOutcome);
+
+  const forced = await copyIntoLibrary(
+    second,
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01.mp4",
+    1,
+    null,
+    null,
+    true
+  );
+  assertCopied(forced);
+  assert.notEqual(forced.destPath, firstOutcome.destPath);
+  assert.match(forced.destPath, /REVIEW - forced/);
+  assert.match(forced.warning ?? "", /forced past an existing file/i);
+
+  // The original is untouched - still there, still its original bytes.
+  assert.equal(await fs.readFile(firstOutcome.destPath, "utf-8"), "original bytes");
+  assert.equal(await fs.readFile(forced.destPath, "utf-8"), "different bytes, same everything else");
+});
+
+test("force: still refuses to overwrite even the forced filename if that's also somehow already taken", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+  const src = await makeSourceFile(sourceDir, "a.mp4");
+
+  await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null);
+  // Pre-occupy the exact path the forced retry would use.
+  await fs.writeFile(join(libraryRoot, destDir, "TestShow - S2026E01 - REVIEW - forced.mp4"), "already here");
+
+  const result = await copyIntoLibrary(src, libraryRoot, destDir, "TestShow - S2026E01.mp4", 1, null, null, true);
+  assertSkipped(result);
+  assert.match(result.reason, /already exists/);
+  // Confirms it didn't overwrite the pre-existing forced file either.
+  assert.equal(
+    await fs.readFile(join(libraryRoot, destDir, "TestShow - S2026E01 - REVIEW - forced.mp4"), "utf-8"),
+    "already here"
+  );
+});
+
+test("force: does NOT bypass the lower-resolution skip - only the plain duplicate-destination one", async () => {
+  const { libraryRoot, sourceDir } = await makeScratch();
+  const destDir = "TestShow/Season 2026";
+
+  await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "hi.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1 - pt01.mp4",
+    1,
+    720,
+    null
+  );
+
+  const lowRes = await copyIntoLibrary(
+    await makeSourceFile(sourceDir, "lo.mp4"),
+    libraryRoot,
+    destDir,
+    "TestShow - S2026E01 - Stage 1.mp4",
+    1,
+    480,
+    null,
+    true
+  );
+
+  assertSkipped(lowRes);
+  assert.match(lowRes.reason, /lower resolution/);
+});
+
 test("quality-aware copy: lower-resolution re-release for an archived episode is skipped", async () => {
   const { libraryRoot, sourceDir } = await makeScratch();
   const destDir = "TestShow/Season 2026";

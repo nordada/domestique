@@ -17,7 +17,7 @@
  */
 
 import { promises as fs } from "node:fs";
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { mergeParsed, parseName, type ParsedName } from "./parser.js";
 
 /**
@@ -180,6 +180,17 @@ async function saveSeasonMeta(
  *   file it as its own tagged alternate instead - see the real incident
  *   this fixed, where NBC alternates for untracked episodes were getting
  *   silently dropped as "destination already exists" instead of archived.
+ * - `force` bypasses only the final "destination already exists" skip
+ *   above - a deliberate, human-invoked override (the Reseed tab's
+ *   "Force file as new version" action) for the case where the heuristics
+ *   above conclude "same release, already have it" but a human has
+ *   confirmed that's wrong (e.g. same broadcaster tag, but genuinely
+ *   different content). Never overwrites: the collision is resolved by
+ *   inserting one more version tag, same idea as the upgrade/alternate
+ *   paths above, not by replacing what's already there. Deliberately does
+ *   NOT bypass the lower-resolution skip earlier in this function - that
+ *   one is a meaningful quality signal worth still respecting even when
+ *   forcing past a same-broadcaster duplicate.
  */
 export async function copyIntoLibrary(
   sourceFile: string,
@@ -188,7 +199,8 @@ export async function copyIntoLibrary(
   destFilename: string,
   episode: number,
   resolution: number | null,
-  broadcaster: string | null
+  broadcaster: string | null,
+  force = false
 ): Promise<CopyOutcome> {
   const destDirAbs = join(libraryRoot, destDir);
   const destPath = join(destDirAbs, destFilename);
@@ -240,7 +252,20 @@ export async function copyIntoLibrary(
   // upgrade/alternate-version copy is just as idempotent against duplicate
   // webhook fires as the plain case is.
   if (await pathExists(finalDestPath)) {
-    return { status: "skipped", destPath: finalDestPath, reason: "destination already exists" };
+    if (!force) {
+      return { status: "skipped", destPath: finalDestPath, reason: "destination already exists" };
+    }
+    const forcedName = insertVersionTag(basename(finalDestPath), "REVIEW - forced");
+    finalDestPath = join(dirname(finalDestPath), forcedName);
+    warning = warning
+      ? `${warning}; forced past an existing file at the plain destination for ${key}, filed as "${forcedName}" instead - review both files by hand.`
+      : `Forced past an existing file at the plain destination for ${key} - filed as "${forcedName}" instead of skipping. Review both files by hand.`;
+    // Still never overwrites: if even the forced filename is somehow
+    // already taken (e.g. a double-click), stay safe and skip rather than
+    // clobber it.
+    if (await pathExists(finalDestPath)) {
+      return { status: "skipped", destPath: finalDestPath, reason: "destination already exists (even the forced filename is taken)" };
+    }
   }
 
   await fs.mkdir(destDirAbs, { recursive: true });

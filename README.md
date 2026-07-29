@@ -688,6 +688,18 @@ duplicate/resolution-upgrade handling, nothing new. The reported location
 is still confined to the downloads share (the same `isPathWithin` check
 the webhook itself uses), so this can't be pointed at anything outside it.
 
+Sometimes that normal pipeline decides "I already have this release" and
+skips it - most often because the file already at that destination shares
+the same (or no) broadcaster tag, so it reads as a repeat of something
+already archived rather than a genuinely different one. If you've checked
+and the existing file is actually wrong, missing, or a different release
+than the heuristics assumed, the hammer icon next to **Add to Plex
+library** - **Force file as new version** - bypasses that one check and
+files it alongside the existing file with a `REVIEW - forced` tag instead
+of skipping, gated behind a confirmation dialog since it's a deliberate
+override. It never overwrites anything: the existing file stays exactly
+as it was, and the forced copy always lands at a distinct filename.
+
 ### 7. Optional: Discord notifications
 
 Set in `.env` to have the archiver post a message to a Discord channel after

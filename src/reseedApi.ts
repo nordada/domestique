@@ -86,10 +86,15 @@ export async function handleReseedRequest(
    * rejects a torrent whose data lives under the reseed staging directory
    * (that lives inside LIBRARY_ROOT, a different tree from the downloads
    * share entirely), so this can't be used to re-copy an already-staged
-   * reseed back onto itself.
+   * reseed back onto itself. Optional body field `force: true` (the
+   * "Force file as new version" action) bypasses copyIntoLibrary's
+   * "destination already exists" skip - for the case where an existing
+   * file was already tagged with the same broadcaster, so the normal
+   * heuristics conclude "already have this release" even though a human
+   * has confirmed it's actually different.
    */
   if (req.method === "POST" && url.pathname === "/api/reseed/add-to-library") {
-    let payload: { id?: unknown };
+    let payload: { id?: unknown; force?: unknown };
     try {
       payload = JSON.parse(await readBody(req));
     } catch (err) {
@@ -100,6 +105,7 @@ export async function handleReseedRequest(
       sendJson(res, 400, { ok: false, error: "body must include a numeric id" });
       return true;
     }
+    const force = payload.force === true;
 
     const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
     if (!settings.transmission) {
@@ -123,7 +129,7 @@ export async function handleReseedRequest(
         });
         return true;
       }
-      const results = await processTorrentDone({ dir: location.downloadDir, name: location.name }, opts);
+      const results = await processTorrentDone({ dir: location.downloadDir, name: location.name }, opts, force);
       sendJson(res, 200, { ok: true, results });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to add to library: ${err}` });

@@ -31,7 +31,7 @@ import type { ServerOptions, TorrentDonePayload } from "./server.js";
  * real circular value import. Only `import type` is safe/erased at compile
  * time, hence the plain function parameter instead.
  */
-export type ProcessTorrentDone = (payload: TorrentDonePayload, opts: ServerOptions) => Promise<unknown>;
+export type ProcessTorrentDone = (payload: TorrentDonePayload, opts: ServerOptions, force?: boolean) => Promise<unknown>;
 
 const STAGING_SUBDIR = ".uploads-tmp";
 

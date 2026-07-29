@@ -400,3 +400,62 @@ test("POST /api/reseed/add-to-library runs a real seeding torrent through the no
     await fs.rm(downloadsDir, { recursive: true, force: true });
   }
 });
+
+test("POST /api/reseed/add-to-library with force:true bypasses a duplicate-destination skip and files a distinctly-tagged copy", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const { baseUrl, libraryRoot, settingsPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  await fs.writeFile(join(downloadsDir, "TDF-Stage18-SBS.mp4"), Buffer.alloc(500));
+
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    if (method === "torrent-get") {
+      return { torrents: [{ id: 4, name: "TDF-Stage18-SBS.mp4", downloadDir: downloadsDir }] };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+
+    const addOnce = () =>
+      fetch(`${baseUrl}/api/reseed/add-to-library`, {
+        method: "POST",
+        headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+        body: JSON.stringify({ id: 4 }),
+      }).then((r) => r.json());
+
+    const firstAttempt = await addOnce();
+    assert.equal(firstAttempt.results[0].status, "copied");
+
+    // Same identity (same show/stage, still no resolution/broadcaster
+    // tag), different bytes - re-processing it again without force should
+    // skip as a plain duplicate, same as any repeated webhook fire.
+    await fs.writeFile(join(downloadsDir, "TDF-Stage18-SBS.mp4"), Buffer.alloc(700));
+    const withoutForce = await addOnce();
+    assert.equal(withoutForce.results[0].status, "skipped");
+    assert.match(withoutForce.results[0].warning, /destination already exists/);
+
+    const withForceRes = await fetch(`${baseUrl}/api/reseed/add-to-library`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 4, force: true }),
+    });
+    const withForce = await withForceRes.json();
+    assert.equal(withForceRes.status, 200);
+    assert.equal(withForce.results[0].status, "copied");
+    assert.match(withForce.results[0].destPath, /REVIEW - forced/);
+
+    // Both files now coexist in the library - the original untouched, plus
+    // the forced copy alongside it.
+    const seasonDir = join(libraryRoot, "Tdf", "Season 2026");
+    const files = await fs.readdir(seasonDir);
+    assert.equal(files.filter((f) => f.endsWith(".mp4")).length, 2);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+  }
+});
