@@ -161,6 +161,110 @@ Saves are validated the same way a hand-edit of the JSON file would be
 instead of corrupting the file. See [Add a new show](#3-add-a-new-show)
 below for what each field actually means.
 
+### Torrent Index tab
+
+One unified table of every torrent Domestique has a saved `.torrent` for -
+whether it got there by staging a reseed here, or by syncing in
+automatically from Transmission's own torrents directory (see [step
+6](#6-optional-the-index-tab-reseed-from-your-plex-library-and-a-unified-torrent-view)
+below for enabling that and the underlying staging/hardlink mechanics).
+Every entry is cross-referenced **live, on every load** against both your
+Plex library (matched by exact file size) and Transmission (live seeding
+status) - neither is authoritative over the other, so a torrent found in
+only one, both, or neither is all real, meaningful state.
+
+**Stat/filter pills** above the table summarize the whole set at a glance -
+total, in Plex, in Transmission, seeding, on disk, ⚠️ need attention,
+🔗 deduped, 📦 duplicated, and a deliberately muted **missing from Plex**
+pill last (expected/normal at scale on a large library, not worth the same
+visual weight as the others). Each is clickable and they AND-combine - click
+"in Plex" and "seeding" together to see only torrents that are both: click
+"total" to reset. A row only counts toward **needs attention** when there's
+something actually actionable right now - a partial or ambiguous Plex
+match, a live/on-disk percentage mismatch, an unreclaimed dedupe leftover,
+or a flagged-dirty integrity check; a torrent that's simply never been
+filed into Plex at all is its own separate, calmer category (**missing from
+Plex**), since on a large library that can genuinely be true for hundreds
+of entries at once. A "partial match" also only counts as actionable once
+the torrent has actually been downloaded (`percentComplete > 0`) - a
+same-size coincidence against a torrent that's never touched disk isn't
+something you can do anything about yet, so it's excluded from the count
+and its "Add to Plex library" button eligibility both, rather than pointing
+at an action that would just fail. The search box filters by torrent name;
+click any column header to sort.
+
+**Selection is checkbox-based**: check individual rows (or the header
+checkbox for every currently-filtered row), and a bulk action bar appears
+showing how many of your selection are eligible for each action - clicking
+one only ever touches the eligible subset, skipping the rest silently
+rather than erroring. The actions:
+
+- **Add to Plex library** - runs each eligible torrent through the normal
+  parse/match/copy pipeline, for torrents whose data was never filed into
+  Plex at all, or whose filed copy is gone. A **Force** checkbox (revealed
+  on first click, checked by default, confirm on the second) bypasses the
+  "I already have this release" check and files a distinctly-tagged
+  (`REVIEW - forced`) copy alongside the existing file instead of skipping -
+  it never overwrites anything, but forcing a whole batch forces *every*
+  file in each selected torrent, so a torrent that's already partly correct
+  can end up with an unwanted duplicate of the part that was already fine;
+  worth checking the result and deleting any stray duplicate by hand.
+- **Re-add to Transmission** - for torrents Domestique still has registered
+  but Transmission no longer reports (removed after seeding, cleaned up).
+  Re-adds using the saved `.torrent`, staging whatever's already matched in
+  your Plex library first - a fully-filed torrent should come back up
+  verified and seeding with nothing re-downloaded.
+- **Verify data** - forces Transmission to re-check an already-seeding
+  torrent's on-disk data against its real piece hashes, something
+  Transmission never does again on its own once a torrent first verifies
+  clean. A clean result resumes automatically; anything less is left paused
+  for review, logged to Activity as review-worthy, and (if configured)
+  posts a Discord mention - never auto-redownloaded. The result persists
+  (`config/verify-state.json`) and stays visible on that entry until the
+  next check, even after the torrent drops out of Transmission entirely.
+- **Dedupe** - for a fully-matched torrent whose data is still a separate
+  physical copy from its Plex library file (📦 **Duplicated**): hardlinks
+  the library copy into the same staging directory the reseed feature uses,
+  repoints Transmission there, and forces a real re-verify. A clean result
+  flips the chip to 🔗 **Deduped** and reveals **Delete leftover copy** to
+  reclaim the now-orphaned downloads-share original; anything less than
+  clean automatically reverts Transmission back to its original location
+  and re-verifies there too, so a torrent that was seeding fine before
+  Dedupe can never end up broken by it.
+- **Delete leftover copy** - the explicit, separate follow-up after a
+  successful Dedupe. Permanently deletes the original download-folder copy,
+  safe since Transmission now seeds from the hardlinked Plex copy instead;
+  never touches anything in your Plex library.
+- **Remove from Transmission** - removes the torrent from Transmission
+  *and* deletes its downloaded data. Never touches anything already filed
+  in your Plex library (a completely separate tree it doesn't know the path
+  to). Irreversible - gated behind a confirmation dialog.
+- **Archive** - for clutter that isn't worth actually throwing away (e.g. a
+  torrent whose own name carries no real identifying text, so a same-size
+  byte collision can never resolve past "ambiguous" no matter what you pick).
+  Unlike Remove, this is fully reversible: hides the torrent from this list
+  and best-effort removes it from Transmission, but explicitly does **not**
+  delete its downloaded data, its registered `.torrent`, or anything filed
+  in Plex. Every archived torrent is listed in the Settings tab's
+  **Archive** panel with an **Unarchive** button that brings it straight
+  back - see the Settings tab section below.
+
+A row whose Plex match is still ambiguous after auto-guessing shows a
+clickable ⚠️ in the Plex column - opens a **Resolve** dialog listing every
+same-size candidate for each ambiguous file (best guess first), so you can
+pick the right one by hand instead of renaming/moving files in the library.
+The pick is remembered (keyed by the torrent's own info-hash) and applied
+on every future preview, stage, dedupe, and Index-tab load of that torrent,
+not just this one screen.
+
+**The percentage shown is deliberately not Transmission's own
+`percentDone`** - Transmission only counts files it considers "wanted"
+toward that figure, so a torrent with some files deselected can report
+100% done while having nothing actually on disk for them. This tab
+computes its own figure straight from each file's actual bytes-on-disk
+versus its full size instead, labeled "on disk" to be unambiguous; if the
+two disagree, both are shown side by side rather than silently picking one.
+
 ### Settings tab
 
 Everything here is **live**: saved straight to `config/settings.json` and
@@ -247,6 +351,12 @@ posts a mention-tagged alert, once per trigger, not on every request
 rejected while still locked out.
 
 <img src="docs/screenshots/settings-lockout.png" width="560" alt="Login lockout settings section: failed-attempts threshold and base cooldown">
+
+**Archive:** every torrent currently hidden from the Torrent Index tab via
+its **Archive** action (see above) - name, size, and when it was archived,
+each with an **Unarchive** button that brings it straight back into the
+Index. Nothing here was ever deleted; archiving only ever hides an entry
+from the main list.
 
 ## Requirements
 
@@ -669,154 +779,40 @@ setup when Plex, Transmission, and Domestique all mount the same host
 share), there's nothing extra to configure - Transmission just needs
 read-write access to that share, not read-only.
 
-**The Torrent index, below the dropzone**: one unified table of every
-`.torrent` Domestique has a saved copy of - the `.torrent` file itself is
-the source of truth for what appears here, not Transmission's live list.
-An entry gets there one of two ways: staged through Preview/Commit above
+**The Torrent Index table below the dropzone** is covered in full in the
+[Torrent Index tab](#torrent-index-tab) section of the Web UI tour above -
+every action (Add to Plex library, Re-add to Transmission, Verify data,
+Dedupe, Delete leftover copy, Remove from Transmission, Archive), the
+filter pills, and the Resolve dialog for ambiguous matches. The rest of
+this section covers the parts that are genuinely setup/configuration
+concerns rather than day-to-day UI.
+
+Each entry gets there one of two ways: staged through Preview/Commit above
 (single-file or batch), or synced in automatically from Transmission's own
 torrents directory if you've configured that (see "Capturing torrents
-added directly by autobrr" below) - which is what makes this cover torrents
-Transmission is seeding that never touched this app at all, not just ones
-reseeded through this tab. Each entry is identified by its **info-hash**
-(the same identifier Transmission itself uses), not by name - two
-unrelated torrents can share a name, and a rename shouldn't break the
+added directly by autobrr" below) - which is what makes the index cover
+torrents Transmission is seeding that never touched this app at all, not
+just ones reseeded through this tab. Each entry is identified by its
+**info-hash** (the same identifier Transmission itself uses), not by name -
+two unrelated torrents can share a name, and a rename shouldn't break the
 link, so hash is the one identity that's actually reliable.
-
-Per entry, two things are checked **live, every time the tab loads** -
-never stored, never cached: whether it's currently matched in your Plex
-library (by exact file size, the same way Preview does, with the matched
-path(s) shown), and whether it's currently seeding in Transmission (with
-its live status and ratio). Neither column is authoritative over the
-other - a torrent can leave Transmission (removed after seeding) or leave
-Plex (cleaned up) completely independently of the other, so an entry
-found in only one, both, or genuinely neither is all real, meaningful
-state, not an error. A search box filters by torrent name client-side,
-and the list itself is capped to a scrollable box, the same pattern the
-Events tab already uses for its own few-hundred-row table - fine even
-with several hundred entries.
-
-A row for a torrent that isn't currently in Transmission just shows its
-Plex-match status and a download link for its saved `.torrent` - none of
-the actions below apply, since they all either call Transmission's own
-RPC directly or ask Transmission where a torrent's data currently lives,
-and there's nothing live to act on.
-
-A row whose Plex match is still ambiguous after auto-guessing (see the
-matching-details note further down) shows a clickable ⚠️ in the Plex
-column - clicking it opens a **Resolve** dialog listing every same-size
-candidate for each ambiguous file (best guess first), so you can pick the
-right one by hand instead of renaming/moving files in the library. The
-pick is remembered (keyed by the torrent's own info-hash) and applied on
-every future preview, stage, dedupe, and Index-tab load of that torrent -
-not just this one screen.
-
-A torrent with an unmatched or ambiguous file - most often one that was
-never filed into Plex at all, or whose library copy is gone - gets an
-**Add to Plex library** button instead of (or alongside) a size match.
-Unlike Preview/Commit above, this doesn't try to size-match anything: it
-asks Transmission exactly where that torrent's data actually lives right
-now, then runs it through the *same* parse/match/copy pipeline the
-Transmission webhook and hot-folder ingestion already use - same
-auto-create-a-show behavior when nothing matches an existing event, same
-duplicate/resolution-upgrade handling, nothing new. The reported location
-is still confined to the downloads share (the same `isPathWithin` check
-the webhook itself uses), so this can't be pointed at anything outside it.
-
-Sometimes that normal pipeline decides "I already have this release" and
-skips it - most often because the file already at that destination shares
-the same (or no) broadcaster tag, so it reads as a repeat of something
-already archived rather than a genuinely different one. If you've checked
-and the existing file is actually wrong, missing, or a different release
-than the heuristics assumed, the hammer icon next to **Add to Plex
-library** - **Force file as new version** - bypasses that one check and
-files it alongside the existing file with a `REVIEW - forced` tag instead
-of skipping, gated behind a confirmation dialog since it's a deliberate
-override. It never overwrites anything: the existing file stays exactly
-as it was, and the forced copy always lands at a distinct filename.
-
-Every entry also has a **Remove & delete files** button, for a torrent
-that's stuck, a duplicate, or just no longer worth keeping. This is a
-Transmission-only action (`torrent-remove` with `delete-local-data`) -
-it removes the torrent and deletes its downloaded data from disk, but
-never touches anything already filed in your Plex library, and never
-could, since it's a completely separate tree Transmission doesn't know
-the path to. Irreversible, so it's a two-click confirm rather than a
-single button press: the first click turns it into a loud red "CONFIRM"
-(auto-reverting after a few seconds if you don't follow through), and only
-a second click while it's in that state actually removes anything - no
-browser popup involved.
-
-For clutter that isn't worth actually throwing away - a torrent whose own
-name carries no real identifying text, so a same-size byte collision can
-never resolve past "ambiguous" no matter how many library files you check
-against it - there's also **Archive**. Unlike Remove above, this is fully
-reversible: it hides the torrent from this list and (best-effort) removes
-it from Transmission, but explicitly does NOT delete its downloaded data,
-its registered `.torrent`, or anything filed in Plex. Every currently
-archived torrent is listed in the Settings tab's **Archive** panel, with
-an **Unarchive** button that brings it straight back.
-
-**The percentage shown is deliberately not Transmission's own
-`percentDone`.** Transmission only counts files it considers "wanted"
-toward that figure, so a torrent with some or all files deselected can
-report 100% done while having nothing actually on disk for them - a real,
-known Transmission RPC quirk, not a display bug. This tab computes its own
-figure instead, straight from each file's actual bytes-on-disk versus its
-full size, and labels it "on disk" to be unambiguous. If the two numbers
-disagree, both are shown side by side with a note explaining why, rather
-than silently picking one - the "on disk" figure is the one that actually
-matters when deciding whether it's safe to remove a torrent's data.
-
-Above the list, six pill badges summarize what's worth a look, each
-hidden when its own count is zero: the running **total**, how many are
-**in Plex**, how many are **in Transmission**, how many torrents **need
-attention** (an unmatched or ambiguous Plex file, a percentage mismatch,
-or an unreclaimed orphaned original - see Dedupe below), and separately,
-how many currently-seeding entries are already **🔗 deduped** versus
-still **📦 duplicated** - an at-a-glance view of how much of the seeding
-backlog still costs double disk without opening every item. The **Sort**
-control next to them defaults to "Needs attention first," so the torrents
-actually worth looking at surface at the top instead of getting lost among
-everything that's already fine; switching to "Name (A-Z)" sorts the list
-plainly alphabetically instead. Each entry currently in Transmission also
-shows its seeding **ratio** (uploaded/downloaded) next to its on-disk
-percentage - `N/A` when Transmission hasn't got a real figure yet (e.g.
-still checking), `∞` for a seed-only/injected torrent with nothing
-recorded as downloaded.
 
 By default, normal ingestion always copies a torrent's data into the
 library rather than hardlinking it (see "How staging actually touches your
-files" above -
-that's specific to reseed staging, not the normal copy pipeline), so every
-torrent filed the ordinary way costs disk space twice: once in the
-downloads share, once again in the library. Set **File mode** to
-"Hardlink" under Settings -> Library filing to save that space from the
+files" above - that's specific to reseed staging, not the normal copy
+pipeline), so every torrent filed the ordinary way costs disk space twice:
+once in the downloads share, once again in the library. Set **File mode**
+to "Hardlink" under Settings -> Library filing to save that space from the
 start instead of running Dedupe after the fact - falls back to a real copy
 when the downloads share and library are on different filesystems
 (reported in the activity log, not silent), and is exactly as safe to
 delete around later as a post-hoc Dedupe is, for the same reason: a
 hardlink is just one more reference to the same data, and removing one
-copy never affects any other reference that still exists. A fully-matched, still-duplicated entry
-shows a **📦 Duplicated** chip and a **Dedupe (reclaim disk space)**
-button (a two-click confirm, same arm-then-confirm pattern as Remove &
-delete files, just accent-colored instead of red since nothing is deleted
-by this step). Dedupe hardlinks the matched library file into the same
-staging directory the reseed feature uses, repoints Transmission at it,
-and forces a real re-verify there - if that verify comes back clean, the
-chip flips to **🔗 Deduped** and a **Delete original copy** button appears
-to reclaim the now-orphaned downloads-share copy - this specific action
-needs Domestique's own container to have write access to the downloads
-share (`DOWNLOADS_DIR` is mounted read-write in `docker-compose.yml` for
-exactly this reason); relinking and verifying themselves don't need it. If
-verify *isn't* clean - an unlucky same-size, different-content collision,
-the one failure mode this app's own size-only matching can't rule out -
-Transmission is automatically repointed back to the original location and
-re-verified there too, so a torrent that was seeding fine before Dedupe
-can never end up broken by it; nothing is ever deleted unless the relink
-was actually confirmed good first. A multi-file torrent that's only partly
-relinked (by hand, outside this app) shows **🔀 Partially deduped**
-instead, with no action offered - only a full, unambiguous match is ever
-deduped automatically.
+copy never affects any other reference that still exists. Dedupe's
+"Delete leftover copy" follow-up specifically needs Domestique's own
+container to have write access to the downloads share (`DOWNLOADS_DIR` is
+mounted read-write in `docker-compose.yml` for exactly this reason) -
+relinking and verifying themselves don't need it.
 
 **The "Delete original copy" button is durable, not one-shot** - it's
 recomputed fresh on every Torrent index load (checking whether a
