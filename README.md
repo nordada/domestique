@@ -276,6 +276,7 @@ rejected while still locked out.
   6. [Optional: the Index tab (reseed from your Plex library, and a unified torrent view)](#6-optional-the-index-tab-reseed-from-your-plex-library-and-a-unified-torrent-view)
   7. [Optional: Discord notifications](#7-optional-discord-notifications)
   8. [Optional: web UI](#8-optional-web-ui)
+- [Frequently Asked Questions](#frequently-asked-questions)
 - [Known limitations / assumptions](#known-limitations--assumptions-check-these-against-reality-as-you-go)
 - [Security posture](#security-posture)
   - [Running as a non-root user](#running-as-a-non-root-user-recommended)
@@ -931,6 +932,48 @@ For what's actually in it (every tab, every setting, with screenshots), see
 the [Web UI tour](#web-ui-tour) near the top of this README.
 `public/index.html` is bind-mounted the same way `config/events.json` is,
 so tweaking it doesn't require a rebuild.
+
+## Frequently Asked Questions
+
+**A torrent's Storage icon shows a ⚠️ next to it. What does that mean, and how do I fix it?**
+That torrent has already been deduped (its data is relinked to the Plex
+library copy), but the original pre-dedupe copy in your downloads folder
+was never deleted. It's now pure duplicate disk usage, since Transmission
+seeds from the hardlinked library file instead. Select the row(s) showing
+the warning and click "Delete leftover copy" in the bulk action bar; it
+only ever removes the downloads-folder copy, never anything filed in your
+Plex library.
+
+**Why does a torrent's Status, On disk, Ratio, and Storage columns all show a dash (—)?**
+Those four columns are all derived from Transmission's own live state for
+that torrent. A dash means Domestique currently has no live entry for it in
+Transmission (it dropped out after seeding, was removed, or was never added
+there); the Plex column is computed independently and stays accurate
+regardless of what Transmission currently reports.
+
+**Dedupe (or a filter pill) won't offer a torrent I know is a duplicate. Why?**
+Storage classification requires the torrent to actually be 100% downloaded
+first. A torrent that's still downloading, or paused partway through,
+can't be a genuine duplicate yet, since nothing complete has been compared
+against your library copy. Once it finishes, Dedupe becomes available if
+it's still a real duplicate.
+
+**A bulk action reported "N errored" with no further detail. How do I find out what actually happened?**
+Every bulk action's status line shows the real error message for each
+failed item directly beneath the summary count, not just a bare number.
+
+**Will "Verify data" redownload anything or interrupt seeding?**
+It briefly pauses each selected torrent while Transmission re-checks its
+on-disk data against the real piece hashes, then resumes automatically if
+the check comes back clean. If it doesn't, the torrent is left paused and
+logged for review instead; nothing is ever redownloaded automatically.
+
+**How do I filter the Torrent index to a specific subset, like one season or everything that needs attention?**
+Combine the search box (matches by torrent name) with the summary pills
+above the table. Every pill is clickable and narrows the table further when
+combined with others (they AND together, so "seeding" plus "in Plex" shows
+only rows matching both). Click "total" to clear every active pill filter
+at once.
 
 ## Known limitations / assumptions (check these against reality as you go)
 
