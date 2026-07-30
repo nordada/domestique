@@ -113,6 +113,21 @@
   .torrent-index-table-scroll table { margin: 0; }
   .torrent-index-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
   .torrent-index-table-scroll td.truncate { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Small secondary line under the torrent name - the matched Plex path
+     when there is one, or a short reason why not (see plexSummary's own
+     title text, reused here rather than re-deriving it). Dimmed via color,
+     not opacity, per this table's own earlier sticky-header lesson: opacity
+     would fade this row's own background too, not just the text. */
+  .index-name-path { display: block; font-size: 0.75rem; color: color-mix(in srgb, currentColor 55%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Very light background wash on the header cells whose values only ever
+     come from Transmission's own live state (Status/On disk/Ratio/Storage
+     all show a dash with no live entry) - just enough to read as "these are
+     tied to the torrent client," not a strong color block. Blended into the
+     opaque sticky-header background (canvas), NOT transparent, on purpose -
+     this table's own header already has a real, fixed bug it had to learn
+     from once: any transparency here lets scrolled row text bleed through
+     while sticky (see torrent-index-table-scroll thead th below). */
+  .torrent-index-table-scroll th.th-transmission { background: color-mix(in srgb, var(--accent) 12%, canvas); }
   #bulk-action-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem 0.6rem; margin-bottom: 0.75rem; border: 1px solid var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .sortable-th { cursor: pointer; user-select: none; }
   .sortable-th:hover { opacity: 0.75; }
@@ -783,10 +798,10 @@
         <tr>
           <th><input type="checkbox" id="index-select-all"></th>
           <th class="sortable-th" data-sort="name">Name<span class="sort-arrow"></span></th>
-          <th class="sortable-th" data-sort="status">Status<span class="sort-arrow"></span></th>
-          <th class="sortable-th" data-sort="onDisk">On disk<span class="sort-arrow"></span></th>
-          <th class="sortable-th" data-sort="ratio">Ratio<span class="sort-arrow"></span></th>
-          <th class="sortable-th" data-sort="storage">Storage<span class="sort-arrow"></span></th>
+          <th class="sortable-th th-transmission" data-sort="status" title="Derived from Transmission's own live state - shows a dash with nothing to report when this torrent isn't currently in Transmission.">Status<span class="sort-arrow"></span></th>
+          <th class="sortable-th th-transmission" data-sort="onDisk" title="Derived from Transmission's own live state - shows a dash with nothing to report when this torrent isn't currently in Transmission.">On disk<span class="sort-arrow"></span></th>
+          <th class="sortable-th th-transmission" data-sort="ratio" title="Derived from Transmission's own live state - shows a dash with nothing to report when this torrent isn't currently in Transmission.">Ratio<span class="sort-arrow"></span></th>
+          <th class="sortable-th th-transmission" data-sort="storage" title="Derived from Transmission's own live state - shows a dash with nothing to report when this torrent isn't currently in Transmission.">Storage<span class="sort-arrow"></span></th>
           <th class="sortable-th" data-sort="plex">Plex<span class="sort-arrow"></span></th>
           <th class="sortable-th" data-sort="size">Size<span class="sort-arrow"></span></th>
           <th class="sortable-th" data-sort="added">Added<span class="sort-arrow"></span></th>
@@ -2185,7 +2200,7 @@ function renderTorrentIndex() {
     return `
       <tr>
         <td><input type="checkbox" class="index-row-checkbox" data-hash="${esc(t.infoHash)}" ${checked}></td>
-        <td class="truncate" title="${esc(t.torrentName)}">${esc(t.torrentName)}</td>
+        <td class="truncate" title="${esc(t.torrentName)}">${esc(t.torrentName)}<span class="index-name-path" title="${esc(plex.title)}">${esc(plex.title)}</span></td>
         <td title="${esc(statusTitle)}">${statusIcon}${verifyMarker}</td>
         <td>${percentCell}</td>
         <td>${ratioCell}</td>
