@@ -732,16 +732,10 @@
     </div>
   </div>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Drop a .torrent file for something your tracker says needs seeds. This checks
-    whether its content already exists somewhere in your library under a different
-    name (by exact file size), then - once you confirm - stages it into the exact
-    layout the torrent expects and hands it to Transmission, paused, to verify and
-    reseed. Matching here is size-only and can be wrong; Transmission's own
-    piece-hash verify after Stage &amp; hand off is what actually confirms a real
-    match, so always Preview first and check the verify percentage afterward.
-    Drop more than one .torrent at once to queue them: a torrent that matches
-    completely stages and hands off automatically, one at a time; anything
-    partial pauses the queue for your call before moving on.
+    Drop a .torrent that needs reseeding - if a same-size match exists in your
+    library, it's staged and handed to Transmission (paused) to verify. Trust
+    the verify percentage after Stage &amp; hand off, not the size match alone.
+    Drop several at once to queue them; anything partial pauses for your review.
   </p>
   <div id="reseed-dropzone">
     <button class="primary" id="reseed-pick-btn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>Choose .torrent file(s)…</button>
@@ -767,16 +761,13 @@
     </div>
   </div>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Every .torrent Domestique has a saved copy of - either staged through
-    Preview/Commit above, or synced in automatically from Transmission's own
-    torrents directory if configured (see Settings), which is how a torrent
-    added directly by autobrr shows up here too, not just ones dropped into
-    this tab. The saved .torrent itself is the source of truth for identity;
-    Plex and Transmission columns are checked live every time this loads - a
-    torrent can leave either system independently of the other over time
-    (removed from Transmission after seeding, or cleaned out of Plex), so
-    neither column is authoritative over the other.
+    Every torrent Domestique has a saved copy of - staged above, or synced from
+    Transmission's own torrents directory (see Settings), which is how
+    autobrr-added torrents show up here too. Plex and Transmission status are
+    both checked live on every load and can drift independently - neither is
+    authoritative over the other.
   </p>
+  <div id="index-summary-stats" style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.4rem;"></div>
   <div id="index-summary-pills" style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;"></div>
   <input type="text" id="index-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
   <div id="bulk-action-bar" class="hidden">
@@ -2033,9 +2024,12 @@ function passesActiveIndexFilters(t) {
   return true;
 }
 
+/** Stat pills (plain info, non-clickable) render into their own row above the interactive filter/reset pills - keeps the two kinds visually and structurally separate instead of wrapping together arbitrarily, while still deriving both from the exact same INDEX_PILLS array (a future pill is still one array entry; this only decides which of the two rows it renders into, via its own existing `role`). */
 function renderIndexPills(entries) {
-  const container = document.getElementById("index-summary-pills");
-  container.innerHTML = INDEX_PILLS.map((pill) => {
+  const statsContainer = document.getElementById("index-summary-stats");
+  const filtersContainer = document.getElementById("index-summary-pills");
+
+  const renderPill = (pill) => {
     const value = computeIndexPillValue(pill, entries);
     // Hide a zero-count optional pill UNLESS it's the active filter right
     // now - otherwise a filter that zeroes itself out (e.g. the last
@@ -2049,9 +2043,12 @@ function renderIndexPills(entries) {
     const classes = ["seeding-summary-badge", pill.colorClass, "clickable"];
     if (pill.role === "filter" && activeIndexFilters.has(pill.id)) classes.push("active");
     return `<button type="button" class="${classes.join(" ")}" data-pill-id="${pill.id}">${label}</button>`;
-  }).join("");
+  };
 
-  container.querySelectorAll("button[data-pill-id]").forEach((btn) => {
+  statsContainer.innerHTML = INDEX_PILLS.filter((p) => p.role === "stat").map(renderPill).join("");
+  filtersContainer.innerHTML = INDEX_PILLS.filter((p) => p.role !== "stat").map(renderPill).join("");
+
+  filtersContainer.querySelectorAll("button[data-pill-id]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const pill = INDEX_PILLS.find((p) => p.id === btn.dataset.pillId);
       if (pill.role === "reset") activeIndexFilters.clear();
@@ -2151,6 +2148,7 @@ function renderTorrentIndex() {
 
   if (torrentIndexEntries.length === 0) {
     tbody.innerHTML = "<tr><td colspan=\"10\" style=\"opacity:0.7;\">Nothing registered yet - staging a torrent above (or configuring the Transmission-torrents sync in Settings) will populate this list.</td></tr>";
+    document.getElementById("index-summary-stats").innerHTML = "";
     document.getElementById("index-summary-pills").innerHTML = "";
     lastFilteredEntries = [];
     updateSelectAllCheckboxState();
