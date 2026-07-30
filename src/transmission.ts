@@ -383,6 +383,23 @@ export async function removeTorrentAndData(config: TransmissionConfig, id: numbe
 }
 
 /**
+ * Removes a torrent from Transmission WITHOUT deleting its downloaded data
+ * (RPC `torrent-remove` with `delete-local-data: false`) - the Index tab's
+ * "Archive" action, for a torrent that's just clutter (an unresolvable
+ * ambiguous match, a stale test drop) rather than something to actually
+ * throw away. Unlike removeTorrentAndData above, this is meant to be
+ * reversible: the download-folder copy is left exactly where it was, so a
+ * later "Re-add to Transmission" (see reseedApi.ts) can pick it back up.
+ */
+export async function removeTorrentKeepingData(
+  config: TransmissionConfig,
+  id: number,
+  timeoutMs = 10000
+): Promise<void> {
+  await rpcCall(config, "torrent-remove", { ids: [id], "delete-local-data": false }, timeoutMs);
+}
+
+/**
  * Repoints a torrent's download-dir via RPC `torrent-set-location` with
  * `move: false` - Transmission just updates its own record to point at
  * `location`, trusting that the files are already there (they are, staged

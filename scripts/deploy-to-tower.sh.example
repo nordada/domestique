@@ -21,14 +21,15 @@ set -euo pipefail
 #
 # --exclude 'config/events.json'/'settings.json'/'activity.json'/
 # 'dedupe-state.json'/'verify-state.json'/'match-overrides.json'/
-# 'torrent-registry': your server's copies are live state (the user-edited
-# race list, live settings, activity history, Dedupe's original-location
-# records, Verify-data results, Resolve-modal picks, and the Reseed tab's
-# saved .torrent files) - each should only ever be seeded/created once on
-# first boot, never overwritten by a code deploy. Don't drop these excludes
-# even if one of these doesn't exist on your dev machine right now - if it
-# ever does (e.g. from local testing), a deploy would otherwise silently
-# overwrite your real server's copy with whatever's sitting locally.
+# 'archive-state.json'/'torrent-registry': your server's copies are live
+# state (the user-edited race list, live settings, activity history,
+# Dedupe's original-location records, Verify-data results, Resolve-modal
+# picks, Archive picks, and the Reseed tab's saved .torrent files) - each
+# should only ever be seeded/created once on first boot, never overwritten
+# by a code deploy. Don't drop these excludes even if one of these doesn't
+# exist on your dev machine right now - if it ever does (e.g. from local
+# testing), a deploy would otherwise silently overwrite your real server's
+# copy with whatever's sitting locally.
 rsync -av \
   --chmod=ugo+rX \
   --exclude 'node_modules' \
@@ -42,5 +43,6 @@ rsync -av \
   --exclude 'config/dedupe-state.json' \
   --exclude 'config/verify-state.json' \
   --exclude 'config/match-overrides.json' \
+  --exclude 'config/archive-state.json' \
   --exclude 'config/torrent-registry' \
   ~/projects/domestique/ user@YOUR-SERVER-IP:/path/to/domestique/

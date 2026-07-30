@@ -798,6 +798,7 @@
     <button type="button" class="pill-btn accent" id="bulk-dedupe-btn" title="Relinks each eligible torrent's data to its Plex library copy and asks Transmission to re-verify it there - reclaims the disk space it was previously duplicating. A failed verify automatically reverts that one torrent back to its original location; nothing is ever deleted by this step.">Dedupe</button>
     <button type="button" class="pill-btn danger" id="bulk-delete-original-btn" title="Permanently deletes the leftover download-folder copy of each eligible already-deduped torrent - safe to remove since Transmission now seeds from the hardlinked Plex copy instead. Never touches your Plex library.">Delete leftover copy</button>
     <button type="button" class="pill-btn danger" id="bulk-remove-btn" title="Removes each eligible torrent from Transmission entirely and deletes its downloaded data from disk. Never touches anything already filed in your Plex library - only Transmission's own copy.">Remove from Transmission</button>
+    <button type="button" class="pill-btn" id="bulk-archive-btn" title="Hides each selected torrent from this list without deleting anything - removes it from Transmission (keeping its downloaded data) but leaves the registered .torrent and any filed Plex library files untouched. Recoverable any time from Settings → Archive.">Archive</button>
   </div>
   <div id="index-action-status" class="status-msg"></div>
   <div class="torrent-index-table-scroll">
@@ -857,6 +858,7 @@
     <button type="button" class="subtab-btn" data-subtab="indexer">Indexer</button>
     <button type="button" class="subtab-btn" data-subtab="reseed">Reseed from library</button>
     <button type="button" class="subtab-btn" data-subtab="security">Security</button>
+    <button type="button" class="subtab-btn" data-subtab="archive">Archive</button>
     <button type="button" class="subtab-btn" data-subtab="activitylog">Activity log</button>
   </div>
 
@@ -1077,6 +1079,21 @@
         <input type="number" id="s-lockout-seconds" placeholder="60" min="10" max="3600" style="max-width:10rem;">
       </label>
     </div>
+  </div>
+
+  <div class="subtab-panel hidden" id="settings-subtab-archive">
+    <h3>Archive</h3>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Torrents hidden from the Index tab via the "Archive" bulk action -
+      nothing is deleted, this is just a way to get clutter (an unresolvable
+      ambiguous match, a stale test drop) out of the main list. Unarchive to
+      bring one back.
+    </p>
+    <div class="row" style="justify-content:flex-end; align-items:center; margin-bottom:0.5rem;">
+      <span class="refresh-flash" id="archived-refresh-flash"></span>
+      <button type="button" class="icon-btn subtle" id="refresh-archived-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+    </div>
+    <div id="archived-torrents-list">Loading…</div>
   </div>
 
   <div class="subtab-panel hidden" id="settings-subtab-activitylog">
@@ -2428,6 +2445,7 @@ function updateBulkActionBar() {
   const eligibleDedupe = selected.filter((t) => t.storageStatus === "duplicate");
   const eligibleDeleteOriginal = selected.filter((t) => t.orphanOriginal);
   const eligibleRemove = selected.filter((t) => t.inTransmission);
+  const eligibleArchive = selected;
 
   const addBtn = document.getElementById("bulk-add-to-library-btn");
   addBtn.textContent = `Add to Plex library (${eligibleAddToLibrary.length})`;
@@ -2452,6 +2470,10 @@ function updateBulkActionBar() {
   const removeBtn = document.getElementById("bulk-remove-btn");
   removeBtn.textContent = `Remove from Transmission (${eligibleRemove.length})`;
   removeBtn.disabled = eligibleRemove.length === 0;
+
+  const archiveBtn = document.getElementById("bulk-archive-btn");
+  archiveBtn.textContent = `Archive (${eligibleArchive.length})`;
+  archiveBtn.disabled = eligibleArchive.length === 0;
 }
 
 /** Shared sequential-loop runner for the bulk actions below - one request at a time (never concurrent, so Transmission isn't hammered by a large batch), same pattern processReseedBatch already established for the drop-zone's own batch queue. Collects each failure's real error message (not just a count) so the caller can actually show it - previously every bulk action only logged this to the DevTools console, leaving the visible status line as an undiagnosable bare "N errored". */
@@ -2705,6 +2727,42 @@ async function bulkRemove() {
   statusEl.textContent =
     `${succeeded} removed${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}` +
     formatBulkFailures(failures);
+  statusEl.className = failed ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
+}
+
+/**
+ * Hides each selected torrent from this list without deleting anything (see
+ * reseedApi.ts's /api/reseed/archive) - for clutter that isn't worth
+ * throwing away, e.g. a torrent whose own name carries no real signal so it
+ * can never resolve past "ambiguous" (see reseedMatch.ts's race-identity
+ * gate). Best-effort removes it from Transmission if currently there
+ * (keeping its downloaded data - contrast with "Remove from Transmission"
+ * above, which deletes both), but works just as well for a torrent that
+ * isn't in Transmission at all right now. Fully reversible from Settings →
+ * Archive, unlike Remove.
+ */
+async function bulkArchive() {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  if (selected.length === 0) return;
+  const proceed = confirm(
+    `This hides ${selected.length} torrent(s) from the Index and removes them from Transmission (WITHOUT deleting their downloaded data). Nothing already filed in your Plex library is touched, and this is fully reversible from Settings → Archive. Continue?`
+  );
+  if (!proceed) return;
+
+  const { succeeded, failed, failures } = await runBulkAction(selected, "Archiving", (t) =>
+    api("/api/reseed/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // t.transmissionId is null (not undefined) when not currently in
+      // Transmission - the server route only accepts a real number or a
+      // genuinely absent id, so null has to be left out entirely rather
+      // than passed through as-is.
+      body: JSON.stringify(t.transmissionId != null ? { hash: t.infoHash, id: t.transmissionId } : { hash: t.infoHash }),
+    })
+  );
+  const statusEl = document.getElementById("index-action-status");
+  statusEl.textContent = `${succeeded} archived${failed ? `, ${failed} failed` : ""}.` + formatBulkFailures(failures);
   statusEl.className = failed ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
@@ -3052,6 +3110,34 @@ async function loadFullActivityLog() {
   }
 }
 
+function archivedTorrentItemHtml(entry) {
+  return `
+    <div class="activity-item">
+      <div class="activity-item-row">
+        <div class="activity-body">
+          <div class="meta">${formatBytes(entry.totalBytes)} - archived ${esc(new Date(entry.archivedAt).toLocaleString())}</div>
+          <strong>${esc(entry.torrentName)}</strong>
+        </div>
+        <button type="button" class="pill-btn" data-unarchive="${esc(entry.infoHash)}">Unarchive</button>
+      </div>
+    </div>
+  `;
+}
+
+async function loadArchivedTorrents() {
+  const el = document.getElementById("archived-torrents-list");
+  try {
+    const data = await api("/api/reseed/index/archived");
+    if (data.entries.length === 0) {
+      el.textContent = "Nothing archived.";
+      return;
+    }
+    el.innerHTML = data.entries.map(archivedTorrentItemHtml).join("");
+  } catch (err) {
+    el.textContent = `Failed to load archived torrents: ${err.message}`;
+  }
+}
+
 document.getElementById("add-event-btn").addEventListener("click", () => openForm(null));
 document.getElementById("sync-sort-titles-btn").addEventListener("click", async () => {
   const btn = document.getElementById("sync-sort-titles-btn");
@@ -3354,6 +3440,7 @@ document.getElementById("bulk-verify-btn").addEventListener("click", bulkVerifyD
 document.getElementById("bulk-dedupe-btn").addEventListener("click", bulkDedupe);
 document.getElementById("bulk-delete-original-btn").addEventListener("click", bulkDeleteOriginal);
 document.getElementById("bulk-remove-btn").addEventListener("click", bulkRemove);
+document.getElementById("bulk-archive-btn").addEventListener("click", bulkArchive);
 document.getElementById("bulk-selected-count").addEventListener("click", () => {
   selectedHashes.clear();
   renderTorrentIndex();
@@ -3399,6 +3486,30 @@ document.getElementById("refresh-full-activity-btn").addEventListener("click", (
     document.getElementById("full-activity-refresh-flash"),
     loadFullActivityLog
   );
+});
+document.getElementById("refresh-archived-btn").addEventListener("click", () => {
+  refreshWithFeedback(
+    document.getElementById("refresh-archived-btn"),
+    document.getElementById("archived-refresh-flash"),
+    loadArchivedTorrents
+  );
+});
+document.getElementById("archived-torrents-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-unarchive]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    await api("/api/reseed/archive/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: btn.dataset.unarchive }),
+    });
+    await loadArchivedTorrents();
+    await loadTorrentIndex();
+  } catch (err) {
+    btn.disabled = false;
+    alert(`Failed to unarchive: ${err.message}`);
+  }
 });
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => showTab(btn.dataset.tab));
@@ -3548,6 +3659,7 @@ loadSettingsPanel();
 loadEvents();
 loadActivity();
 loadFullActivityLog();
+loadArchivedTorrents();
 loadTorrentIndex();
 </script>
 </body>

@@ -19,6 +19,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
   const dedupeStatePath = join(configDir, "dedupe-state.json");
   const verifyStatePath = join(configDir, "verify-state.json");
   const matchOverridesPath = join(configDir, "match-overrides.json");
+  const archiveStatePath = join(configDir, "archive-state.json");
   const torrentRegistryDir = join(configDir, "torrent-registry");
   await fs.writeFile(configPath, JSON.stringify({ shows: [] }) + "\n", "utf-8");
   await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
@@ -33,6 +34,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
     dedupeStatePath,
     verifyStatePath,
     matchOverridesPath,
+    archiveStatePath,
     torrentRegistryDir,
     transmissionTorrentsDir,
     webui: { password: "correct-password" },
@@ -52,6 +54,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
     dedupeStatePath,
     verifyStatePath,
     matchOverridesPath,
+    archiveStatePath,
     torrentRegistryDir,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
@@ -1349,5 +1352,133 @@ test("POST /api/reseed/verify: a dirty result leaves the torrent paused, records
     global.fetch = originalFetch;
     await closeApp();
     await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/archive removes the torrent from Transmission WITHOUT deleting its data, hides it from the Index, and /clear brings it back", async () => {
+  const { baseUrl, settingsPath, torrentRegistryDir, close: closeApp } = await makeScratchServer();
+  let receivedArgs;
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get") return { torrents: [{ id: 8, name: "DVD1", downloadDir: "/downloads" }] };
+    if (method === "torrent-remove") {
+      receivedArgs = args;
+      return {};
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+
+    const torrentBuf = buildSingleFileTorrent("DVD1", 500);
+    const infoHash = parseTorrentFile(torrentBuf).infoHash;
+    await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
+
+    const before = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.equal(before.torrents.length, 1);
+
+    const archiveRes = await fetch(`${baseUrl}/api/reseed/archive`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash, id: 8 }),
+    });
+    assert.equal(archiveRes.status, 200);
+    const archiveBody = await archiveRes.json();
+    assert.equal(archiveBody.ok, true);
+    assert.equal(archiveBody.removedFromTransmission, true);
+    assert.deepEqual(receivedArgs, { ids: [8], "delete-local-data": false });
+
+    const afterArchive = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.deepEqual(afterArchive.torrents, []);
+
+    const clearRes = await fetch(`${baseUrl}/api/reseed/archive/clear`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash }),
+    });
+    assert.equal(clearRes.status, 200);
+
+    const afterClear = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.equal(afterClear.torrents.length, 1);
+    assert.equal(afterClear.torrents[0].infoHash, infoHash);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/archive still archives even when the torrent isn't currently in Transmission (no id, or Transmission not configured)", async () => {
+  const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
+  try {
+    const torrentBuf = buildSingleFileTorrent("RegistryOnly", 500);
+    const infoHash = parseTorrentFile(torrentBuf).infoHash;
+    await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
+
+    const res = await fetch(`${baseUrl}/api/reseed/archive`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.removedFromTransmission, false);
+
+    const after = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.deepEqual(after.torrents, []);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/archive rejects a body without a string hash", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/archive`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("GET /api/reseed/index/archived lists archived torrents with a readable name/size, and clearing one removes it from the list", async () => {
+  const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
+  try {
+    const torrentBuf = buildSingleFileTorrent("DVD2", 12345);
+    const infoHash = parseTorrentFile(torrentBuf).infoHash;
+    await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
+
+    await fetch(`${baseUrl}/api/reseed/archive`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash }),
+    });
+
+    const listed = await (await fetch(`${baseUrl}/api/reseed/index/archived`, { headers: { Authorization: authHeader() } })).json();
+    assert.equal(listed.ok, true);
+    assert.equal(listed.entries.length, 1);
+    assert.equal(listed.entries[0].infoHash, infoHash);
+    assert.equal(listed.entries[0].torrentName, "DVD2");
+    assert.equal(listed.entries[0].totalBytes, 12345);
+    assert.equal(typeof listed.entries[0].archivedAt, "string");
+
+    await fetch(`${baseUrl}/api/reseed/archive/clear`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash }),
+    });
+
+    const afterClear = await (await fetch(`${baseUrl}/api/reseed/index/archived`, { headers: { Authorization: authHeader() } })).json();
+    assert.deepEqual(afterClear.entries, []);
+  } finally {
+    await close();
   }
 });

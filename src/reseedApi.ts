@@ -24,9 +24,10 @@ import { previewReseed, commitReseed } from "./reseed.js";
 import { commitDedupe } from "./dedupe.js";
 import { recordDedupeOriginal, clearDedupeOriginal } from "./dedupeState.js";
 import { recordManualMatch, clearManualMatch } from "./matchOverrides.js";
+import { recordArchived, clearArchived, listArchived } from "./archiveState.js";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan } from "./reseedMatch.js";
-import { getTorrentLocation, removeTorrentAndData, getAllTorrentsWithFiles } from "./transmission.js";
+import { getTorrentLocation, removeTorrentAndData, removeTorrentKeepingData, getAllTorrentsWithFiles } from "./transmission.js";
 import { checkTorrentIntegrity } from "./torrentVerify.js";
 import { recordVerifyResult } from "./verifyState.js";
 import { sendDiscordNotification } from "./discord.js";
@@ -187,6 +188,80 @@ export async function handleReseedRequest(
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to remove torrent: ${err}` });
     }
+    return true;
+  }
+
+  /**
+   * "Archive" - hides a torrent from the Index tab's main list without
+   * deleting anything, for clutter that isn't worth actually throwing away
+   * (e.g. a torrent whose own name carries no real signal, so it can never
+   * resolve past "ambiguous" - see reseedMatch.ts's race-identity gate).
+   * Best-effort removes it from Transmission via `id`, if given and still
+   * live there, WITHOUT deleting its downloaded data
+   * (removeTorrentKeepingData - contrast with /api/reseed/remove above,
+   * which deletes both); a Transmission-removal failure is only logged, not
+   * fatal to the request, since archiving should still succeed even if
+   * Transmission is unreachable or the torrent already isn't there. Always
+   * records the archive itself (keyed by `hash`, the info-hash - stable
+   * even if this torrent is never in Transmission again) via archiveState.ts.
+   * Never touches the torrent-registry entry or the library, so this is
+   * fully reversible - see /api/reseed/archive/clear below.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/archive") {
+    let payload: { hash?: unknown; id?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.hash !== "string") {
+      sendJson(res, 400, { ok: false, error: "body must include a string hash" });
+      return true;
+    }
+    if (payload.id !== undefined && typeof payload.id !== "number") {
+      sendJson(res, 400, { ok: false, error: "id, if provided, must be a number" });
+      return true;
+    }
+
+    let removedFromTransmission = false;
+    if (typeof payload.id === "number") {
+      const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+      if (settings.transmission) {
+        try {
+          const location = await getTorrentLocation(settings.transmission, payload.id);
+          if (location) {
+            await removeTorrentKeepingData(settings.transmission, payload.id);
+            removedFromTransmission = true;
+          }
+        } catch (err) {
+          console.warn(
+            `[reseed-api] archive: failed to remove torrent id ${payload.id} from Transmission (still archiving it): ${err}`
+          );
+        }
+      }
+    }
+
+    recordArchived(payload.hash, { archivedAt: new Date().toISOString() }, opts.archiveStatePath);
+    sendJson(res, 200, { ok: true, removedFromTransmission });
+    return true;
+  }
+
+  /** Undoes an archive (see /api/reseed/archive above) - a no-op, not an error, if this hash wasn't archived. Doesn't re-add anything to Transmission; archiving never deleted the registry entry or the library, so the torrent just reappears in the Index list as-is on the next load. */
+  if (req.method === "POST" && url.pathname === "/api/reseed/archive/clear") {
+    let payload: { hash?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.hash !== "string") {
+      sendJson(res, 400, { ok: false, error: "body must include a string hash" });
+      return true;
+    }
+    clearArchived(payload.hash, opts.archiveStatePath);
+    sendJson(res, 200, { ok: true });
     return true;
   }
 
@@ -466,6 +541,7 @@ export async function handleReseedRequest(
         dedupeStatePath: opts.dedupeStatePath,
         verifyStatePath: opts.verifyStatePath,
         matchOverridesPath: opts.matchOverridesPath,
+        archiveStatePath: opts.archiveStatePath,
         transmissionConfig: settings.transmission ?? null,
       });
 
@@ -510,6 +586,46 @@ export async function handleReseedRequest(
       "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}.torrent"`,
     });
     res.end(buf);
+    return true;
+  }
+
+  /**
+   * Lists every currently-archived torrent (see /api/reseed/archive above) -
+   * backs the Settings tab's "Archived torrents" panel, the one place an
+   * archived entry is still visible/recoverable from, since the main Index
+   * list excludes them entirely. Re-parses each one's registered .torrent
+   * for a readable name/size same as /api/reseed/index/download does,
+   * falling back to the bare hash if that .torrent no longer parses (still
+   * listed either way, so it can still be un-archived) - deliberately does
+   * NOT rebuild a full reseed plan against the library like the main Index
+   * list does, since an archived entry's Plex/Transmission status isn't
+   * useful here, only "what is this and can I bring it back."
+   */
+  if (req.method === "GET" && url.pathname === "/api/reseed/index/archived") {
+    try {
+      const archived = listArchived(opts.archiveStatePath);
+      const entries = await Promise.all(
+        Object.entries(archived).map(async ([infoHash, record]) => {
+          const buf = await getRegisteredTorrentBuf(infoHash, opts.torrentRegistryDir);
+          let torrentName = infoHash;
+          let totalBytes = 0;
+          if (buf) {
+            try {
+              const meta = parseTorrentFile(buf);
+              torrentName = meta.name;
+              totalBytes = meta.files.reduce((sum, f) => sum + f.length, 0);
+            } catch {
+              // Falls back to the hash-as-name above - still listed so it can be unarchived.
+            }
+          }
+          return { infoHash, torrentName, totalBytes, archivedAt: record.archivedAt };
+        })
+      );
+      entries.sort((a, b) => b.archivedAt.localeCompare(a.archivedAt));
+      sendJson(res, 200, { ok: true, entries });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to list archived torrents: ${err}` });
+    }
     return true;
   }
 

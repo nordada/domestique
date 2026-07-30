@@ -36,6 +36,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
   const dedupeStatePath = join(configDir, "dedupe-state.json");
   const verifyStatePath = join(configDir, "verify-state.json");
   const matchOverridesPath = join(configDir, "match-overrides.json");
+  const archiveStatePath = join(configDir, "archive-state.json");
   const torrentRegistryDir = join(configDir, "torrent-registry");
   await fs.writeFile(
     configPath,
@@ -58,6 +59,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     dedupeStatePath,
     verifyStatePath,
     matchOverridesPath,
+    archiveStatePath,
     torrentRegistryDir,
     transmissionTorrentsDir: null,
     webui,

@@ -514,16 +514,17 @@ and these env vars are ignored on every later boot. Delete
 
 **Before your very first `docker compose up` here**, run `touch
 config/settings.json config/activity.json config/dedupe-state.json
-config/verify-state.json config/match-overrides.json`
+config/verify-state.json config/match-overrides.json config/archive-state.json`
 (unlike `config/events.json`, none of these ship in the repo). Skipping
 this is harmless on most setups, but if nothing exists at that path on the
 host yet, Docker creates an empty *directory* there instead of a file - a
 well-known bind-mount gotcha the app can't clean up on its own, since by
 then it's the container's actual mount point. If you hit this
 (crash-looping with an `EBUSY`-related error mentioning `settings.json`,
-`activity.json`, `dedupe-state.json`, `verify-state.json`, or
-`match-overrides.json`), stop the container, `rmdir` the affected path on
-the host, `touch` an empty file in its place, then start it again.
+`activity.json`, `dedupe-state.json`, `verify-state.json`,
+`match-overrides.json`, or `archive-state.json`), stop the container, `rmdir`
+the affected path on the host, `touch` an empty file in its place, then
+start it again.
 
 By default Plex only notices new files on its own scan schedule. Set these
 in `.env` to have the archiver tell Plex to rescan just the one season
@@ -744,6 +745,16 @@ single button press: the first click turns it into a loud red "CONFIRM"
 (auto-reverting after a few seconds if you don't follow through), and only
 a second click while it's in that state actually removes anything - no
 browser popup involved.
+
+For clutter that isn't worth actually throwing away - a torrent whose own
+name carries no real identifying text, so a same-size byte collision can
+never resolve past "ambiguous" no matter how many library files you check
+against it - there's also **Archive**. Unlike Remove above, this is fully
+reversible: it hides the torrent from this list and (best-effort) removes
+it from Transmission, but explicitly does NOT delete its downloaded data,
+its registered `.torrent`, or anything filed in Plex. Every currently
+archived torrent is listed in the Settings tab's **Archive** panel, with
+an **Unarchive** button that brings it straight back.
 
 **The percentage shown is deliberately not Transmission's own
 `percentDone`.** Transmission only counts files it considers "wanted"
@@ -1188,9 +1199,9 @@ run-as-root behavior, so upgrades don't change anything until you opt in.
 What happens at startup with `PUID` set: the entrypoint fixes ownership of
 the bind-mounted config files (`events.json`, `settings.json`,
 `activity.json`, `dedupe-state.json`, `verify-state.json`,
-`match-overrides.json`) and the `torrent-registry/` directory, which are
-tiny and must be writable by the app, then drops privileges before Node
-starts. The library and downloads mounts are deliberately never
+`match-overrides.json`, `archive-state.json`) and the `torrent-registry/`
+directory, which are tiny and must be writable by the app, then drops
+privileges before Node starts. The library and downloads mounts are deliberately never
 chowned automatically (they can be terabytes, and ownership there is your
 call), which leads to the one manual step:
 

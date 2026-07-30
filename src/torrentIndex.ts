@@ -37,6 +37,7 @@ import { parseTorrentFile } from "./torrentFile.js";
 import { computeStorageStatus, findOrphanOriginal, computePercentComplete, type StorageStatus, type OrphanOriginal } from "./seeding.js";
 import { getVerifyResult, type VerifyRecord } from "./verifyState.js";
 import { getManualMatches } from "./matchOverrides.js";
+import { isArchived } from "./archiveState.js";
 
 export interface TorrentIndexEntry {
   infoHash: string;
@@ -78,6 +79,8 @@ export interface BuildTorrentIndexOptions {
   verifyStatePath: string;
   /** Where matchOverrides.ts persists a human's own pick for an ambiguous file (see reseedApi.ts's /api/reseed/index/resolve route) - applied on top of every fresh plan below. */
   matchOverridesPath: string;
+  /** Where archiveState.ts persists which torrents a human has archived (see reseedApi.ts's /api/reseed/archive route) - an archived entry is excluded from this function's result entirely, same as a vanished registry entry, rather than returned with a flag. */
+  archiveStatePath: string;
   transmissionConfig: TransmissionConfig | null;
 }
 
@@ -102,6 +105,10 @@ export async function buildTorrentIndex(
 
   const entries = await Promise.all(
     registryEntries.map(async (regEntry): Promise<TorrentIndexEntry | null> => {
+      // Archived - skip the (otherwise wasted) parse/plan/Transmission-match
+      // work entirely, same as a vanished-from-disk entry below.
+      if (isArchived(regEntry.infoHash, opts.archiveStatePath)) return null;
+
       const buf = await getRegisteredTorrentBuf(regEntry.infoHash, opts.registryDir);
       if (!buf) return null; // vanished between listRegistry and here - skip rather than crash the whole index
       let meta;
