@@ -513,16 +513,17 @@ and these env vars are ignored on every later boot. Delete
 `config/settings.json` if you want `.env` to reseed it fresh.
 
 **Before your very first `docker compose up` here**, run `touch
-config/settings.json config/activity.json config/dedupe-state.json`
+config/settings.json config/activity.json config/dedupe-state.json
+config/verify-state.json config/match-overrides.json`
 (unlike `config/events.json`, none of these ship in the repo). Skipping
 this is harmless on most setups, but if nothing exists at that path on the
 host yet, Docker creates an empty *directory* there instead of a file - a
 well-known bind-mount gotcha the app can't clean up on its own, since by
 then it's the container's actual mount point. If you hit this
 (crash-looping with an `EBUSY`-related error mentioning `settings.json`,
-`activity.json`, or `dedupe-state.json`), stop the container, `rmdir` the
-affected path on the host, `touch` an empty file in its place, then start
-it again.
+`activity.json`, `dedupe-state.json`, `verify-state.json`, or
+`match-overrides.json`), stop the container, `rmdir` the affected path on
+the host, `touch` an empty file in its place, then start it again.
 
 By default Plex only notices new files on its own scan schedule. Set these
 in `.env` to have the archiver tell Plex to rescan just the one season
@@ -1186,9 +1187,10 @@ run-as-root behavior, so upgrades don't change anything until you opt in.
 
 What happens at startup with `PUID` set: the entrypoint fixes ownership of
 the bind-mounted config files (`events.json`, `settings.json`,
-`activity.json`, `dedupe-state.json`) and the `torrent-registry/` directory,
-which are tiny and must be writable by the app, then drops privileges
-before Node starts. The library and downloads mounts are deliberately never
+`activity.json`, `dedupe-state.json`, `verify-state.json`,
+`match-overrides.json`) and the `torrent-registry/` directory, which are
+tiny and must be writable by the app, then drops privileges before Node
+starts. The library and downloads mounts are deliberately never
 chowned automatically (they can be terabytes, and ownership there is your
 call), which leads to the one manual step:
 

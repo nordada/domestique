@@ -50,6 +50,8 @@ services:
       SETTINGS_PATH: ${SETTINGS_CONTAINER_PATH:-/app/config/settings.json}
       ACTIVITY_PATH: ${ACTIVITY_CONTAINER_PATH:-/app/config/activity.json}
       DEDUPE_STATE_PATH: ${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
+      VERIFY_STATE_PATH: ${VERIFY_STATE_CONTAINER_PATH:-/app/config/verify-state.json}
+      MATCH_OVERRIDES_PATH: ${MATCH_OVERRIDES_CONTAINER_PATH:-/app/config/match-overrides.json}
       TORRENT_REGISTRY_DIR: ${TORRENT_REGISTRY_CONTAINER_PATH:-/app/config/torrent-registry}
       PORT: "${PORT}"
       # Optional Plex/Discord/hot-folder integrations - safe to leave unset,
@@ -148,6 +150,20 @@ services:
       # Same first-run gotcha as settings.json/activity.json above: `touch
       # config/dedupe-state.json` before your first `docker compose up` here.
       - ./config/dedupe-state.json:${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
+      # Index tab's "Verify data" integrity-check results (see verifyState.ts)
+      # - was never bind-mounted at all until this line existed, so every
+      # container recreation silently reset it to empty and any prior verify
+      # run looked like it had never happened. Same first-run gotcha as
+      # settings.json/activity.json above: `touch config/verify-state.json`
+      # before your first `docker compose up` here.
+      - ./config/verify-state.json:${VERIFY_STATE_CONTAINER_PATH:-/app/config/verify-state.json}
+      # A human's own picks from the Index tab's "Resolve ambiguous files"
+      # modal (see matchOverrides.ts) - same story as verify-state.json just
+      # above: never bind-mounted, so a resolved pick silently reverted to
+      # "ambiguous" again on the next container recreation. Same first-run
+      # gotcha: `touch config/match-overrides.json` before your first
+      # `docker compose up` here.
+      - ./config/match-overrides.json:${MATCH_OVERRIDES_CONTAINER_PATH:-/app/config/match-overrides.json}
       # Durable copy of every .torrent Domestique has a record of (staged
       # through the Index tab, or synced in from Transmission's own torrents
       # directory below), keyed by info-hash (see torrentRegistry.ts) - lets

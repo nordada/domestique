@@ -18,6 +18,10 @@ config/dedupe-state.json
 # src/verifyState.ts) - runtime state, same as dedupe-state.json above, not
 # something to track in git.
 config/verify-state.json
+# A human's own picks from the Index tab's "Resolve ambiguous files" modal
+# (see src/matchOverrides.ts) - runtime state, same as dedupe-state.json
+# above, not something to track in git.
+config/match-overrides.json
 # Durable copy of every .torrent successfully staged through the Reseed tab
 # (see src/torrentRegistry.ts) - runtime state, host-specific, not something
 # to track in git.

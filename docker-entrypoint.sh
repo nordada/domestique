@@ -11,8 +11,9 @@
 # don't change behavior on upgrade.
 #
 # What gets chowned automatically: only the config dir(s) holding
-# events.json/settings.json/activity.json/dedupe-state.json, plus the
-# torrent-registry directory - tiny, so doing it every boot is cheap, and
+# events.json/settings.json/activity.json/dedupe-state.json/verify-state.json/
+# match-overrides.json, plus the torrent-registry directory - tiny, so doing
+# it every boot is cheap, and
 # settings.json MUST be owned by the app user (the app enforces owner-only
 # 0600 on it). The library and downloads mounts are deliberately never
 # touched: they can be terabytes, and ownership there is the host's
@@ -22,7 +23,7 @@ set -e
 
 if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}" ]; then
   PGID="${PGID:-$PUID}"
-  for f in "${CONFIG_PATH:-/app/config/events.json}" "${SETTINGS_PATH:-/app/config/settings.json}" "${ACTIVITY_PATH:-/app/config/activity.json}" "${DEDUPE_STATE_PATH:-/app/config/dedupe-state.json}"; do
+  for f in "${CONFIG_PATH:-/app/config/events.json}" "${SETTINGS_PATH:-/app/config/settings.json}" "${ACTIVITY_PATH:-/app/config/activity.json}" "${DEDUPE_STATE_PATH:-/app/config/dedupe-state.json}" "${VERIFY_STATE_PATH:-/app/config/verify-state.json}" "${MATCH_OVERRIDES_PATH:-/app/config/match-overrides.json}"; do
     chown -R "$PUID:$PGID" "$(dirname "$f")" 2>/dev/null || true
   done
   # A directory itself, not a file - dirname would chown its parent instead.
