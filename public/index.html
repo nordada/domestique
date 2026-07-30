@@ -113,7 +113,7 @@
   .torrent-index-table-scroll table { margin: 0; }
   .torrent-index-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
   .torrent-index-table-scroll td.truncate { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #bulk-action-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.6rem 0.75rem; margin-bottom: 0.75rem; border: 1px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  #bulk-action-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem 0.6rem; margin-bottom: 0.75rem; border: 1px solid var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .sortable-th { cursor: pointer; user-select: none; }
   .sortable-th:hover { opacity: 0.75; }
   .sort-arrow { display: inline-block; width: 0.9em; margin-left: 0.15em; opacity: 0.7; }
@@ -155,6 +155,18 @@
   .seeding-summary-badge.err { color: var(--err); border-color: var(--err); }
   .seeding-summary-badge.ok { color: var(--ok); border-color: var(--ok); }
   .seeding-summary-badge.neutral { opacity: 0.75; border-color: var(--border); }
+  /* Pill-shaped buttons matching the summary-badge pills above (same
+     radius/padding/font-size), for the Torrent index's bulk action bar -
+     plain rectangular buttons there read as chunky and wasted space on a
+     narrow/mobile viewport; this is meaningfully more compact and visually
+     consistent with the badges already sitting above the same table. */
+  .pill-btn { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
+  .pill-btn.accent { color: var(--accent); border-color: var(--accent); }
+  .pill-btn:disabled { opacity: 0.4; }
+  /* "N selected" itself as a clickable badge-styled button (clears the
+     selection) rather than separate text + a separate icon-button, for the
+     same compactness reason. */
+  .seeding-summary-badge.clickable { cursor: pointer; }
   button:hover { opacity: 0.85; }
   h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
   h3:first-child { margin-top: 0; }
@@ -756,22 +768,14 @@
   </div>
   <input type="text" id="index-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
   <div id="bulk-action-bar" class="hidden">
-    <div class="row" style="flex:0 0 auto; align-items:center; gap:0.4rem;">
-      <strong id="bulk-selected-count"></strong>
-      <button type="button" class="icon-btn subtle" id="bulk-clear-selection-btn" title="Clear selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-    </div>
-    <span style="border-left:1px solid var(--border); align-self:stretch;"></span>
-    <div class="row" style="flex:0 0 auto; align-items:center; gap:0.4rem;">
-      <button type="button" id="bulk-add-to-library-btn" title="Runs each eligible torrent through the normal parse/match/copy pipeline into your Plex library - for torrents whose data was never filed into Plex at all, or whose filed copy is gone.">Add to Plex library</button>
-      <label style="display:flex; align-items:center; gap:0.3rem; margin:0; font-size:0.85rem; opacity:0.85;" title="Bypasses the &quot;already have this release&quot; check and always files a distinctly-tagged copy - only check this if you've confirmed the existing Plex file is wrong or genuinely a different release.">
-        <input type="checkbox" id="bulk-force-checkbox" style="width:auto;"> Force
-      </label>
-    </div>
-    <span style="border-left:1px solid var(--border); align-self:stretch;"></span>
-    <button type="button" class="confirm-action" id="bulk-dedupe-btn" title="Relinks each eligible torrent's data to its Plex library copy and asks Transmission to re-verify it there - reclaims the disk space it was previously duplicating. A failed verify automatically reverts that one torrent back to its original location; nothing is ever deleted by this step.">Dedupe</button>
-    <span style="border-left:1px solid var(--border); align-self:stretch;"></span>
-    <button type="button" class="danger" id="bulk-delete-original-btn" title="Permanently deletes the leftover download-folder copy of each eligible already-deduped torrent - safe to remove since Transmission now seeds from the hardlinked Plex copy instead. Never touches your Plex library.">Delete leftover copy</button>
-    <button type="button" class="danger" id="bulk-remove-btn" title="Removes each eligible torrent from Transmission entirely and deletes its downloaded data from disk. Never touches anything already filed in your Plex library - only Transmission's own copy.">Remove from Transmission</button>
+    <button type="button" class="seeding-summary-badge neutral clickable" id="bulk-selected-count" title="Clear selection"></button>
+    <button type="button" class="pill-btn" id="bulk-add-to-library-btn" title="Runs each eligible torrent through the normal parse/match/copy pipeline into your Plex library - for torrents whose data was never filed into Plex at all, or whose filed copy is gone. Click again to confirm once you've checked the Force option (if needed).">Add to Plex library</button>
+    <label id="bulk-force-label" class="hidden" style="display:flex; align-items:center; gap:0.25rem; margin:0; font-size:0.85rem; opacity:0.85;" title="Bypasses the &quot;already have this release&quot; check and always files a distinctly-tagged copy - checked by default once revealed; uncheck if you don't want the override for this batch.">
+      <input type="checkbox" id="bulk-force-checkbox" style="width:auto;" checked> Force
+    </label>
+    <button type="button" class="pill-btn accent" id="bulk-dedupe-btn" title="Relinks each eligible torrent's data to its Plex library copy and asks Transmission to re-verify it there - reclaims the disk space it was previously duplicating. A failed verify automatically reverts that one torrent back to its original location; nothing is ever deleted by this step.">Dedupe</button>
+    <button type="button" class="pill-btn danger" id="bulk-delete-original-btn" title="Permanently deletes the leftover download-folder copy of each eligible already-deduped torrent - safe to remove since Transmission now seeds from the hardlinked Plex copy instead. Never touches your Plex library.">Delete leftover copy</button>
+    <button type="button" class="pill-btn danger" id="bulk-remove-btn" title="Removes each eligible torrent from Transmission entirely and deletes its downloaded data from disk. Never touches anything already filed in your Plex library - only Transmission's own copy.">Remove from Transmission</button>
   </div>
   <div id="index-action-status" class="status-msg"></div>
   <div class="torrent-index-table-scroll">
@@ -2158,15 +2162,32 @@ function updateSelectAllCheckboxState() {
  * on the eligible subset and reports what was skipped and why, rather than
  * requiring a uniform selection up front.
  */
+// Tracks the Add-to-Plex-library button's own two-step reveal-then-confirm
+// state (see resetAddToLibraryReveal/the click handler below) - the Force
+// checkbox stays hidden until the first click, appears pre-checked, and a
+// second click on the now-"Confirm" button actually runs the action and
+// resets this back to the initial single-button state.
+let addToLibraryArmed = false;
+
+/** Reverts the Add-to-Plex-library button + Force checkbox back to their initial unarmed state - called after a confirm actually runs, and whenever the selection itself changes (an in-progress confirm shouldn't silently carry over to a different set of torrents). */
+function resetAddToLibraryReveal() {
+  addToLibraryArmed = false;
+  document.getElementById("bulk-force-label").classList.add("hidden");
+  document.getElementById("bulk-force-checkbox").checked = true;
+}
+
 function updateBulkActionBar() {
   const bar = document.getElementById("bulk-action-bar");
   const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
   if (selected.length === 0) {
     bar.classList.add("hidden");
+    resetAddToLibraryReveal();
     return;
   }
   bar.classList.remove("hidden");
-  document.getElementById("bulk-selected-count").textContent = `${selected.length} selected`;
+  resetAddToLibraryReveal();
+  const selectedCountEl = document.getElementById("bulk-selected-count");
+  selectedCountEl.textContent = `${selected.length} selected ✕`;
 
   const eligibleAddToLibrary = selected.filter((t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length);
   const eligibleDedupe = selected.filter((t) => t.storageStatus === "duplicate");
@@ -2176,7 +2197,6 @@ function updateBulkActionBar() {
   const addBtn = document.getElementById("bulk-add-to-library-btn");
   addBtn.textContent = `Add to Plex library (${eligibleAddToLibrary.length})`;
   addBtn.disabled = eligibleAddToLibrary.length === 0;
-  document.getElementById("bulk-force-checkbox").disabled = eligibleAddToLibrary.length === 0;
 
   const dedupeBtn = document.getElementById("bulk-dedupe-btn");
   dedupeBtn.textContent = `Dedupe (${eligibleDedupe.length})`;
@@ -2980,13 +3000,27 @@ document.getElementById("index-select-all").addEventListener("change", (e) => {
   else lastFilteredEntries.forEach((t) => selectedHashes.delete(t.infoHash));
   renderTorrentIndex();
 });
-document.getElementById("bulk-add-to-library-btn").addEventListener("click", () =>
-  bulkAddToLibrary(document.getElementById("bulk-force-checkbox").checked)
-);
+// Two-step reveal-then-confirm, distinct from the native confirm() dialogs
+// the other four bulk actions use: the first click just reveals the Force
+// checkbox (pre-checked) and relabels this button to "Confirm" - nothing
+// runs yet. A second click on the now-"Confirm" button actually calls
+// bulkAddToLibrary with whatever the Force checkbox currently reads,
+// then resets back to the initial state (handled by
+// resetAddToLibraryReveal, itself called from updateBulkActionBar once the
+// selection clears after a successful run).
+document.getElementById("bulk-add-to-library-btn").addEventListener("click", (e) => {
+  if (!addToLibraryArmed) {
+    addToLibraryArmed = true;
+    document.getElementById("bulk-force-label").classList.remove("hidden");
+    e.target.textContent = e.target.textContent.replace("Add to Plex library", "Confirm");
+    return;
+  }
+  bulkAddToLibrary(document.getElementById("bulk-force-checkbox").checked);
+});
 document.getElementById("bulk-dedupe-btn").addEventListener("click", bulkDedupe);
 document.getElementById("bulk-delete-original-btn").addEventListener("click", bulkDeleteOriginal);
 document.getElementById("bulk-remove-btn").addEventListener("click", bulkRemove);
-document.getElementById("bulk-clear-selection-btn").addEventListener("click", () => {
+document.getElementById("bulk-selected-count").addEventListener("click", () => {
   selectedHashes.clear();
   renderTorrentIndex();
 });
