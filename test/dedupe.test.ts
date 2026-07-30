@@ -110,7 +110,7 @@ test("commitDedupe carries along DVD navigation files reseedMatch.ts excludes fr
   // Real incident: a torrent with real content fully matched (VIDEO_TS's
   // VTS_NN_MM.VOB) alongside excluded DVD-nav files (VIDEO_TS.BUP here)
   // passed the full-match gate (correctly - see reseedMatch.ts's
-  // isDvdNavigationFile exclusion) but then failed verify outright, because
+  // isNonContentFile exclusion) but then failed verify outright, because
   // the staging dir had the real video staged but was simply missing the
   // nav file Transmission's torrent still declares and checks on verify.
   const { libraryRoot, stagingRoot, downloadsRoot, overridesPath } = await makeLibrary();

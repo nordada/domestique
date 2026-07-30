@@ -23,7 +23,7 @@ import { buildReseedPlan, applyManualOverrides, type ReseedPlan } from "./reseed
 import { getManualMatches } from "./matchOverrides.js";
 import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
 import { computePercentComplete } from "./seeding.js";
-import { isPathWithin, isDvdNavigationFile } from "./fileops.js";
+import { isPathWithin, isNonContentFile } from "./fileops.js";
 import {
   getAllTorrentsWithFiles,
   setTorrentLocation,
@@ -66,7 +66,7 @@ function isCleanVerify(verify: TorrentVerifyResult | null): verify is TorrentVer
  * app's own size-only matching alone, same philosophy as reseed.ts.
  *
  * Also copies along any DVD navigation/recorder-metadata files (see
- * fileops.ts's isDvdNavigationFile) that `plan.files` deliberately excludes
+ * fileops.ts's isNonContentFile) that `plan.files` deliberately excludes
  * from matching - they're real files Transmission's torrent still declares
  * and will check on verify, even though reseedMatch.ts is right to never
  * expect a library match for them (a Plex library never contains them).
@@ -167,7 +167,7 @@ export async function commitDedupe(
   // than throwing and aborting the whole dedupe attempt over what's always
   // a tiny, non-essential file.
   for (const f of torrent.files) {
-    if (!isDvdNavigationFile(basename(f.name))) continue;
+    if (!isNonContentFile(basename(f.name))) continue;
     try {
       const destPath = join(perTorrentDir, f.name);
       await mkdir(dirname(destPath), { recursive: true });

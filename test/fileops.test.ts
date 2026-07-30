@@ -68,6 +68,23 @@ test("resolveSourceItems skips raw DVD navigation files (.BUP/.IFO, VIDEO_TS.VOB
   assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_2.VOB"))?.parsed.partNum, 2);
 });
 
+test("resolveSourceItems skips generic non-video companion files (.nfo/.srt/.ssp/etc) sitting alongside real content", async () => {
+  // Real incident: a "Project-2.ssp" (a video-editing project file, not
+  // video itself) sitting in a Tour de France torrent permanently counted
+  // against reseedMatch.ts's match total, same false-partial-match shape
+  // as the DVD navigation/recorder-metadata cases above.
+  const { sourceDir } = await makeScratch();
+  const folder = join(sourceDir, "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2");
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(join(folder, "Project-2.ssp"), "x");
+  await fs.writeFile(join(folder, "release.nfo"), "x");
+  await fs.writeFile(join(folder, "TdF-2019-Stage-17-(ESHD)-Part-3-of-4.mp4"), "real video");
+
+  const items = await resolveSourceItems(sourceDir, "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sourceFile.split("/").pop(), "TdF-2019-Stage-17-(ESHD)-Part-3-of-4.mp4");
+});
+
 test("resolveSourceItems skips DVD-recorder housekeeping files (VIDEO_RM.DAT/PVR_TEMP.USR/DVD_REC.USR) sitting alongside real content", async () => {
   // Real incident: "Giro D'Italia History 1909-1993" carries a VIDEO_RM
   // folder (recorder metadata, a different disc-authoring convention than
@@ -106,11 +123,11 @@ test("resolveSourceItems folds in a VIDEO_TS subfolder's files when the release 
   await fs.writeFile(join(videoTs, "VTS_01_2.VOB"), "real video 2");
   // A file sitting at the TOP level too, alongside VIDEO_TS - confirms it's
   // folded in, not used instead of the top level.
-  await fs.writeFile(join(folder, "cover.jpg"), "x");
+  await fs.writeFile(join(folder, "extra.mp4"), "x");
 
   const items = await resolveSourceItems(sourceDir, "1985 Giro d'Italia");
   const names = items.map((i) => i.sourceFile.split("/").pop()).sort();
-  assert.deepEqual(names, ["VTS_01_1.VOB", "VTS_01_2.VOB", "cover.jpg"]);
+  assert.deepEqual(names, ["VTS_01_1.VOB", "VTS_01_2.VOB", "extra.mp4"]);
   assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_1.VOB"))?.parsed.partNum, 1);
 });
 

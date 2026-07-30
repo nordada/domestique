@@ -76,9 +76,55 @@ const DVD_NAVIGATION_EXTENSIONS = new Set(["bup", "ifo"]);
 // would misclassify genuine video content on a different disc format.
 const DVD_RECORDER_NAVIGATION_FILENAMES = new Set(["video_rm.dat", "pvr_temp.usr", "dvd_rec.usr"]);
 
-export function isDvdNavigationFile(filename: string): boolean {
+// A third, much more general category: generic non-video companion files
+// scene/private-tracker releases sometimes bundle alongside the real
+// content - .nfo/.txt/.sfv/.diz are common release metadata, .srt/.sub/.idx
+// subtitles, .jpg/.png/.gif/.bmp cover art or screenshots, .ssp/.par2/.md5
+// assorted editing or verification artifacts. None of these can ever have a
+// real counterpart in a Plex media library (Plex only ever stores actual
+// video files), so counting them the same way as real content produces the
+// exact same permanent-false-"Partial match" shape as the two DVD cases
+// above - the real incident this fixed: a stray "Project-2.ssp" (a video-
+// editing project file, not video itself) sitting in an otherwise-fully-
+// filed "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2" torrent. Unlike
+// the DVD_RECORDER_NAVIGATION_FILENAMES set above, extension alone is safe
+// here - none of these are ever a legitimate video container on any known
+// disc/release format, unlike .DAT.
+const NON_VIDEO_COMPANION_EXTENSIONS = new Set([
+  "nfo",
+  "txt",
+  "sfv",
+  "md5",
+  "par2",
+  "srt",
+  "sub",
+  "idx",
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "url",
+  "ssp",
+  "db",
+  "m3u",
+  "diz",
+]);
+
+/**
+ * True for a torrent file that's never real video content, whether raw DVD
+ * navigation/recorder-metadata or a generic scene-release companion file -
+ * see the three constants above for each category's own real incident.
+ * Used both at ingest time (resolveSourceItems below, so this never gets
+ * auto-created into its own bogus "episode") and by reseedMatch.ts's
+ * buildReseedPlan (so it never counts against a torrent's match total
+ * either, the same false-partial-match shape every category here produces
+ * if left uncounted-for).
+ */
+export function isNonContentFile(filename: string): boolean {
   const ext = extname(filename).slice(1).toLowerCase();
   if (DVD_NAVIGATION_EXTENSIONS.has(ext)) return true;
+  if (NON_VIDEO_COMPANION_EXTENSIONS.has(ext)) return true;
   if (DVD_RECORDER_NAVIGATION_FILENAMES.has(filename.toLowerCase())) return true;
   return /^video_ts\.vob$/i.test(filename);
 }
@@ -88,8 +134,9 @@ export function isDvdNavigationFile(filename: string): boolean {
  * figures out whether it's a single file or a folder of files, and returns
  * one SourceItem per file to archive. For folders, each file is parsed using
  * its own name merged with the folder's name (see parser.mergeParsed) since
- * part/stage info lives on the individual filenames in this library. Raw
- * DVD-Video navigation files (see isDvdNavigationFile) are skipped entirely,
+ * part/stage info lives on the individual filenames in this library.
+ * Non-content files (see isNonContentFile - DVD navigation/recorder
+ * metadata, generic scene-release companion files) are skipped entirely,
  * never even reaching the parser. A "VIDEO_TS" subfolder, if present, is
  * folded in alongside the top level's own files - otherwise this is
  * single-level only, deliberately not a general recursive walk.
@@ -131,7 +178,7 @@ export async function resolveSourceItems(
 
   const items: SourceItem[] = [];
   for (const { name, dir } of fileEntries) {
-    if (isDvdNavigationFile(name)) continue;
+    if (isNonContentFile(name)) continue;
     const ext = extname(name).slice(1).toLowerCase() || VIDEO_EXT_FALLBACK;
     const nameNoExt = basename(name, extname(name));
     const fileParsed = parseName(nameNoExt);

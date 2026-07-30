@@ -138,10 +138,10 @@ test("buildReseedPlan reports a file with no size match as unmatched", () => {
 });
 
 test("buildReseedPlan auto-matches zero-length files without a candidate search", () => {
-  const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/empty.nfo", length: 0 }] };
+  const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/empty.mp4", length: 0 }] };
   const plan = buildReseedPlan(meta, new Map());
   assert.equal(plan.matchedCount, 1);
-  assert.deepEqual(plan.files[0], { relativePath: "Race/empty.nfo", length: 0, status: "matched" });
+  assert.deepEqual(plan.files[0], { relativePath: "Race/empty.mp4", length: 0, status: "matched" });
 });
 
 test("buildReseedPlan caps the reported ambiguous candidate list", () => {
@@ -222,6 +222,30 @@ test("buildReseedPlan excludes DVD-recorder housekeeping files (VIDEO_RM.DAT/PVR
   const plan = buildReseedPlan(meta, index);
   assert.equal(plan.files.length, 3);
   assert.equal(plan.matchedCount, 3);
+  assert.equal(plan.matchedCount, plan.files.length);
+});
+
+test("buildReseedPlan excludes generic non-video companion files (.ssp/.nfo/etc) from the match denominator", () => {
+  // Real incident, found live: "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2"
+  // carries a stray "Project-2.ssp" (a video-editing project file) alongside
+  // its 2 real, already-filed video parts - showed a permanent "Partial
+  // match: 2/3" purely because that one file could never match anything in
+  // a Plex library (which never stores non-video files at all).
+  const meta: TorrentMetainfo = {
+    name: "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2",
+    files: [
+      { relativePath: "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2/TdF-2019-Stage-17-(ESHD)-Part-3-of-4.mp4", length: 100 },
+      { relativePath: "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2/TdF-2019-Stage-17-(ESHD)-Part-4-of-4.mp4", length: 200 },
+      { relativePath: "Tour-de-France-2019-Stage-17-(ESHD)-Part-2-of-2/Project-2.ssp", length: 10 },
+    ],
+  };
+  const index = new Map([
+    [100, ["/library/Tour de France/TdF - S2019E17 - pt03.mp4"]],
+    [200, ["/library/Tour de France/TdF - S2019E17 - pt04.mp4"]],
+  ]);
+  const plan = buildReseedPlan(meta, index);
+  assert.equal(plan.files.length, 2);
+  assert.equal(plan.matchedCount, 2);
   assert.equal(plan.matchedCount, plan.files.length);
 });
 
