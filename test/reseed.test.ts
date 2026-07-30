@@ -155,8 +155,11 @@ test("commitReseed stages only the matched files of a partially-matched torrent,
   try {
     await writeFile(join(libraryRoot, "Stage 1 renamed.mp4"), Buffer.alloc(100));
     // Two same-size files for the "ambiguous" stage2 slot - never guessed.
-    await writeFile(join(libraryRoot, "dup-a.mp4"), Buffer.alloc(200));
-    await writeFile(join(libraryRoot, "dup-b.mp4"), Buffer.alloc(200));
+    // Both share the torrent's own "Partial Race" name (unlike an unrelated
+    // race that only collides on byte size - see reseedMatch.test.ts's
+    // race-identity gate), so neither gets excluded outright.
+    await writeFile(join(libraryRoot, "Partial Race - dup-a.mp4"), Buffer.alloc(200));
+    await writeFile(join(libraryRoot, "Partial Race - dup-b.mp4"), Buffer.alloc(200));
     const torrentBuf = buildMultiFileTorrent("Partial Race", [
       { path: ["Stage 1.mp4"], length: 100 },
       { path: ["Stage 2.mp4"], length: 200 },

@@ -18,14 +18,66 @@ test("buildReseedPlan matches a file with exactly one same-size library candidat
 
 test("buildReseedPlan leaves a file ambiguous when no candidate's filename scores higher than the others", () => {
   const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/stage1.mp4", length: 100 }] };
-  const index = new Map([[100, ["/library/a.mp4", "/library/b.mp4"]]]);
+  const index = new Map([[100, ["/library/Race/a.mp4", "/library/Race/b.mp4"]]]);
   const plan = buildReseedPlan(meta, index);
   assert.equal(plan.ambiguousCount, 1);
   assert.equal(plan.matchedCount, 0);
   assert.equal(plan.guessedCount, 0);
   assert.equal(plan.files[0].status, "ambiguous");
-  assert.deepEqual(new Set(plan.files[0].candidates), new Set(["/library/a.mp4", "/library/b.mp4"]));
+  assert.deepEqual(new Set(plan.files[0].candidates), new Set(["/library/Race/a.mp4", "/library/Race/b.mp4"]));
   assert.equal(plan.files[0].candidate, undefined);
+});
+
+test("buildReseedPlan excludes a same-size candidate that shares no race-identity word with the torrent, rather than leaving it ambiguous", () => {
+  // The real incident this fixed: a "1986 Tour De France DVD3" torrent's
+  // VTS_01_N.VOB files (raw DVD-rip parts, ~1GB each per the DVD-Video
+  // spec's VOB size cap) kept surfacing a same-size Giro d'Italia library
+  // file as an "ambiguous, pick one" candidate purely on byte-size
+  // coincidence - nothing about a Giro d'Italia file is plausibly this Tour
+  // de France torrent, so it should be excluded outright, not offered.
+  // Two same-size Giro candidates (not one) so this exercises the same
+  // "ambiguous, pick one" code path the real incident hit - a single
+  // same-size candidate is always trusted outright, by a separate,
+  // deliberate existing design tradeoff this fix doesn't touch.
+  const meta: TorrentMetainfo = {
+    name: "1986 Tour De France DVD3",
+    files: [{ relativePath: "1986 Tour De France DVD3/VIDEO_TS/VTS_01_1.VOB", length: 1_073_741_824 }],
+  };
+  const index = new Map([
+    [
+      1_073_741_824,
+      [
+        "/library/Giro D'Italia/Season 1986/Giro D'Italia - S1986E01 - pt01.vob",
+        "/library/Giro D'Italia/Season 1986/Giro D'Italia - S1986E01 - pt02.vob",
+      ],
+    ],
+  ]);
+  const plan = buildReseedPlan(meta, index);
+  assert.equal(plan.files[0].status, "unmatched");
+  assert.equal(plan.matchedCount, 0);
+  assert.equal(plan.ambiguousCount, 0);
+  assert.equal(plan.unmatchedCount, 1);
+});
+
+test("buildReseedPlan keeps a same-race same-size candidate ambiguous even when a same-size different-race candidate is also present", () => {
+  const meta: TorrentMetainfo = {
+    name: "1986 Tour De France DVD3",
+    files: [{ relativePath: "1986 Tour De France DVD3/VIDEO_TS/VTS_01_1.VOB", length: 1_073_741_824 }],
+  };
+  const index = new Map([
+    [
+      1_073_741_824,
+      [
+        "/library/Giro D'Italia/Season 1986/Giro D'Italia - S1986E01 - pt01.vob",
+        "/library/Tour De France/Season 1986/Tour De France - S1986E01 - pt02.vob",
+      ],
+    ],
+  ]);
+  const plan = buildReseedPlan(meta, index);
+  assert.equal(plan.files[0].status, "ambiguous");
+  assert.deepEqual(plan.files[0].candidates, [
+    "/library/Tour De France/Season 1986/Tour De France - S1986E01 - pt02.vob",
+  ]);
 });
 
 test("buildReseedPlan auto-guesses among same-size DVD-boxset candidates via disc-number filename scoring", () => {
@@ -93,7 +145,7 @@ test("buildReseedPlan auto-matches zero-length files without a candidate search"
 });
 
 test("buildReseedPlan caps the reported ambiguous candidate list", () => {
-  const many = Array.from({ length: 40 }, (_, i) => `/library/dup${i}.mp4`);
+  const many = Array.from({ length: 40 }, (_, i) => `/library/Race/dup${i}.mp4`);
   const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/stage1.mp4", length: 100 }] };
   const plan = buildReseedPlan(meta, new Map([[100, many]]));
   assert.equal(plan.files[0].candidates?.length, 25);
@@ -109,8 +161,8 @@ test("buildReseedPlan mixes matched/ambiguous/unmatched across a multi-file torr
     ],
   };
   const index = new Map([
-    [100, ["/library/stage1.mp4"]],
-    [200, ["/library/a.mp4", "/library/b.mp4"]],
+    [100, ["/library/Race/stage1.mp4"]],
+    [200, ["/library/Race/a.mp4", "/library/Race/b.mp4"]],
   ]);
   const plan = buildReseedPlan(meta, index);
   assert.equal(plan.matchedCount, 1);
@@ -146,22 +198,22 @@ test("buildReseedPlan excludes DVD navigation files (.IFO/.BUP/VIDEO_TS.VOB) fro
 
 test("applyManualOverrides promotes an ambiguous file to matched when a recorded pick is one of its own candidates", () => {
   const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/stage1.mp4", length: 100 }] };
-  const index = new Map([[100, ["/library/a.mp4", "/library/b.mp4"]]]);
+  const index = new Map([[100, ["/library/Race/a.mp4", "/library/Race/b.mp4"]]]);
   const plan = buildReseedPlan(meta, index);
   assert.equal(plan.files[0].status, "ambiguous");
 
-  const resolved = applyManualOverrides(plan, { "Race/stage1.mp4": "/library/b.mp4" });
+  const resolved = applyManualOverrides(plan, { "Race/stage1.mp4": "/library/Race/b.mp4" });
   assert.equal(resolved.matchedCount, 1);
   assert.equal(resolved.ambiguousCount, 0);
   assert.equal(resolved.guessedCount, 0);
   assert.equal(resolved.files[0].status, "matched");
-  assert.equal(resolved.files[0].candidate, "/library/b.mp4");
+  assert.equal(resolved.files[0].candidate, "/library/Race/b.mp4");
   assert.equal(resolved.files[0].resolvedBy, "manual");
 });
 
 test("applyManualOverrides ignores a stale override whose candidate isn't (or is no longer) among the file's own candidates", () => {
   const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/stage1.mp4", length: 100 }] };
-  const index = new Map([[100, ["/library/a.mp4", "/library/b.mp4"]]]);
+  const index = new Map([[100, ["/library/Race/a.mp4", "/library/Race/b.mp4"]]]);
   const plan = buildReseedPlan(meta, index);
 
   const resolved = applyManualOverrides(plan, { "Race/stage1.mp4": "/library/no-longer-there.mp4" });

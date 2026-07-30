@@ -1027,14 +1027,17 @@ test("POST /api/reseed/index/resolve records a manual pick and it's reflected in
     const torrentBuf = buildSingleFileTorrent("Ambiguous", 500);
     const infoHash = parseTorrentFile(torrentBuf).infoHash;
     await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
-    await fs.writeFile(join(libraryRoot, "Candidate A.mp4"), Buffer.alloc(500));
-    await fs.writeFile(join(libraryRoot, "Candidate B.mp4"), Buffer.alloc(500));
+    // Both candidates share the torrent's own "Ambiguous" word (unlike an
+    // unrelated race that only collides on byte size - see
+    // reseedMatch.test.ts's race-identity gate), so neither gets excluded.
+    await fs.writeFile(join(libraryRoot, "Ambiguous Candidate A.mp4"), Buffer.alloc(500));
+    await fs.writeFile(join(libraryRoot, "Ambiguous Candidate B.mp4"), Buffer.alloc(500));
 
     const before = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
     assert.equal(before.torrents[0].inPlex, false);
     assert.equal(before.torrents[0].plan.ambiguousCount, 1);
     const relativePath = before.torrents[0].plan.files[0].relativePath;
-    const candidate = join(libraryRoot, "Candidate B.mp4");
+    const candidate = join(libraryRoot, "Ambiguous Candidate B.mp4");
 
     const resolveRes = await fetch(`${baseUrl}/api/reseed/index/resolve`, {
       method: "POST",

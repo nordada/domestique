@@ -339,8 +339,11 @@ test("buildTorrentIndex: a recorded manual match resolves an otherwise-ambiguous
     await registerTorrent(meta.infoHash, torrentBuf, registryDir);
     // Two same-size, same-score library files - buildReseedPlan alone can't
     // tell them apart, so this stays ambiguous until a human picks one.
-    await fs.writeFile(join(libraryRoot, "Candidate A.mp4"), Buffer.alloc(500));
-    await fs.writeFile(join(libraryRoot, "Candidate B.mp4"), Buffer.alloc(500));
+    // Both share the torrent's own "Ambiguous" word (unlike an unrelated
+    // race that only collides on byte size - see reseedMatch.test.ts's
+    // race-identity gate), so neither gets excluded outright.
+    await fs.writeFile(join(libraryRoot, "Ambiguous Candidate A.mp4"), Buffer.alloc(500));
+    await fs.writeFile(join(libraryRoot, "Ambiguous Candidate B.mp4"), Buffer.alloc(500));
 
     const before = await buildTorrentIndex({
       registryDir,
@@ -355,7 +358,7 @@ test("buildTorrentIndex: a recorded manual match resolves an otherwise-ambiguous
     assert.equal(before.entries[0].inPlex, false);
     assert.equal(before.entries[0].plan.ambiguousCount, 1);
 
-    const chosen = join(libraryRoot, "Candidate B.mp4");
+    const chosen = join(libraryRoot, "Ambiguous Candidate B.mp4");
     recordManualMatch(meta.infoHash, before.entries[0].plan.files[0].relativePath, chosen, matchOverridesPath);
 
     const after = await buildTorrentIndex({

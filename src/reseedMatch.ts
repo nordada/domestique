@@ -20,6 +20,7 @@ import { basename, dirname } from "node:path";
 import type { TorrentMetainfo } from "./torrentFile.js";
 import { parseName, mergeParsed, type ParsedName } from "./parser.js";
 import { isDvdNavigationFile } from "./fileops.js";
+import { NOISE_TOKENS } from "./matcher.js";
 
 export type FileMatchStatus = "matched" | "ambiguous" | "unmatched";
 
@@ -105,6 +106,47 @@ function parseLibraryCandidate(path: string): ParsedName {
   return mergeParsed(parseName(basename(dirname(path))), parseName(basename(path)));
 }
 
+// Extension/quality noise plus this app's own structural filename
+// conventions - stripped before the identity-overlap gate below (see
+// identityTokens) since none of it says anything about which race a file
+// actually is. NOISE_TOKENS (broadcaster/quality) is reused as-is;
+// "season"/"review"/"forced" and common video extensions are this gate's
+// own additions since matcher.ts never had a reason to strip them.
+const IDENTITY_STOPWORDS = new Set([
+  ...NOISE_TOKENS,
+  "season",
+  "review",
+  "forced",
+  "mp4",
+  "mkv",
+  "avi",
+  "mov",
+  "m4v",
+  "wmv",
+  "vob",
+  "ts",
+]);
+
+// Regex leftovers parser.ts's structured extraction doesn't fully consume:
+// a bare "s"/"e01" glued fragment left behind when a year got borrowed out
+// of the middle of "S1986E01" (parser.ts's year regex has no \b, exactly so
+// it can catch a year glued onto a prefix - this is the cost of that), and
+// "pt01" - this app's own part-number suffix (see fileops.ts's naming),
+// which parser.ts's part regex doesn't recognize since it only matches the
+// literal word "part", not the abbreviation - so a file this app already
+// filed re-parses with "pt01" surviving as a raw, meaningless token.
+function isStructuralRemnant(token: string): boolean {
+  return /^\d+$/.test(token) || /^s\d*$/.test(token) || /^e\d+$/.test(token) || /^pt\d*$/.test(token);
+}
+
+function identityTokens(tokenSet: Set<string>): Set<string> {
+  const out = new Set<string>();
+  for (const token of tokenSet) {
+    if (!IDENTITY_STOPWORDS.has(token) && !isStructuralRemnant(token)) out.add(token);
+  }
+  return out;
+}
+
 /**
  * Ranks same-size `candidates` against `entry` best-first, and reports
  * whether the top one is a clear enough winner to auto-resolve: its score
@@ -116,12 +158,35 @@ function parseLibraryCandidate(path: string): ParsedName {
  * clearing both bars is still never silently trusted past this: every real
  * caller (reseed.ts/dedupe.ts) re-verifies the actual bytes via
  * Transmission's own piece-hash check before treating anything as settled.
+ *
+ * Before any of that scoring happens, candidates that share literally no
+ * race-identity word with `entry` (see identityTokens) are dropped outright
+ * rather than merely scored low - same-size alone is weak signal for raw
+ * DVD-rip files, since the DVD-Video spec caps a VOB at ~1GB regardless of
+ * what's on the disc, so completely unrelated races collide on byte size
+ * constantly. The real incident this fixed: a "1986 Tour De France DVD3"
+ * torrent kept surfacing a same-size Giro d'Italia library file as an
+ * "ambiguous, pick one" candidate purely because both happened to be 1986
+ * DVD rips - nothing in scoreCandidate's weighting could ever push that
+ * kind of wrong-race candidate to zero, only "less high." Skipped entirely
+ * when entry itself has no identity tokens to filter by (e.g. a bare
+ * "VTS_01_1" with no informative folder name either) - there's nothing to
+ * exclude anything by in that case, so every original candidate stays in
+ * play, same as before this gate existed.
  */
 function rankCandidates(entry: ParsedName, candidates: string[]): { ranked: string[]; guess: string | null } {
-  const scored = candidates
-    .map((path) => ({ path, score: scoreCandidate(entry, parseLibraryCandidate(path)) }))
+  const entryIdentity = identityTokens(entry.tokenSet);
+  const parsedCandidates = candidates.map((path) => ({ path, parsed: parseLibraryCandidate(path) }));
+  const pool =
+    entryIdentity.size === 0
+      ? parsedCandidates
+      : parsedCandidates.filter((c) => [...identityTokens(c.parsed.tokenSet)].some((t) => entryIdentity.has(t)));
+
+  const scored = pool
+    .map((c) => ({ path: c.path, score: scoreCandidate(entry, c.parsed) }))
     .sort((a, b) => b.score - a.score);
   const ranked = scored.map((s) => s.path);
+  if (scored.length === 0) return { ranked: [], guess: null };
 
   const top = scored[0];
   const runnerUp = scored[1];
@@ -181,6 +246,13 @@ export function buildReseedPlan(
     }
 
     const { ranked, guess } = rankCandidates(parseTorrentEntry(meta.name, entry.relativePath), candidates);
+    // Every same-size candidate shared no race-identity signal with this
+    // entry at all (see rankCandidates' identity gate) - there's nothing
+    // plausible left to ask a human to pick between, so this reads as "not
+    // actually in the library yet" rather than "ambiguous."
+    if (ranked.length === 0) {
+      return { relativePath: entry.relativePath, length: entry.length, status: "unmatched" };
+    }
     const rankedCapped = ranked.slice(0, MAX_REPORTED_CANDIDATES);
     if (guess) {
       return {
