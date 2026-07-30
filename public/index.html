@@ -773,6 +773,7 @@
     <label id="bulk-force-label" class="hidden" style="display:flex; align-items:center; gap:0.25rem; margin:0; font-size:0.85rem; opacity:0.85;" title="Bypasses the &quot;already have this release&quot; check and always files a distinctly-tagged copy - checked by default once revealed; uncheck if you don't want the override for this batch.">
       <input type="checkbox" id="bulk-force-checkbox" style="width:auto;" checked> Force
     </label>
+    <button type="button" class="pill-btn" id="bulk-readd-btn" title="Re-adds each eligible torrent to Transmission using its already-registered .torrent file, staging whatever's already filed in your Plex library first - a fully-filed torrent should come back up verified and seeding with nothing re-downloaded. Only for torrents Domestique still has registered but Transmission no longer reports.">Re-add to Transmission</button>
     <button type="button" class="pill-btn accent" id="bulk-dedupe-btn" title="Relinks each eligible torrent's data to its Plex library copy and asks Transmission to re-verify it there - reclaims the disk space it was previously duplicating. A failed verify automatically reverts that one torrent back to its original location; nothing is ever deleted by this step.">Dedupe</button>
     <button type="button" class="pill-btn danger" id="bulk-delete-original-btn" title="Permanently deletes the leftover download-folder copy of each eligible already-deduped torrent - safe to remove since Transmission now seeds from the hardlinked Plex copy instead. Never touches your Plex library.">Delete leftover copy</button>
     <button type="button" class="pill-btn danger" id="bulk-remove-btn" title="Removes each eligible torrent from Transmission entirely and deletes its downloaded data from disk. Never touches anything already filed in your Plex library - only Transmission's own copy.">Remove from Transmission</button>
@@ -2190,6 +2191,7 @@ function updateBulkActionBar() {
   selectedCountEl.textContent = `${selected.length} selected ✕`;
 
   const eligibleAddToLibrary = selected.filter((t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length);
+  const eligibleReAdd = selected.filter((t) => !t.inTransmission);
   const eligibleDedupe = selected.filter((t) => t.storageStatus === "duplicate");
   const eligibleDeleteOriginal = selected.filter((t) => t.orphanOriginal);
   const eligibleRemove = selected.filter((t) => t.inTransmission);
@@ -2197,6 +2199,10 @@ function updateBulkActionBar() {
   const addBtn = document.getElementById("bulk-add-to-library-btn");
   addBtn.textContent = `Add to Plex library (${eligibleAddToLibrary.length})`;
   addBtn.disabled = eligibleAddToLibrary.length === 0;
+
+  const readdBtn = document.getElementById("bulk-readd-btn");
+  readdBtn.textContent = `Re-add to Transmission (${eligibleReAdd.length})`;
+  readdBtn.disabled = eligibleReAdd.length === 0;
 
   const dedupeBtn = document.getElementById("bulk-dedupe-btn");
   dedupeBtn.textContent = `Dedupe (${eligibleDedupe.length})`;
@@ -2272,6 +2278,59 @@ async function bulkAddToLibrary(force) {
   const statusEl = document.getElementById("index-action-status");
   statusEl.textContent = `${succeeded} added${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
   statusEl.className = failed ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
+}
+
+/**
+ * Re-adds each eligible torrent (anything Domestique still has registered
+ * but Transmission no longer reports) back to Transmission - for torrents
+ * that dropped out of Transmission (removed after seeding, cleaned up,
+ * etc.) while their data is still filed away in the Plex library. No new
+ * server route: fetches the already-registered raw .torrent bytes from the
+ * existing GET /api/reseed/index/download endpoint, then hands those bytes
+ * to the exact same /api/reseed/commit route the drop-zone's own
+ * Preview/Commit flow uses - it stages whatever's already matched in the
+ * library and hands the torrent to Transmission to verify against, so a
+ * fully-filed torrent should come back up verified and seeding with
+ * nothing re-downloaded. A torrent with only a partial (or no) library
+ * match still gets added, just left paused for review by Transmission's
+ * own verify step - the same outcome a fresh drop-zone commit would produce
+ * for the same plan, not a special case here.
+ */
+async function bulkReAddToTransmission() {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  const eligible = selected.filter((t) => !t.inTransmission);
+  if (eligible.length === 0) return;
+  const proceed = confirm(
+    `Re-add ${eligible.length} torrent(s) to Transmission using their already-registered .torrent file. Whatever's already filed in your Plex library will be staged and offered to Transmission to verify against, so a fully-filed torrent should come back up seeding with nothing re-downloaded. Continue?`
+  );
+  if (!proceed) return;
+
+  const statusEl = document.getElementById("index-action-status");
+  let seeding = 0;
+  let pausedForReview = 0;
+  let failed = 0;
+  for (let i = 0; i < eligible.length; i++) {
+    const t = eligible[i];
+    statusEl.textContent = `Re-adding to Transmission ${i + 1}/${eligible.length}: "${t.torrentName}"…`;
+    statusEl.className = "status-msg";
+    try {
+      const torrentRes = await fetch(`/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}`);
+      if (!torrentRes.ok) throw new Error(`couldn't fetch its registered .torrent file (HTTP ${torrentRes.status})`);
+      const torrentBlob = await torrentRes.blob();
+      const data = await api("/api/reseed/commit", { method: "POST", body: torrentBlob });
+      const verify = data.result.transmission && data.result.transmission.verify;
+      if (verify && !verify.error && verify.percentDone === 1 && data.result.transmission.started) seeding++;
+      else pausedForReview++;
+    } catch (err) {
+      failed++;
+      console.error(`Re-add to Transmission failed for "${t.torrentName}": ${err.message}`);
+    }
+  }
+  statusEl.textContent =
+    `${seeding} re-added and seeding${pausedForReview ? `, ${pausedForReview} added but left paused for review (partial or no verify)` : ""}${failed ? `, ${failed} failed` : ""}.` +
+    bulkSkippedSuffix(selected.length, eligible.length);
+  statusEl.className = failed || pausedForReview ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
 
@@ -3017,6 +3076,7 @@ document.getElementById("bulk-add-to-library-btn").addEventListener("click", (e)
   }
   bulkAddToLibrary(document.getElementById("bulk-force-checkbox").checked);
 });
+document.getElementById("bulk-readd-btn").addEventListener("click", bulkReAddToTransmission);
 document.getElementById("bulk-dedupe-btn").addEventListener("click", bulkDedupe);
 document.getElementById("bulk-delete-original-btn").addEventListener("click", bulkDeleteOriginal);
 document.getElementById("bulk-remove-btn").addEventListener("click", bulkRemove);
