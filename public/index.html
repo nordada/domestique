@@ -753,23 +753,25 @@
     <span id="index-summary-attention" class="seeding-summary-badge err" style="display:none;"></span>
     <span id="index-summary-deduped" class="seeding-summary-badge ok" style="display:none;"></span>
     <span id="index-summary-duplicated" class="seeding-summary-badge neutral" style="display:none;"></span>
-    <label style="display:flex; align-items:center; gap:0.4rem; margin-left:auto; font-size:0.85rem; opacity:0.85; flex:0 0 auto;">
-      Sort
-      <select id="index-sort">
-        <option value="attention">Needs attention first</option>
-        <option value="name">Name (A-Z)</option>
-      </select>
-    </label>
   </div>
   <input type="text" id="index-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
   <div id="bulk-action-bar" class="hidden">
-    <strong id="bulk-selected-count"></strong>
-    <button type="button" id="bulk-add-to-library-btn">Add to Plex library</button>
-    <button type="button" class="icon-btn subtle" id="bulk-force-btn" title="Force file as new version - bypasses the &quot;already have this release&quot; check"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="15" y1="9" x2="6" y2="18"/><rect x="13" y="2.5" width="8" height="5" rx="1" transform="rotate(45 17 5)"/></svg></button>
-    <button type="button" class="confirm-action" id="bulk-dedupe-btn">Dedupe</button>
-    <button type="button" class="danger" id="bulk-delete-original-btn">Delete original copy</button>
-    <button type="button" class="danger" id="bulk-remove-btn">Remove &amp; delete files</button>
-    <button type="button" class="icon-btn subtle" id="bulk-clear-selection-btn" title="Clear selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    <div class="row" style="flex:0 0 auto; align-items:center; gap:0.4rem;">
+      <strong id="bulk-selected-count"></strong>
+      <button type="button" class="icon-btn subtle" id="bulk-clear-selection-btn" title="Clear selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <span style="border-left:1px solid var(--border); align-self:stretch;"></span>
+    <div class="row" style="flex:0 0 auto; align-items:center; gap:0.4rem;">
+      <button type="button" id="bulk-add-to-library-btn" title="Runs each eligible torrent through the normal parse/match/copy pipeline into your Plex library - for torrents whose data was never filed into Plex at all, or whose filed copy is gone.">Add to Plex library</button>
+      <label style="display:flex; align-items:center; gap:0.3rem; margin:0; font-size:0.85rem; opacity:0.85;" title="Bypasses the &quot;already have this release&quot; check and always files a distinctly-tagged copy - only check this if you've confirmed the existing Plex file is wrong or genuinely a different release.">
+        <input type="checkbox" id="bulk-force-checkbox" style="width:auto;"> Force
+      </label>
+    </div>
+    <span style="border-left:1px solid var(--border); align-self:stretch;"></span>
+    <button type="button" class="confirm-action" id="bulk-dedupe-btn" title="Relinks each eligible torrent's data to its Plex library copy and asks Transmission to re-verify it there - reclaims the disk space it was previously duplicating. A failed verify automatically reverts that one torrent back to its original location; nothing is ever deleted by this step.">Dedupe</button>
+    <span style="border-left:1px solid var(--border); align-self:stretch;"></span>
+    <button type="button" class="danger" id="bulk-delete-original-btn" title="Permanently deletes the leftover download-folder copy of each eligible already-deduped torrent - safe to remove since Transmission now seeds from the hardlinked Plex copy instead. Never touches your Plex library.">Delete leftover copy</button>
+    <button type="button" class="danger" id="bulk-remove-btn" title="Removes each eligible torrent from Transmission entirely and deletes its downloaded data from disk. Never touches anything already filed in your Plex library - only Transmission's own copy.">Remove from Transmission</button>
   </div>
   <div id="index-action-status" class="status-msg"></div>
   <div class="torrent-index-table-scroll">
@@ -777,14 +779,14 @@
       <thead>
         <tr>
           <th><input type="checkbox" id="index-select-all"></th>
-          <th>Name</th>
-          <th>Status</th>
-          <th>On disk</th>
-          <th>Ratio</th>
-          <th>Storage</th>
-          <th>Plex</th>
-          <th>Size</th>
-          <th>Added</th>
+          <th class="sortable-th" data-sort="name">Name<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="status">Status<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="onDisk">On disk<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="ratio">Ratio<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="storage">Storage<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="plex">Plex<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="size">Size<span class="sort-arrow"></span></th>
+          <th class="sortable-th" data-sort="added">Added<span class="sort-arrow"></span></th>
           <th></th>
         </tr>
       </thead>
@@ -1093,9 +1095,9 @@ function esc(s) {
 const ICON_REFRESH = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 const ICON_CHECK_CIRCLE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
-// The "Force file as new version" hammer icon lives directly in the bulk
-// action bar's static markup now (see #bulk-force-btn), not built from a
-// JS template string like the per-row version used to be.
+// "Force file as new version" is a plain labeled checkbox in the bulk
+// action bar now (see #bulk-force-checkbox), not an icon-only button - an
+// unlabeled hammer glyph there read as broken/unclear in practice.
 
 function showTab(name) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
@@ -1563,7 +1565,11 @@ function sortEventRows(rows) {
 }
 
 function updateEventsSortHeaders() {
-  document.querySelectorAll(".sortable-th").forEach((th) => {
+  // Scoped to this section specifically - .sortable-th/.sort-arrow are
+  // shared styling classes, also used by the Torrent index table's own
+  // independently-wired sort (see updateIndexSortHeaders) - an unscoped
+  // query here would touch that table's headers too.
+  document.querySelectorAll("#events-section .sortable-th").forEach((th) => {
     const arrow = th.querySelector(".sort-arrow");
     arrow.textContent = th.dataset.sort === eventsSortColumn ? (eventsSortDir === "asc" ? "▲" : "▼") : "";
   });
@@ -1960,6 +1966,56 @@ function plexSummary(t) {
   return { icon: "❌", title: "No match found in the library" };
 }
 
+// Click-header-to-sort, same mechanic as the Events tab's own
+// sortEventRows/updateEventsSortHeaders (see there) - kept as separate
+// state/functions rather than shared, since .sortable-th/.sort-arrow are
+// just styling classes reused across both tables, not tied to one specific
+// wiring. null column = the smart default this table always had (needs
+// attention first, then alphabetical) - clicking any header switches to
+// sorting by that column instead, clicking it again reverses direction.
+let indexSortColumn = null;
+let indexSortDir = "asc";
+const INDEX_STORAGE_SORT_ORDER = { "n/a": 0, duplicate: 1, mixed: 2, deduped: 3 };
+
+function indexSortValue(t, col) {
+  switch (col) {
+    case "name": return t.torrentName.toLowerCase();
+    case "status": return t.inTransmission ? (t.status === 6 ? 2 : 1) : 0;
+    case "onDisk": return t.inTransmission ? t.percentComplete : -1;
+    case "ratio": return t.inTransmission ? t.ratio : -1;
+    case "storage": return INDEX_STORAGE_SORT_ORDER[t.storageStatus] ?? 0;
+    case "plex": return t.inPlex ? 1 : 0;
+    case "size": return t.totalBytes;
+    case "added": return new Date(t.addedAt).getTime();
+    default: return 0;
+  }
+}
+
+function sortIndexRows(rows) {
+  if (!indexSortColumn) {
+    return rows.slice().sort((a, b) => {
+      const aAttn = torrentNeedsAttention(a);
+      const bAttn = torrentNeedsAttention(b);
+      if (aAttn !== bAttn) return aAttn ? -1 : 1;
+      return a.torrentName.localeCompare(b.torrentName);
+    });
+  }
+  const dir = indexSortDir === "asc" ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const av = indexSortValue(a, indexSortColumn);
+    const bv = indexSortValue(b, indexSortColumn);
+    if (typeof av === "string") return av.localeCompare(bv, undefined, { sensitivity: "base", numeric: true }) * dir;
+    return (av - bv) * dir;
+  });
+}
+
+function updateIndexSortHeaders() {
+  document.querySelectorAll("#torrent-index-section .sortable-th").forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    arrow.textContent = th.dataset.sort === indexSortColumn ? (indexSortDir === "asc" ? "▲" : "▼") : "";
+  });
+}
+
 function renderTorrentIndex() {
   const tbody = document.getElementById("index-tbody");
   const totalBadge = document.getElementById("index-summary-total");
@@ -2014,18 +2070,10 @@ function renderTorrentIndex() {
     return;
   }
 
-  const sortMode = document.getElementById("index-sort").value;
-  filtered.sort((a, b) => {
-    if (sortMode === "attention") {
-      const aAttn = torrentNeedsAttention(a);
-      const bAttn = torrentNeedsAttention(b);
-      if (aAttn !== bAttn) return aAttn ? -1 : 1;
-    }
-    return a.torrentName.localeCompare(b.torrentName);
-  });
+  const sorted = sortIndexRows(filtered);
 
   const STATUS_SEEDING = 6;
-  tbody.innerHTML = filtered.map((t) => {
+  tbody.innerHTML = sorted.map((t) => {
     const checked = selectedHashes.has(t.infoHash) ? "checked" : "";
 
     // Icon + title-tooltip throughout this row (matching the old
@@ -2086,6 +2134,7 @@ function renderTorrentIndex() {
   });
   updateSelectAllCheckboxState();
   updateBulkActionBar();
+  updateIndexSortHeaders();
 }
 
 /** Reflects whether every currently-*filtered* row is selected (checked), none are (unchecked), or some are (the native indeterminate state) - "select all" only ever means "all visible under the current search filter," never literally every entry regardless of it. */
@@ -2127,21 +2176,18 @@ function updateBulkActionBar() {
   const addBtn = document.getElementById("bulk-add-to-library-btn");
   addBtn.textContent = `Add to Plex library (${eligibleAddToLibrary.length})`;
   addBtn.disabled = eligibleAddToLibrary.length === 0;
-
-  const forceBtn = document.getElementById("bulk-force-btn");
-  forceBtn.disabled = eligibleAddToLibrary.length === 0;
-  forceBtn.title = `Force ${eligibleAddToLibrary.length} file(s) as a new version - bypasses the "already have this release" check`;
+  document.getElementById("bulk-force-checkbox").disabled = eligibleAddToLibrary.length === 0;
 
   const dedupeBtn = document.getElementById("bulk-dedupe-btn");
   dedupeBtn.textContent = `Dedupe (${eligibleDedupe.length})`;
   dedupeBtn.disabled = eligibleDedupe.length === 0;
 
   const deleteOriginalBtn = document.getElementById("bulk-delete-original-btn");
-  deleteOriginalBtn.textContent = `Delete original copy (${eligibleDeleteOriginal.length})`;
+  deleteOriginalBtn.textContent = `Delete leftover copy (${eligibleDeleteOriginal.length})`;
   deleteOriginalBtn.disabled = eligibleDeleteOriginal.length === 0;
 
   const removeBtn = document.getElementById("bulk-remove-btn");
-  removeBtn.textContent = `Remove & delete files (${eligibleRemove.length})`;
+  removeBtn.textContent = `Remove from Transmission (${eligibleRemove.length})`;
   removeBtn.disabled = eligibleRemove.length === 0;
 }
 
@@ -2180,9 +2226,11 @@ async function finishBulkAction() {
  * Runs each eligible torrent through the normal parse/match/copy pipeline
  * (see reseedApi.ts's /api/reseed/add-to-library) - for torrents whose data
  * was never filed into Plex at all, or whose filed copy is gone. `force`
- * bypasses the "already have this release" dedupe check and always files a
+ * (the "Force" checkbox next to this button, not a separate button/icon -
+ * an unlabeled hammer icon here read as broken/unclear in practice) bypasses
+ * the "already have this release" dedupe check and always files a
  * distinctly-tagged copy - gated behind its own confirm() since it's a
- * deliberate override, same warning text the old per-row hammer button used.
+ * deliberate override.
  */
 async function bulkAddToLibrary(force) {
   const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
@@ -2682,7 +2730,7 @@ document.getElementById("sync-sort-titles-btn").addEventListener("click", async 
   }
 });
 document.getElementById("events-search").addEventListener("input", renderEvents);
-document.querySelectorAll(".sortable-th").forEach((th) => {
+document.querySelectorAll("#events-section .sortable-th").forEach((th) => {
   th.addEventListener("click", () => {
     const col = th.dataset.sort;
     if (eventsSortColumn === col) {
@@ -2692,6 +2740,18 @@ document.querySelectorAll(".sortable-th").forEach((th) => {
       eventsSortDir = "asc";
     }
     renderEvents();
+  });
+});
+document.querySelectorAll("#torrent-index-section .sortable-th").forEach((th) => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.sort;
+    if (indexSortColumn === col) {
+      indexSortDir = indexSortDir === "asc" ? "desc" : "asc";
+    } else {
+      indexSortColumn = col;
+      indexSortDir = "asc";
+    }
+    renderTorrentIndex();
   });
 });
 document.getElementById("cancel-event-btn").addEventListener("click", closeForm);
@@ -2915,14 +2975,14 @@ document.getElementById("refresh-index-btn").addEventListener("click", () => {
   );
 });
 document.getElementById("index-search").addEventListener("input", renderTorrentIndex);
-document.getElementById("index-sort").addEventListener("change", renderTorrentIndex);
 document.getElementById("index-select-all").addEventListener("change", (e) => {
   if (e.target.checked) lastFilteredEntries.forEach((t) => selectedHashes.add(t.infoHash));
   else lastFilteredEntries.forEach((t) => selectedHashes.delete(t.infoHash));
   renderTorrentIndex();
 });
-document.getElementById("bulk-add-to-library-btn").addEventListener("click", () => bulkAddToLibrary(false));
-document.getElementById("bulk-force-btn").addEventListener("click", () => bulkAddToLibrary(true));
+document.getElementById("bulk-add-to-library-btn").addEventListener("click", () =>
+  bulkAddToLibrary(document.getElementById("bulk-force-checkbox").checked)
+);
 document.getElementById("bulk-dedupe-btn").addEventListener("click", bulkDedupe);
 document.getElementById("bulk-delete-original-btn").addEventListener("click", bulkDeleteOriginal);
 document.getElementById("bulk-remove-btn").addEventListener("click", bulkRemove);
