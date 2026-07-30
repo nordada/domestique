@@ -23,7 +23,10 @@ import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
 import { commitDedupe } from "./dedupe.js";
 import { recordDedupeOriginal, clearDedupeOriginal } from "./dedupeState.js";
-import { getTorrentLocation, removeTorrentAndData } from "./transmission.js";
+import { getTorrentLocation, removeTorrentAndData, getAllTorrentsWithFiles } from "./transmission.js";
+import { checkTorrentIntegrity } from "./torrentVerify.js";
+import { recordVerifyResult } from "./verifyState.js";
+import { sendDiscordNotification } from "./discord.js";
 import { isPathWithin } from "./fileops.js";
 import { recordActivity } from "./activity.js";
 import { readBody, readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES } from "./body.js";
@@ -180,6 +183,83 @@ export async function handleReseedRequest(
       sendJson(res, 200, { ok: true, name: location.name });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `Failed to remove torrent: ${err}` });
+    }
+    return true;
+  }
+
+  /**
+   * Forces a fresh Transmission piece-hash re-check of an already-seeding
+   * torrent's on-disk data - see torrentVerify.ts's checkTorrentIntegrity
+   * for the actual pause/verify/conditionally-resume mechanics. Transmission
+   * never does this on its own once a torrent first verifies clean, so this
+   * is the only way corruption (bitrot, a failing disk) on already-seeding
+   * data ever gets noticed short of a stream actually failing to play.
+   * Records the result (clean or not) in verifyState.ts either way, so the
+   * Index tab can show an ongoing integrity signal; a dirty result also
+   * gets a reviewWorthy activity entry and, if configured, a Discord
+   * mention - the same "loudly note it, don't silently redownload" pattern
+   * requested after finding real corrupted TdF-2020 stages this session.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/verify") {
+    let payload: { id?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.id !== "number") {
+      sendJson(res, 400, { ok: false, error: "body must include a numeric id" });
+      return true;
+    }
+
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    if (!settings.transmission) {
+      sendJson(res, 400, {
+        ok: false,
+        error: "Transmission isn't configured - set its RPC URL in Settings before verifying torrents.",
+      });
+      return true;
+    }
+
+    try {
+      const torrents = await getAllTorrentsWithFiles(settings.transmission);
+      const torrent = torrents.find((t) => t.id === payload.id);
+      if (!torrent) {
+        sendJson(res, 404, { ok: false, error: `Transmission doesn't report a torrent with id ${payload.id}` });
+        return true;
+      }
+
+      const STATUS_STOPPED = 0;
+      const wasPaused = torrent.status === STATUS_STOPPED;
+      const result = await checkTorrentIntegrity(settings.transmission, payload.id, wasPaused);
+
+      recordVerifyResult(
+        torrent.hashString,
+        { checkedAt: new Date().toISOString(), percentDone: result.percentDone, clean: result.clean },
+        opts.verifyStatePath
+      );
+
+      if (!result.clean) {
+        const pct = Math.round(result.percentDone * 100);
+        const message = `⚠️ Verify came back only ${pct}% clean for "${torrent.name}" - likely corruption. Left paused for review; resuming in Transmission will attempt to redownload the mismatched portion from peers.`;
+        recordActivity(
+          { timestamp: new Date().toISOString(), torrentName: torrent.name, lines: [message], reviewWorthy: true },
+          opts.activityPath
+        );
+        if (settings.discord) {
+          sendDiscordNotification(settings.discord, message, { mention: true }).catch((err) =>
+            console.warn(`[discord] failed to send notification: ${err}`)
+          );
+        }
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        result: { clean: result.clean, percentDone: result.percentDone, resumed: result.resumed },
+      });
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: `Failed to verify: ${err}` });
     }
     return true;
   }
@@ -379,6 +459,7 @@ export async function handleReseedRequest(
         stagingRoot,
         downloadsPath: opts.downloadsPath,
         dedupeStatePath: opts.dedupeStatePath,
+        verifyStatePath: opts.verifyStatePath,
         transmissionConfig: settings.transmission ?? null,
       });
 

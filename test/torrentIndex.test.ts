@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildTorrentIndex } from "../src/torrentIndex.js";
 import { registerTorrent } from "../src/torrentRegistry.js";
+import { recordVerifyResult } from "../src/verifyState.js";
 import { parseTorrentFile } from "../src/torrentFile.js";
 import { buildSingleFileTorrent } from "./torrentFixtures.js";
 
@@ -15,7 +16,8 @@ async function scratchDirs() {
   const stagingRoot = join(libraryRoot, ".reseed-staging");
   const downloadsPath = await fs.mkdtemp(join(tmpdir(), "domestique-torrentindex-downloads-"));
   const dedupeStatePath = join(downloadsPath, "dedupe-state.json");
-  return { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath };
+  const verifyStatePath = join(downloadsPath, "verify-state.json");
+  return { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath };
 }
 
 function startFakeTransmissionRpc(
@@ -51,7 +53,7 @@ function startFakeTransmissionRpc(
 }
 
 test("buildTorrentIndex: an entry found in both Plex and Transmission reports both, correlated by info-hash not name", async () => {
-  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath } = await scratchDirs();
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
   try {
     const torrentBuf = buildSingleFileTorrent("Both-2026-SBS.mp4", 1000);
     const meta = parseTorrentFile(torrentBuf);
@@ -84,6 +86,7 @@ test("buildTorrentIndex: an entry found in both Plex and Transmission reports bo
         stagingRoot,
         downloadsPath,
         dedupeStatePath,
+        verifyStatePath,
         transmissionConfig: { url },
       });
       assert.equal(entries.length, 1);
@@ -107,7 +110,7 @@ test("buildTorrentIndex: an entry found in both Plex and Transmission reports bo
 });
 
 test("buildTorrentIndex: an entry matched in Plex but with no live Transmission torrent reports inTransmission:false and null live fields", async () => {
-  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath } = await scratchDirs();
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
   try {
     const torrentBuf = buildSingleFileTorrent("PlexOnly", 500);
     const meta = parseTorrentFile(torrentBuf);
@@ -138,7 +141,7 @@ test("buildTorrentIndex: an entry matched in Plex but with no live Transmission 
 });
 
 test("buildTorrentIndex: a live Transmission-only entry (not matched in Plex) reports inPlex:false", async () => {
-  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath } = await scratchDirs();
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
   try {
     const torrentBuf = buildSingleFileTorrent("TransmissionOnly", 777);
     const meta = parseTorrentFile(torrentBuf);
@@ -171,6 +174,7 @@ test("buildTorrentIndex: a live Transmission-only entry (not matched in Plex) re
         stagingRoot,
         downloadsPath,
         dedupeStatePath,
+        verifyStatePath,
         transmissionConfig: { url },
       });
       assert.equal(entries[0].inPlex, false);
@@ -187,7 +191,7 @@ test("buildTorrentIndex: a live Transmission-only entry (not matched in Plex) re
 });
 
 test("buildTorrentIndex: an entry found in neither system still appears, reporting both false", async () => {
-  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath } = await scratchDirs();
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
   try {
     const torrentBuf = buildSingleFileTorrent("Neither", 999999);
     const meta = parseTorrentFile(torrentBuf);
@@ -215,7 +219,7 @@ test("buildTorrentIndex: an entry found in neither system still appears, reporti
 });
 
 test("buildTorrentIndex: gracefully degrades (never throws) when the Transmission RPC call fails, reporting every entry as not-in-Transmission", async () => {
-  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath } = await scratchDirs();
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
   try {
     const torrentBuf = buildSingleFileTorrent("Unreachable", 42);
     const meta = parseTorrentFile(torrentBuf);
@@ -240,7 +244,7 @@ test("buildTorrentIndex: gracefully degrades (never throws) when the Transmissio
 });
 
 test("buildTorrentIndex: returns an empty index when the registry is empty, without any Transmission call needed", async () => {
-  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath } = await scratchDirs();
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
   try {
     const { entries, summary } = await buildTorrentIndex({
       registryDir,
@@ -248,10 +252,68 @@ test("buildTorrentIndex: returns an empty index when the registry is empty, with
       stagingRoot,
       downloadsPath,
       dedupeStatePath,
+      verifyStatePath,
       transmissionConfig: null,
     });
     assert.deepEqual(entries, []);
     assert.equal(summary.total, 0);
+  } finally {
+    await fs.rm(registryDir, { recursive: true, force: true });
+    await fs.rm(libraryRoot, { recursive: true, force: true });
+    await fs.rm(downloadsPath, { recursive: true, force: true });
+  }
+});
+
+test("buildTorrentIndex: surfaces the most recent verify result (lastVerify) on an entry, whether or not it's currently in Transmission", async () => {
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
+  try {
+    const torrentBuf = buildSingleFileTorrent("Flagged-2020-Stage-09.mp4", 1000);
+    const meta = parseTorrentFile(torrentBuf);
+    await registerTorrent(meta.infoHash, torrentBuf, registryDir);
+    await fs.writeFile(join(libraryRoot, "Flagged - S2020E09.mp4"), Buffer.alloc(1000));
+
+    const record = { checkedAt: "2026-07-30T00:00:00.000Z", percentDone: 0.42, clean: false };
+    recordVerifyResult(meta.infoHash, record, verifyStatePath);
+
+    // Not currently in Transmission at all - a torrent that got removed
+    // after being flagged should still show the flag, not lose it.
+    const { entries } = await buildTorrentIndex({
+      registryDir,
+      libraryRoot,
+      stagingRoot,
+      downloadsPath,
+      dedupeStatePath,
+      verifyStatePath,
+      transmissionConfig: null,
+    });
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].inTransmission, false);
+    assert.deepEqual(entries[0].lastVerify, record);
+  } finally {
+    await fs.rm(registryDir, { recursive: true, force: true });
+    await fs.rm(libraryRoot, { recursive: true, force: true });
+    await fs.rm(downloadsPath, { recursive: true, force: true });
+  }
+});
+
+test("buildTorrentIndex: an entry that's never been verified reports lastVerify: null", async () => {
+  const { registryDir, libraryRoot, stagingRoot, downloadsPath, dedupeStatePath, verifyStatePath } = await scratchDirs();
+  try {
+    const torrentBuf = buildSingleFileTorrent("Never-Verified.mp4", 500);
+    const meta = parseTorrentFile(torrentBuf);
+    await registerTorrent(meta.infoHash, torrentBuf, registryDir);
+
+    const { entries } = await buildTorrentIndex({
+      registryDir,
+      libraryRoot,
+      stagingRoot,
+      downloadsPath,
+      dedupeStatePath,
+      verifyStatePath,
+      transmissionConfig: null,
+    });
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].lastVerify, null);
   } finally {
     await fs.rm(registryDir, { recursive: true, force: true });
     await fs.rm(libraryRoot, { recursive: true, force: true });

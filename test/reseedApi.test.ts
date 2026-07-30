@@ -17,6 +17,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
   const settingsPath = join(configDir, "settings.json");
   const activityPath = join(configDir, "activity.json");
   const dedupeStatePath = join(configDir, "dedupe-state.json");
+  const verifyStatePath = join(configDir, "verify-state.json");
   const torrentRegistryDir = join(configDir, "torrent-registry");
   await fs.writeFile(configPath, JSON.stringify({ shows: [] }) + "\n", "utf-8");
   await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
@@ -29,6 +30,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
     activityPath,
     downloadsPath: downloadsPath ?? "/nonexistent",
     dedupeStatePath,
+    verifyStatePath,
     torrentRegistryDir,
     transmissionTorrentsDir,
     webui: { password: "correct-password" },
@@ -46,6 +48,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
     settingsPath,
     activityPath,
     dedupeStatePath,
+    verifyStatePath,
     torrentRegistryDir,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
@@ -1010,5 +1013,193 @@ test("GET /api/reseed/index cleans up legacy name-keyed registry files as part o
     assert.equal(entries[0].infoHash, infoHash);
   } finally {
     await close();
+  }
+});
+
+test("POST /api/reseed/verify without Transmission configured returns 400", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/verify`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 1 }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /isn't configured/i);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/verify rejects a body without a numeric id", async () => {
+  const { baseUrl, close } = await makeScratchServer();
+  try {
+    const res = await fetch(`${baseUrl}/api/reseed/verify`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/verify returns 404 when Transmission doesn't report that torrent id", async () => {
+  const { baseUrl, settingsPath, close: closeApp } = await makeScratchServer();
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) =>
+    method === "torrent-get" ? { torrents: [] } : {}
+  );
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/verify`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 42 }),
+    });
+    assert.equal(res.status, 404);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/verify: a clean result resumes the torrent, records verify state, and logs no activity noise", async () => {
+  const { baseUrl, settingsPath, activityPath, verifyStatePath, close: closeApp } = await makeScratchServer();
+  const calls: string[] = [];
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    calls.push(method);
+    if (method === "torrent-get") {
+      return {
+        torrents: [
+          {
+            id: 8,
+            name: "Stage-09",
+            status: 6,
+            percentDone: 1,
+            downloadDir: "/downloads",
+            uploadRatio: 1.5,
+            hashString: "abc123",
+            files: [],
+          },
+        ],
+      };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/verify`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 8 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.result.clean, true);
+    assert.equal(body.result.resumed, true);
+    assert.ok(calls.includes("torrent-start"));
+
+    const state = JSON.parse(await fs.readFile(verifyStatePath, "utf-8"));
+    assert.equal(state["abc123"].clean, true);
+    assert.equal(state["abc123"].percentDone, 1);
+
+    // A clean result logs nothing - activity.json is only ever created
+    // lazily on first write, so with zero entries it genuinely doesn't
+    // exist yet rather than existing as an empty array.
+    await assert.rejects(fs.stat(activityPath));
+  } finally {
+    await closeApp();
+    await closeTransmission();
+  }
+});
+
+test("POST /api/reseed/verify: a dirty result leaves the torrent paused, records verify state, logs a reviewWorthy activity entry, and pings Discord with a mention when configured", async () => {
+  const { baseUrl, settingsPath, activityPath, verifyStatePath, close: closeApp } = await makeScratchServer();
+  const calls: string[] = [];
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+    calls.push(method);
+    if (method === "torrent-get") {
+      return {
+        torrents: [
+          {
+            id: 8,
+            name: "TdF-2020-Stage-09",
+            status: 6,
+            percentDone: 0.354,
+            downloadDir: "/downloads",
+            uploadRatio: 1.5,
+            hashString: "corrupted-hash",
+            files: [],
+          },
+        ],
+      };
+    }
+    return {};
+  });
+
+  const discordCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const originalFetch = global.fetch;
+  global.fetch = (async (url, init) => {
+    if (typeof url === "string" && url.includes("discord.example")) {
+      discordCalls.push({ url, body: JSON.parse((init as { body: string }).body) });
+      return { ok: true } as Response;
+    }
+    return originalFetch(url as Parameters<typeof fetch>[0], init as Parameters<typeof fetch>[1]);
+  }) as typeof fetch;
+
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({
+        ...current,
+        transmission: { url: transmissionUrl },
+        discord: { webhookUrl: "https://discord.example/webhook", mentionUserId: "999" },
+      }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/verify`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 8 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.result.clean, false);
+    assert.equal(body.result.resumed, false);
+    assert.equal(Math.round(body.result.percentDone * 100), 35);
+    assert.equal(calls.includes("torrent-start"), false);
+
+    const state = JSON.parse(await fs.readFile(verifyStatePath, "utf-8"));
+    assert.equal(state["corrupted-hash"].clean, false);
+
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0].reviewWorthy, true);
+    assert.match(activity[0].lines.join("\n"), /35% clean.*TdF-2020-Stage-09/);
+
+    // The notification is fire-and-forget - give it a moment to land.
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    assert.equal(discordCalls.length, 1);
+    assert.match(discordCalls[0].body.content as string, /<@999>/);
+    assert.match(discordCalls[0].body.content as string, /35% clean/);
+  } finally {
+    global.fetch = originalFetch;
+    await closeApp();
+    await closeTransmission();
   }
 });

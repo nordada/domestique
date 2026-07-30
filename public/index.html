@@ -774,6 +774,7 @@
       <input type="checkbox" id="bulk-force-checkbox" style="width:auto;" checked> Force
     </label>
     <button type="button" class="pill-btn" id="bulk-readd-btn" title="Re-adds each eligible torrent to Transmission using its already-registered .torrent file, staging whatever's already filed in your Plex library first - a fully-filed torrent should come back up verified and seeding with nothing re-downloaded. Only for torrents Domestique still has registered but Transmission no longer reports.">Re-add to Transmission</button>
+    <button type="button" class="pill-btn" id="bulk-verify-btn" title="Forces Transmission to re-check each eligible torrent's on-disk data against its real piece hashes - briefly pauses each one during its own check. A clean result resumes automatically; anything less is left paused for review and logged to Activity, never auto-redownloaded.">Verify data</button>
     <button type="button" class="pill-btn accent" id="bulk-dedupe-btn" title="Relinks each eligible torrent's data to its Plex library copy and asks Transmission to re-verify it there - reclaims the disk space it was previously duplicating. A failed verify automatically reverts that one torrent back to its original location; nothing is ever deleted by this step.">Dedupe</button>
     <button type="button" class="pill-btn danger" id="bulk-delete-original-btn" title="Permanently deletes the leftover download-folder copy of each eligible already-deduped torrent - safe to remove since Transmission now seeds from the hardlinked Plex copy instead. Never touches your Plex library.">Delete leftover copy</button>
     <button type="button" class="pill-btn danger" id="bulk-remove-btn" title="Removes each eligible torrent from Transmission entirely and deletes its downloaded data from disk. Never touches anything already filed in your Plex library - only Transmission's own copy.">Remove from Transmission</button>
@@ -1938,7 +1939,8 @@ function torrentNeedsAttention(t) {
   return (
     t.plan.matchedCount < t.plan.files.length ||
     (t.inTransmission && Math.abs(t.percentComplete - t.percentDone) > 0.01) ||
-    Boolean(t.orphanOriginal)
+    Boolean(t.orphanOriginal) ||
+    Boolean(t.lastVerify && !t.lastVerify.clean)
   );
 }
 
@@ -2112,12 +2114,21 @@ function renderTorrentIndex() {
     const orphanMarker = t.orphanOriginal
       ? ` <span style="color:var(--err);" title="Original download-folder copy still exists (${formatBytes(t.orphanOriginal.totalBytes)}) - not yet reclaimed.">⚠️</span>`
       : "";
+    // Durable, not one-shot, same reasoning as orphanMarker above - a
+    // flagged verify stays visible on every reload until the user actually
+    // does something about it, not just for the one session it was found
+    // in. Deliberately an overlay next to the real status icon, not a
+    // replacement for it - a corrupted torrent can still genuinely be
+    // "seeding" or "paused" at the RPC level, this is a separate signal.
+    const verifyMarker = t.lastVerify && !t.lastVerify.clean
+      ? ` <span style="color:var(--err);" title="Verify data came back only ${Math.round(t.lastVerify.percentDone * 100)}% clean as of ${esc(new Date(t.lastVerify.checkedAt).toLocaleString())} - likely corruption, left paused for review.">⚠️</span>`
+      : "";
     const plex = plexSummary(t);
     return `
       <tr>
         <td><input type="checkbox" class="index-row-checkbox" data-hash="${esc(t.infoHash)}" ${checked}></td>
         <td class="truncate" title="${esc(t.torrentName)}">${esc(t.torrentName)}</td>
-        <td title="${esc(statusTitle)}">${statusIcon}</td>
+        <td title="${esc(statusTitle)}">${statusIcon}${verifyMarker}</td>
         <td>${percentCell}</td>
         <td>${ratioCell}</td>
         <td title="${esc(storageTitle)}">${storageIcon}${orphanMarker}</td>
@@ -2192,6 +2203,7 @@ function updateBulkActionBar() {
 
   const eligibleAddToLibrary = selected.filter((t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length);
   const eligibleReAdd = selected.filter((t) => !t.inTransmission);
+  const eligibleVerify = selected.filter((t) => t.inTransmission);
   const eligibleDedupe = selected.filter((t) => t.storageStatus === "duplicate");
   const eligibleDeleteOriginal = selected.filter((t) => t.orphanOriginal);
   const eligibleRemove = selected.filter((t) => t.inTransmission);
@@ -2203,6 +2215,10 @@ function updateBulkActionBar() {
   const readdBtn = document.getElementById("bulk-readd-btn");
   readdBtn.textContent = `Re-add to Transmission (${eligibleReAdd.length})`;
   readdBtn.disabled = eligibleReAdd.length === 0;
+
+  const verifyBtn = document.getElementById("bulk-verify-btn");
+  verifyBtn.textContent = `Verify data (${eligibleVerify.length})`;
+  verifyBtn.disabled = eligibleVerify.length === 0;
 
   const dedupeBtn = document.getElementById("bulk-dedupe-btn");
   dedupeBtn.textContent = `Dedupe (${eligibleDedupe.length})`;
@@ -2331,6 +2347,55 @@ async function bulkReAddToTransmission() {
     `${seeding} re-added and seeding${pausedForReview ? `, ${pausedForReview} added but left paused for review (partial or no verify)` : ""}${failed ? `, ${failed} failed` : ""}.` +
     bulkSkippedSuffix(selected.length, eligible.length);
   statusEl.className = failed || pausedForReview ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
+}
+
+/**
+ * Forces a fresh Transmission piece-hash re-check for each eligible
+ * (currently-in-Transmission) torrent - see reseedApi.ts's
+ * /api/reseed/verify and torrentVerify.ts's checkTorrentIntegrity. Briefly
+ * pauses each torrent during its own check; a clean result resumes it
+ * automatically, anything less is left paused and shows up both here and
+ * as a reviewWorthy Activity entry (plus a Discord ping if configured) -
+ * this never redownloads anything itself, purely detect-and-report. Built
+ * after finding real corrupted TdF-2020 stages this session that Transmission
+ * had never re-checked since they first verified clean, since Transmission
+ * itself never re-verifies already-seeding data on its own.
+ */
+async function bulkVerifyData() {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  const eligible = selected.filter((t) => t.inTransmission);
+  if (eligible.length === 0) return;
+  const proceed = confirm(
+    `Force a fresh data check for ${eligible.length} torrent(s) - each is briefly paused while Transmission re-checks it. A clean result resumes it automatically; anything less is left paused and logged to Activity for review, never auto-redownloaded. Continue?`
+  );
+  if (!proceed) return;
+
+  const statusEl = document.getElementById("index-action-status");
+  let clean = 0;
+  let flagged = 0;
+  let failed = 0;
+  for (let i = 0; i < eligible.length; i++) {
+    const t = eligible[i];
+    statusEl.textContent = `Verifying ${i + 1}/${eligible.length}: "${t.torrentName}"…`;
+    statusEl.className = "status-msg";
+    try {
+      const data = await api("/api/reseed/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: t.transmissionId }),
+      });
+      if (data.result.clean) clean++;
+      else flagged++;
+    } catch (err) {
+      failed++;
+      console.error(`Verify failed for "${t.torrentName}": ${err.message}`);
+    }
+  }
+  statusEl.textContent =
+    `${clean} clean${flagged ? `, ${flagged} flagged for review (see Activity)` : ""}${failed ? `, ${failed} failed` : ""}.` +
+    bulkSkippedSuffix(selected.length, eligible.length);
+  statusEl.className = failed || flagged ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
 
@@ -3077,6 +3142,7 @@ document.getElementById("bulk-add-to-library-btn").addEventListener("click", (e)
   bulkAddToLibrary(document.getElementById("bulk-force-checkbox").checked);
 });
 document.getElementById("bulk-readd-btn").addEventListener("click", bulkReAddToTransmission);
+document.getElementById("bulk-verify-btn").addEventListener("click", bulkVerifyData);
 document.getElementById("bulk-dedupe-btn").addEventListener("click", bulkDedupe);
 document.getElementById("bulk-delete-original-btn").addEventListener("click", bulkDeleteOriginal);
 document.getElementById("bulk-remove-btn").addEventListener("click", bulkRemove);

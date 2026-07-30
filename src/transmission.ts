@@ -281,6 +281,20 @@ export async function startTorrent(config: TransmissionConfig, id: number, timeo
   await rpcCall(config, "torrent-start", { ids: [id] }, timeoutMs);
 }
 
+/**
+ * Pauses a torrent via RPC `torrent-stop` - used by torrentVerify.ts's
+ * checkTorrentIntegrity to pause a live torrent *before* forcing a fresh
+ * piece-hash check, mirroring reseed.ts's commitReseed (stage paused,
+ * verify, only unpause on a clean result) rather than letting an
+ * already-seeding torrent try to redownload a bad piece from peers the
+ * instant verify finds one. Idempotent - safe to call on an
+ * already-stopped torrent, so callers never need to branch on prior state
+ * before calling this.
+ */
+export async function stopTorrent(config: TransmissionConfig, id: number, timeoutMs = 5000): Promise<void> {
+  await rpcCall(config, "torrent-stop", { ids: [id] }, timeoutMs);
+}
+
 /** One entry of RPC `torrent-get`'s `files` field - `name` is already the full path relative to the torrent's own download-dir (i.e. it includes the torrent's top-level name/folder for a multi-file torrent), the same convention torrentFile.ts's `relativePath` uses. */
 export interface TransmissionFileEntry {
   name: string;

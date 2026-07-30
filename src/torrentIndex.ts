@@ -35,6 +35,7 @@ import { getAllTorrentsWithFiles, type TransmissionConfig } from "./transmission
 import { listRegistry, getRegisteredTorrentBuf } from "./torrentRegistry.js";
 import { parseTorrentFile } from "./torrentFile.js";
 import { computeStorageStatus, findOrphanOriginal, computePercentComplete, type StorageStatus, type OrphanOriginal } from "./seeding.js";
+import { getVerifyResult, type VerifyRecord } from "./verifyState.js";
 
 export interface TorrentIndexEntry {
   infoHash: string;
@@ -56,6 +57,8 @@ export interface TorrentIndexEntry {
   storageStatus: StorageStatus;
   orphanOriginal: OrphanOriginal | null;
   ratio: number | null;
+  /** Most recent forced piece-hash re-check (see torrentVerify.ts), if this torrent's ever had one - null for one that's never been through a "Verify data" run. Kept even after the torrent drops out of Transmission, so a flagged-dirty result stays visible rather than silently disappearing the moment it's removed. */
+  lastVerify: VerifyRecord | null;
 }
 
 export interface TorrentIndexSummary {
@@ -71,6 +74,7 @@ export interface BuildTorrentIndexOptions {
   stagingRoot: string;
   downloadsPath: string;
   dedupeStatePath: string;
+  verifyStatePath: string;
   transmissionConfig: TransmissionConfig | null;
 }
 
@@ -110,6 +114,7 @@ export async function buildTorrentIndex(
       const plan = buildReseedPlan(meta, sizeIndex);
       const inPlex = plan.files.length > 0 && plan.matchedCount === plan.files.length;
       const totalBytes = meta.files.reduce((sum, f) => sum + f.length, 0);
+      const lastVerify = getVerifyResult(regEntry.infoHash, opts.verifyStatePath);
 
       const live = liveByHash.get(meta.infoHash.toLowerCase());
       if (!live) {
@@ -128,6 +133,7 @@ export async function buildTorrentIndex(
           storageStatus: "n/a",
           orphanOriginal: null,
           ratio: null,
+          lastVerify,
         };
       }
 
@@ -148,6 +154,7 @@ export async function buildTorrentIndex(
         orphanOriginal:
           storageStatus === "deduped" ? await findOrphanOriginal(plan, opts.downloadsPath, opts.dedupeStatePath) : null,
         ratio: live.uploadRatio,
+        lastVerify,
       };
     })
   );

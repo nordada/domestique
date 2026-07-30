@@ -13,6 +13,7 @@ async function makeScratch() {
   const settingsPath = join(configDir, "settings.json");
   const activityPath = join(configDir, "activity.json");
   const dedupeStatePath = join(configDir, "dedupe-state.json");
+  const verifyStatePath = join(configDir, "verify-state.json");
   const torrentRegistryDir = join(configDir, "torrent-registry");
   await fs.writeFile(configPath, JSON.stringify({ shows: [] }) + "\n", "utf-8");
   await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
@@ -25,6 +26,7 @@ async function makeScratch() {
     activityPath,
     downloadsPath,
     dedupeStatePath,
+    verifyStatePath,
     torrentRegistryDir,
     transmissionTorrentsDir: null,
     webui: null,
