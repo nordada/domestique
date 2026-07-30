@@ -16,12 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { parseTorrentFile } from "./torrentFile.js";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
-import { stageMatchedFiles, type StageResult } from "./reseedStage.js";
+import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
 import {
   addTorrentToTransmission,
   pollTorrentVerification,
@@ -67,10 +66,12 @@ function isCleanVerify(verify: TorrentVerifyResult | null): verify is TorrentVer
  * re-parse, and re-checking the library right before staging is more
  * correct anyway: it catches a library change made between the two calls).
  * Refuses to touch the filesystem or Transmission at all when nothing
- * matched. Otherwise clears/recreates this torrent's own staging subdir
- * (`plan.torrentName` is already a validated single path segment - see
- * torrentFile.ts's sanitizePathSegment, applied to info.name), stages every
- * matched file, then hands Transmission the *original* .torrent bytes
+ * matched. Otherwise clears/recreates this torrent's own staging subdir via
+ * prepareStagingDir (`plan.torrentName` is already a validated single path
+ * segment - see torrentFile.ts's sanitizePathSegment, applied to info.name;
+ * prepareStagingDir falls back to a fresh sibling directory rather than
+ * throwing if a stale leftover from an earlier attempt won't fully clear),
+ * stages every matched file, then hands Transmission the *original* .torrent bytes
  * pointed at that directory, paused, and waits out its own verify pass.
  * Only once that verify comes back clean (100%, no error) is the torrent
  * unpaused - a partial or failed verify is left paused for the caller to
@@ -86,14 +87,15 @@ export async function commitReseed(
   transmissionConfig: TransmissionConfig
 ): Promise<ReseedCommitResult> {
   const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot);
-  const perTorrentDir = join(stagingRoot, plan.torrentName);
+  const requestedDir = join(stagingRoot, plan.torrentName);
 
   if (plan.matchedCount === 0) {
-    return { ...plan, staged: false, stagedFiles: [], perTorrentDir };
+    // Nothing's ever staged here, so there's no staleness risk - report the
+    // plain requested path rather than involving prepareStagingDir at all.
+    return { ...plan, staged: false, stagedFiles: [], perTorrentDir: requestedDir };
   }
 
-  await rm(perTorrentDir, { recursive: true, force: true });
-  await mkdir(perTorrentDir, { recursive: true });
+  const perTorrentDir = await prepareStagingDir(requestedDir);
   const stagedFiles = await stageMatchedFiles(plan, perTorrentDir);
 
   const added = await addTorrentToTransmission(transmissionConfig, torrentBuf.toString("base64"), {

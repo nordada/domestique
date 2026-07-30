@@ -18,6 +18,7 @@
 
 import { link, copyFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { ReseedPlan } from "./reseedMatch.js";
 
 export interface StageResult {
@@ -35,6 +36,44 @@ export interface StageDeps {
 
 function isExdev(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "EXDEV";
+}
+
+/** Same DI reasoning as StageDeps above - a stuck-directory clearing failure isn't reproducibly forceable through a real filesystem in CI without this seam. Every real caller omits this. */
+export interface PrepareStagingDirDeps {
+  rm?: typeof rm;
+  mkdir?: typeof mkdir;
+  /** Test seam for the fallback suffix - real callers never pass this. */
+  randomSuffix?: () => string;
+}
+
+/**
+ * Clears `dir` (if anything's there) and recreates it fresh - the shared
+ * first step before staging matched files (see commitReseed/commitDedupe).
+ * Falls back to a fresh, uniquely-suffixed sibling directory rather than
+ * throwing if the requested one can't be fully cleared - real incident: a
+ * stuck `.fuse_hidden*` file (Unraid's shfs/FUSE layer renaming a file that
+ * got deleted while still open by another process - almost always
+ * Transmission itself, mid-read, from an earlier reverted dedupe attempt)
+ * permanently blocked every future dedupe on that torrent with a bare
+ * ENOTEMPTY, since nothing here can force another process to release a
+ * file handle it's still holding. Returns whatever directory actually
+ * ended up ready to use - callers must stage into THIS path, not
+ * necessarily the one they asked for.
+ */
+export async function prepareStagingDir(dir: string, deps: PrepareStagingDirDeps = {}): Promise<string> {
+  const doRm = deps.rm ?? rm;
+  const doMkdir = deps.mkdir ?? mkdir;
+  const suffix = deps.randomSuffix ?? (() => randomBytes(3).toString("hex"));
+  try {
+    await doRm(dir, { recursive: true, force: true });
+    await doMkdir(dir, { recursive: true });
+    return dir;
+  } catch (err) {
+    const fallback = `${dir}-${suffix()}`;
+    console.warn(`[reseed-stage] "${dir}" wouldn't fully clear (${err}) - staging into "${fallback}" instead.`);
+    await doMkdir(fallback, { recursive: true });
+    return fallback;
+  }
 }
 
 /**

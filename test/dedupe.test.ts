@@ -187,6 +187,13 @@ test("commitDedupe automatically reverts to the original location when the post-
       assert.equal(setLocationCalls.length, 2);
       assert.equal((setLocationCalls[0] as Record<string, unknown>).location, result.perTorrentDir);
       assert.equal((setLocationCalls[1] as Record<string, unknown>).location, downloadsRoot);
+
+      // Real incident this closes: a reverted dedupe used to leave its
+      // staged hardlink behind indefinitely, which could turn into a stuck
+      // .fuse_hidden* file (if Transmission hadn't fully released it yet)
+      // and permanently block every future dedupe attempt on that same
+      // torrent. A revert must clean up after itself.
+      await assert.rejects(() => stat(result.perTorrentDir));
     } finally {
       await close();
     }

@@ -16,11 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { mkdir, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
-import { stageMatchedFiles, type StageResult } from "./reseedStage.js";
+import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
 import { isPathWithin } from "./fileops.js";
 import {
   getAllTorrentsWithFiles,
@@ -102,21 +102,23 @@ export async function commitDedupe(
     return { staged: false, reverted: false, plan, stagedFiles: [], perTorrentDir: "", verify: null };
   }
 
-  const perTorrentDir = join(stagingRoot, plan.torrentName);
+  const requestedDir = join(stagingRoot, plan.torrentName);
   // plan.torrentName here is Transmission's own live torrent name, not one
   // that's been through torrentFile.ts's per-segment sanitization (that
   // only runs when parsing an uploaded .torrent, see reseed.ts) - confine
   // it the same way the webhook confines a client-supplied dir/name before
   // touching the filesystem, rather than trusting join() alone to be safe
-  // against a malformed/adversarial name.
-  if (!isPathWithin(perTorrentDir, stagingRoot)) {
+  // against a malformed/adversarial name. Checked on the requested path -
+  // prepareStagingDir's own fallback is always still within stagingRoot by
+  // construction (an appended suffix, never a new ".." segment), so it
+  // doesn't need re-checking.
+  if (!isPathWithin(requestedDir, stagingRoot)) {
     throw new Error(`torrent name "${plan.torrentName}" resolves outside the staging directory - refusing to stage it`);
   }
 
   const originalLocation: TorrentOriginalLocation = { dir: torrent.downloadDir, name: torrent.name };
 
-  await rm(perTorrentDir, { recursive: true, force: true });
-  await mkdir(perTorrentDir, { recursive: true });
+  const perTorrentDir = await prepareStagingDir(requestedDir);
   const stagedFiles = await stageMatchedFiles(plan, perTorrentDir);
 
   await setTorrentLocation(transmissionConfig, id, perTorrentDir);
@@ -130,6 +132,18 @@ export async function commitDedupe(
   await setTorrentLocation(transmissionConfig, id, originalLocation.dir);
   await verifyTorrent(transmissionConfig, id);
   await pollTorrentVerification(transmissionConfig, id);
+
+  // Best-effort - the revert itself has already succeeded regardless of
+  // whether this cleanup does. Real incident this closes: a reverted
+  // dedupe used to leave its staged hardlink behind indefinitely, which
+  // could turn into a stuck `.fuse_hidden*` file (if Transmission hadn't
+  // fully released it yet) that then permanently blocked every future
+  // dedupe attempt on this same torrent with a bare ENOTEMPTY - see
+  // prepareStagingDir's own fallback in reseedStage.ts for the other half
+  // of this fix.
+  await rm(perTorrentDir, { recursive: true, force: true }).catch((err) =>
+    console.warn(`[dedupe] failed to clean up staging dir "${perTorrentDir}" after revert: ${err}`)
+  );
 
   return { staged: false, reverted: true, plan, stagedFiles, perTorrentDir, originalLocation, verify };
 }

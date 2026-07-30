@@ -2233,11 +2233,11 @@ function updateBulkActionBar() {
   removeBtn.disabled = eligibleRemove.length === 0;
 }
 
-/** Shared sequential-loop runner for the bulk actions below - one request at a time (never concurrent, so Transmission isn't hammered by a large batch), same pattern processReseedBatch already established for the drop-zone's own batch queue. */
+/** Shared sequential-loop runner for the bulk actions below - one request at a time (never concurrent, so Transmission isn't hammered by a large batch), same pattern processReseedBatch already established for the drop-zone's own batch queue. Collects each failure's real error message (not just a count) so the caller can actually show it - previously every bulk action only logged this to the DevTools console, leaving the visible status line as an undiagnosable bare "N errored". */
 async function runBulkAction(entries, progressVerb, runOne) {
   const statusEl = document.getElementById("index-action-status");
   let succeeded = 0;
-  let failed = 0;
+  const failures = []; // { torrentName, message }
   for (let i = 0; i < entries.length; i++) {
     const t = entries[i];
     statusEl.textContent = `${progressVerb} ${i + 1}/${entries.length}: "${t.torrentName}"…`;
@@ -2246,11 +2246,16 @@ async function runBulkAction(entries, progressVerb, runOne) {
       await runOne(t);
       succeeded++;
     } catch (err) {
-      failed++;
+      failures.push({ torrentName: t.torrentName, message: err.message });
       console.error(`${progressVerb} failed for "${t.torrentName}": ${err.message}`);
     }
   }
-  return { succeeded, failed };
+  return { succeeded, failed: failures.length, failures };
+}
+
+/** Appends each real failure message as its own line - `.status-msg` already has `white-space: pre-wrap`, so this renders as separate readable lines, same convention commitResultLines already uses for the single-file commit flow. */
+function formatBulkFailures(failures) {
+  return failures.length ? "\n" + failures.map((f) => `❌ "${f.torrentName}": ${f.message}`).join("\n") : "";
 }
 
 function bulkSkippedSuffix(selectedCount, eligibleCount) {
@@ -2284,7 +2289,7 @@ async function bulkAddToLibrary(force) {
     );
     if (!proceed) return;
   }
-  const { succeeded, failed } = await runBulkAction(eligible, force ? "Forcing" : "Adding to Plex library", (t) =>
+  const { succeeded, failed, failures } = await runBulkAction(eligible, force ? "Forcing" : "Adding to Plex library", (t) =>
     api("/api/reseed/add-to-library", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2292,7 +2297,9 @@ async function bulkAddToLibrary(force) {
     })
   );
   const statusEl = document.getElementById("index-action-status");
-  statusEl.textContent = `${succeeded} added${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
+  statusEl.textContent =
+    `${succeeded} added${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}` +
+    formatBulkFailures(failures);
   statusEl.className = failed ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
@@ -2322,30 +2329,22 @@ async function bulkReAddToTransmission() {
   );
   if (!proceed) return;
 
-  const statusEl = document.getElementById("index-action-status");
   let seeding = 0;
   let pausedForReview = 0;
-  let failed = 0;
-  for (let i = 0; i < eligible.length; i++) {
-    const t = eligible[i];
-    statusEl.textContent = `Re-adding to Transmission ${i + 1}/${eligible.length}: "${t.torrentName}"…`;
-    statusEl.className = "status-msg";
-    try {
-      const torrentRes = await fetch(`/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}`);
-      if (!torrentRes.ok) throw new Error(`couldn't fetch its registered .torrent file (HTTP ${torrentRes.status})`);
-      const torrentBlob = await torrentRes.blob();
-      const data = await api("/api/reseed/commit", { method: "POST", body: torrentBlob });
-      const verify = data.result.transmission && data.result.transmission.verify;
-      if (verify && !verify.error && verify.percentDone === 1 && data.result.transmission.started) seeding++;
-      else pausedForReview++;
-    } catch (err) {
-      failed++;
-      console.error(`Re-add to Transmission failed for "${t.torrentName}": ${err.message}`);
-    }
-  }
+  const { failed, failures } = await runBulkAction(eligible, "Re-adding to Transmission", async (t) => {
+    const torrentRes = await fetch(`/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}`);
+    if (!torrentRes.ok) throw new Error(`couldn't fetch its registered .torrent file (HTTP ${torrentRes.status})`);
+    const torrentBlob = await torrentRes.blob();
+    const data = await api("/api/reseed/commit", { method: "POST", body: torrentBlob });
+    const verify = data.result.transmission && data.result.transmission.verify;
+    if (verify && !verify.error && verify.percentDone === 1 && data.result.transmission.started) seeding++;
+    else pausedForReview++;
+  });
+  const statusEl = document.getElementById("index-action-status");
   statusEl.textContent =
     `${seeding} re-added and seeding${pausedForReview ? `, ${pausedForReview} added but left paused for review (partial or no verify)` : ""}${failed ? `, ${failed} failed` : ""}.` +
-    bulkSkippedSuffix(selected.length, eligible.length);
+    bulkSkippedSuffix(selected.length, eligible.length) +
+    formatBulkFailures(failures);
   statusEl.className = failed || pausedForReview ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
@@ -2371,30 +2370,22 @@ async function bulkVerifyData() {
   );
   if (!proceed) return;
 
-  const statusEl = document.getElementById("index-action-status");
   let clean = 0;
   let flagged = 0;
-  let failed = 0;
-  for (let i = 0; i < eligible.length; i++) {
-    const t = eligible[i];
-    statusEl.textContent = `Verifying ${i + 1}/${eligible.length}: "${t.torrentName}"…`;
-    statusEl.className = "status-msg";
-    try {
-      const data = await api("/api/reseed/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: t.transmissionId }),
-      });
-      if (data.result.clean) clean++;
-      else flagged++;
-    } catch (err) {
-      failed++;
-      console.error(`Verify failed for "${t.torrentName}": ${err.message}`);
-    }
-  }
+  const { failed, failures } = await runBulkAction(eligible, "Verifying", async (t) => {
+    const data = await api("/api/reseed/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: t.transmissionId }),
+    });
+    if (data.result.clean) clean++;
+    else flagged++;
+  });
+  const statusEl = document.getElementById("index-action-status");
   statusEl.textContent =
     `${clean} clean${flagged ? `, ${flagged} flagged for review (see Activity)` : ""}${failed ? `, ${failed} failed` : ""}.` +
-    bulkSkippedSuffix(selected.length, eligible.length);
+    bulkSkippedSuffix(selected.length, eligible.length) +
+    formatBulkFailures(failures);
   statusEl.className = failed || flagged ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
@@ -2417,30 +2408,22 @@ async function bulkDedupe() {
   );
   if (!proceed) return;
 
-  const statusEl = document.getElementById("index-action-status");
   let staged = 0;
   let reverted = 0;
-  let failed = 0;
-  for (let i = 0; i < eligible.length; i++) {
-    const t = eligible[i];
-    statusEl.textContent = `Deduping ${i + 1}/${eligible.length}: "${t.torrentName}"…`;
-    statusEl.className = "status-msg";
-    try {
-      const data = await api("/api/reseed/dedupe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: t.transmissionId }),
-      });
-      if (data.result.staged) staged++;
-      else if (data.result.reverted) reverted++;
-    } catch (err) {
-      failed++;
-      console.error(`Dedupe failed for "${t.torrentName}": ${err.message}`);
-    }
-  }
+  const { failed, failures } = await runBulkAction(eligible, "Deduping", async (t) => {
+    const data = await api("/api/reseed/dedupe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: t.transmissionId }),
+    });
+    if (data.result.staged) staged++;
+    else if (data.result.reverted) reverted++;
+  });
+  const statusEl = document.getElementById("index-action-status");
   statusEl.textContent =
     `${staged} deduped${reverted ? `, ${reverted} failed verify and reverted (untouched)` : ""}${failed ? `, ${failed} errored` : ""}.` +
-    bulkSkippedSuffix(selected.length, eligible.length);
+    bulkSkippedSuffix(selected.length, eligible.length) +
+    formatBulkFailures(failures);
   statusEl.className = failed || reverted ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
@@ -2458,7 +2441,7 @@ async function bulkDeleteOriginal() {
   const proceed = confirm(`This permanently deletes the original download-folder copy for ${eligible.length} already-deduped torrent(s). Continue?`);
   if (!proceed) return;
 
-  const { succeeded, failed } = await runBulkAction(eligible, "Deleting original copy", (t) =>
+  const { succeeded, failed, failures } = await runBulkAction(eligible, "Deleting original copy", (t) =>
     api("/api/reseed/delete-original", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2466,7 +2449,9 @@ async function bulkDeleteOriginal() {
     })
   );
   const statusEl = document.getElementById("index-action-status");
-  statusEl.textContent = `${succeeded} deleted${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
+  statusEl.textContent =
+    `${succeeded} deleted${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}` +
+    formatBulkFailures(failures);
   statusEl.className = failed ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }
@@ -2488,7 +2473,7 @@ async function bulkRemove() {
   );
   if (!proceed) return;
 
-  const { succeeded, failed } = await runBulkAction(eligible, "Removing", (t) =>
+  const { succeeded, failed, failures } = await runBulkAction(eligible, "Removing", (t) =>
     api("/api/reseed/remove", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2496,7 +2481,9 @@ async function bulkRemove() {
     })
   );
   const statusEl = document.getElementById("index-action-status");
-  statusEl.textContent = `${succeeded} removed${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
+  statusEl.textContent =
+    `${succeeded} removed${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}` +
+    formatBulkFailures(failures);
   statusEl.className = failed ? "status-msg err" : "status-msg ok";
   await finishBulkAction();
 }

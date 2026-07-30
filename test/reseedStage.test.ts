@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, stat, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stageMatchedFiles } from "../src/reseedStage.js";
+import { stageMatchedFiles, prepareStagingDir } from "../src/reseedStage.js";
 import type { ReseedPlan } from "../src/reseedMatch.js";
 
 async function makeScratch(): Promise<{ libraryDir: string; stagingDir: string }> {
@@ -134,5 +134,53 @@ test("stageMatchedFiles clears a stale leftover from a previous attempt before r
   } finally {
     await rm(libraryDir, { recursive: true, force: true });
     await rm(stagingDir, { recursive: true, force: true });
+  }
+});
+
+test("prepareStagingDir: creates a directory fresh when nothing was there before", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "domestique-preparestaging-"));
+  try {
+    const dir = join(parent, "Race");
+    const result = await prepareStagingDir(dir);
+    assert.equal(result, dir);
+    const s = await stat(dir);
+    assert.ok(s.isDirectory());
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("prepareStagingDir: clears stale content and reuses the exact same path when clearing succeeds", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "domestique-preparestaging-"));
+  try {
+    const dir = join(parent, "Race");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "stale.txt"), "leftover junk");
+
+    const result = await prepareStagingDir(dir);
+    assert.equal(result, dir);
+    await assert.rejects(() => stat(join(dir, "stale.txt")));
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("prepareStagingDir: falls back to a fresh suffixed sibling directory when the requested one won't fully clear, rather than throwing - reproduces the real stuck .fuse_hidden* incident that permanently blocked a dedupe retry", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "domestique-preparestaging-"));
+  try {
+    const dir = join(parent, "Race");
+
+    const alwaysStuck = async () => {
+      const err = new Error("directory not empty") as NodeJS.ErrnoException;
+      err.code = "ENOTEMPTY";
+      throw err;
+    };
+
+    const result = await prepareStagingDir(dir, { rm: alwaysStuck as never, randomSuffix: () => "deadbeef" });
+    assert.equal(result, `${dir}-deadbeef`);
+    const s = await stat(result);
+    assert.ok(s.isDirectory());
+  } finally {
+    await rm(parent, { recursive: true, force: true });
   }
 });
