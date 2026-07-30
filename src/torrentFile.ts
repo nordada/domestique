@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { decodeBencode, type BencodeValue } from "./bencode.js";
+import { decodeBencode, computeInfoHash, type BencodeValue } from "./bencode.js";
 
 /** relativePath already includes the torrent's info.name as its first segment, so every caller can treat single- and multi-file torrents identically - it's exactly the path Transmission's download-dir + this path should resolve to. */
 export interface TorrentFileEntry {
@@ -27,6 +27,8 @@ export interface TorrentFileEntry {
 export interface TorrentMetainfo {
   name: string;
   files: TorrentFileEntry[];
+  /** SHA1 of the raw info dict bytes (see bencode.ts's computeInfoHash) - the same identifier Transmission itself reports as hashString, lowercase hex. This is the torrent's real, content-derived identity - unlike `name`, it can't collide between two unrelated torrents and doesn't change if either side renames something. */
+  infoHash: string;
 }
 
 export class TorrentParseError extends Error {
@@ -87,8 +89,10 @@ function sanitizePathSegment(raw: string, context: string): string {
  */
 export function parseTorrentFile(buf: Buffer): TorrentMetainfo {
   let root: BencodeValue;
+  let infoHash: string;
   try {
     root = decodeBencode(buf);
+    infoHash = computeInfoHash(buf);
   } catch (err) {
     throw new TorrentParseError(`torrent file is not valid bencode: ${err}`);
   }
@@ -121,12 +125,12 @@ export function parseTorrentFile(buf: Buffer): TorrentMetainfo {
       );
       return { relativePath: [name, ...segments].join("/"), length };
     });
-    return { name, files };
+    return { name, files, infoHash };
   }
 
   if (lengthValue !== undefined) {
     const length = asNumber(lengthValue, "info.length");
-    return { name, files: [{ relativePath: name, length }] };
+    return { name, files: [{ relativePath: name, length }], infoHash };
   }
 
   throw new TorrentParseError(

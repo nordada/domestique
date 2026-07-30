@@ -489,7 +489,7 @@
   <nav class="tabs">
     <button type="button" class="tab-btn" data-tab="home">Activity</button>
     <button type="button" class="tab-btn" data-tab="events">Events</button>
-    <button type="button" class="tab-btn" data-tab="reseed">Reseed</button>
+    <button type="button" class="tab-btn" data-tab="index">Index</button>
     <button type="button" class="tab-btn" data-tab="settings">Settings</button>
   </nav>
 </header>
@@ -682,7 +682,7 @@
 
 </div>
 
-<div id="tab-reseed" class="tab-panel hidden">
+<div id="tab-index" class="tab-panel hidden">
 
 <section id="reseed-section">
   <div class="toolbar">
@@ -719,65 +719,44 @@
   <div id="reseed-batch-list"></div>
 </section>
 
-<section id="torrent-registry-section">
+<section id="torrent-index-section">
   <div class="toolbar">
-    <h2 style="margin:0">Torrent registry</h2>
+    <h2 style="margin:0">Torrent index</h2>
     <div class="row" style="flex:0 0 auto; gap:0.4rem; align-items:center;">
-      <button type="button" class="icon-btn subtle" id="refresh-registry-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
-      <span class="refresh-flash" id="registry-refresh-flash"></span>
+      <button type="button" class="icon-btn subtle" id="refresh-index-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <span class="refresh-flash" id="index-refresh-flash"></span>
     </div>
   </div>
   <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Every .torrent successfully staged through Reseed above gets a durable copy
-    saved here, so you can download it again later and so re-dropping the same
-    batch skips anything already handled instead of re-walking the library for
-    it. Plex/Transmission columns are checked live every time this loads - a
-    torrent can leave either system independently of the other over time, so
-    neither column is authoritative over the other, this is just a record of
-    what's been fed through Reseed.
+    Every .torrent Domestique has a saved copy of - either staged through
+    Preview/Commit above, or synced in automatically from Transmission's own
+    torrents directory if configured (see Settings), which is how a torrent
+    added directly by autobrr shows up here too, not just ones dropped into
+    this tab. The saved .torrent itself is the source of truth for identity;
+    Plex and Transmission columns are checked live every time this loads - a
+    torrent can leave either system independently of the other over time
+    (removed from Transmission after seeding, or cleaned out of Plex), so
+    neither column is authoritative over the other.
   </p>
   <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
-    <span id="registry-summary-total" class="seeding-summary-badge neutral" style="display:none;"></span>
-    <span id="registry-summary-plex" class="seeding-summary-badge ok" style="display:none;"></span>
-    <span id="registry-summary-transmission" class="seeding-summary-badge ok" style="display:none;"></span>
-  </div>
-  <input type="text" id="registry-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
-  <div id="registry-list">Loading…</div>
-</section>
-
-<section id="seeding-section">
-  <div class="toolbar">
-    <h2 style="margin:0">Currently seeding</h2>
-    <div class="row" style="flex:0 0 auto; gap:0.4rem; align-items:center;">
-      <button type="button" class="icon-btn subtle" id="refresh-seeding-btn" title="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
-      <span class="refresh-flash" id="seeding-refresh-flash"></span>
-    </div>
-  </div>
-  <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
-    Every torrent Transmission is currently seeding or has paused, each matched against
-    your library by file size the same way Preview above does - not limited to torrents
-    reseeded through this tab. A torrent with an unmatched or ambiguous file offers an
-    <strong>Add to Plex library</strong> button, which runs it through the normal
-    parse/match/copy pipeline (same as a fresh download) rather than trying to match
-    it into place.
-  </p>
-  <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
-    <span id="seeding-summary-attention" class="seeding-summary-badge err" style="display:none;"></span>
-    <span id="seeding-summary-ok" class="seeding-summary-badge ok" style="display:none;"></span>
-    <span id="seeding-summary-deduped" class="seeding-summary-badge ok" style="display:none;"></span>
-    <span id="seeding-summary-duplicated" class="seeding-summary-badge neutral" style="display:none;"></span>
+    <span id="index-summary-total" class="seeding-summary-badge neutral" style="display:none;"></span>
+    <span id="index-summary-plex" class="seeding-summary-badge ok" style="display:none;"></span>
+    <span id="index-summary-transmission" class="seeding-summary-badge ok" style="display:none;"></span>
+    <span id="index-summary-attention" class="seeding-summary-badge err" style="display:none;"></span>
+    <span id="index-summary-deduped" class="seeding-summary-badge ok" style="display:none;"></span>
+    <span id="index-summary-duplicated" class="seeding-summary-badge neutral" style="display:none;"></span>
     <label style="display:flex; align-items:center; gap:0.4rem; margin-left:auto; font-size:0.85rem; opacity:0.85; flex:0 0 auto;">
       Sort
-      <select id="seeding-sort">
+      <select id="index-sort">
         <option value="attention">Needs attention first</option>
         <option value="name">Name (A-Z)</option>
       </select>
     </label>
   </div>
-  <input type="text" id="seeding-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
-  <div id="seeding-action-status" class="status-msg"></div>
+  <input type="text" id="index-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
+  <div id="index-action-status" class="status-msg"></div>
   <div class="seeding-list-scroll">
-    <div id="seeding-list">Loading…</div>
+    <div id="index-list">Loading…</div>
   </div>
 </section>
 
@@ -1843,78 +1822,6 @@ async function uploadFolder(fileList) {
 
 let lastReseedFile = null;
 let lastReseedPlan = null;
-let torrentRegistry = [];
-
-async function loadTorrentRegistry() {
-  const listEl = document.getElementById("registry-list");
-  try {
-    const data = await api("/api/reseed/registry");
-    torrentRegistry = data.torrents;
-    renderTorrentRegistry();
-  } catch (err) {
-    listEl.innerHTML = `<p class="status-msg err">Failed to load: ${esc(err.message)}</p>`;
-  }
-}
-
-function renderTorrentRegistry() {
-  const listEl = document.getElementById("registry-list");
-  const totalBadge = document.getElementById("registry-summary-total");
-  const plexBadge = document.getElementById("registry-summary-plex");
-  const transmissionBadge = document.getElementById("registry-summary-transmission");
-
-  if (torrentRegistry.length === 0) {
-    listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing registered yet - staging a torrent through Reseed above will save a copy here.</p>";
-    totalBadge.style.display = "none";
-    plexBadge.style.display = "none";
-    transmissionBadge.style.display = "none";
-    return;
-  }
-
-  totalBadge.textContent = `${torrentRegistry.length} total`;
-  totalBadge.style.display = "inline-block";
-  plexBadge.textContent = `${torrentRegistry.filter((t) => t.inPlex).length} in Plex`;
-  plexBadge.style.display = "inline-block";
-  transmissionBadge.textContent = `${torrentRegistry.filter((t) => t.inTransmission).length} in Transmission`;
-  transmissionBadge.style.display = "inline-block";
-
-  const query = document.getElementById("registry-search").value.trim().toLowerCase();
-  const filtered = query
-    ? torrentRegistry.filter((t) => t.torrentName.toLowerCase().includes(query))
-    : torrentRegistry.slice();
-  if (filtered.length === 0) {
-    listEl.innerHTML = `<p style="opacity:0.7;">No registered torrents match "${esc(query)}".</p>`;
-    return;
-  }
-  filtered.sort((a, b) => a.torrentName.localeCompare(b.torrentName));
-
-  listEl.innerHTML = `
-    <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-      <thead>
-        <tr style="text-align:left; border-bottom:1px solid var(--border);">
-          <th style="padding:0.35rem 0.5rem 0.35rem 0;">Name</th>
-          <th style="padding:0.35rem 0.5rem;">Size</th>
-          <th style="padding:0.35rem 0.5rem;">Added</th>
-          <th style="padding:0.35rem 0.5rem;">Plex</th>
-          <th style="padding:0.35rem 0.5rem;">Transmission</th>
-          <th style="padding:0.35rem 0 0.35rem 0.5rem;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${filtered.map((t) => `
-          <tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:0.35rem 0.5rem 0.35rem 0;">${esc(t.torrentName)}</td>
-            <td style="padding:0.35rem 0.5rem; white-space:nowrap;">${formatBytes(t.sizeBytes)}</td>
-            <td style="padding:0.35rem 0.5rem; white-space:nowrap;">${esc(new Date(t.addedAt).toLocaleDateString())}</td>
-            <td style="padding:0.35rem 0.5rem;">${t.inPlex ? "✅" : "❌"}</td>
-            <td style="padding:0.35rem 0.5rem;">${t.inTransmission ? "✅" : "❌"}</td>
-            <td style="padding:0.35rem 0 0.35rem 0.5rem; white-space:nowrap;"><a href="/api/reseed/registry/download?name=${encodeURIComponent(t.torrentName)}">Download</a></td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
-}
-
 function formatBytes(n) {
   if (n === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1962,14 +1869,14 @@ function renderReseedPlan(plan) {
 // keystroke in the search box - same "fetch once, filter locally" pattern
 // as the Events tab's own search box (events/renderEvents), which already
 // proved out at 500+ rows there.
-let seedingTorrents = [];
+let torrentIndexEntries = [];
 
-async function loadSeedingList() {
-  const listEl = document.getElementById("seeding-list");
+async function loadTorrentIndex() {
+  const listEl = document.getElementById("index-list");
   try {
-    const data = await api("/api/reseed/seeding");
-    seedingTorrents = data.torrents;
-    renderSeedingList();
+    const data = await api("/api/reseed/index");
+    torrentIndexEntries = data.torrents;
+    renderTorrentIndex();
   } catch (err) {
     listEl.innerHTML = `<p class="status-msg err">Failed to load: ${esc(err.message)}</p>`;
   }
@@ -1981,77 +1888,105 @@ async function loadSeedingList() {
  * per-item needsAttention below (which only covers file-matching and
  * drives whether Add/Force show, since those are the only two things with
  * an actual fix-it button). This one also counts a Transmission/on-disk
- * percentage mismatch, since that's just as worth flagging even though
- * there's nothing to click to "fix" it here.
+ * percentage mismatch (only meaningful when currently in Transmission -
+ * percentComplete/percentDone are null otherwise), since that's just as
+ * worth flagging even though there's nothing to click to "fix" it here.
  */
 function torrentNeedsAttention(t) {
   return (
     t.plan.matchedCount < t.plan.files.length ||
-    Math.abs(t.percentComplete - t.percentDone) > 0.01 ||
+    (t.inTransmission && Math.abs(t.percentComplete - t.percentDone) > 0.01) ||
     Boolean(t.orphanOriginal)
   );
 }
 
-function renderSeedingList() {
-  const listEl = document.getElementById("seeding-list");
-  const attentionBadge = document.getElementById("seeding-summary-attention");
-  const okBadge = document.getElementById("seeding-summary-ok");
-  const dedupedBadge = document.getElementById("seeding-summary-deduped");
-  const duplicatedBadge = document.getElementById("seeding-summary-duplicated");
+function renderTorrentIndex() {
+  const listEl = document.getElementById("index-list");
+  const totalBadge = document.getElementById("index-summary-total");
+  const plexBadge = document.getElementById("index-summary-plex");
+  const transmissionBadge = document.getElementById("index-summary-transmission");
+  const attentionBadge = document.getElementById("index-summary-attention");
+  const dedupedBadge = document.getElementById("index-summary-deduped");
+  const duplicatedBadge = document.getElementById("index-summary-duplicated");
 
-  if (seedingTorrents.length === 0) {
-    listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing is currently seeding or paused.</p>";
-    attentionBadge.style.display = "none";
-    okBadge.style.display = "none";
-    dedupedBadge.style.display = "none";
-    duplicatedBadge.style.display = "none";
+  if (torrentIndexEntries.length === 0) {
+    listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing registered yet - staging a torrent above (or configuring the Transmission-torrents sync in Settings) will populate this list.</p>";
+    [totalBadge, plexBadge, transmissionBadge, attentionBadge, dedupedBadge, duplicatedBadge].forEach((b) => {
+      b.style.display = "none";
+    });
     return;
   }
 
-  const attentionCount = seedingTorrents.filter(torrentNeedsAttention).length;
-  const okCount = seedingTorrents.length - attentionCount;
+  totalBadge.textContent = `${torrentIndexEntries.length} total`;
+  totalBadge.style.display = "inline-block";
+  plexBadge.textContent = `${torrentIndexEntries.filter((t) => t.inPlex).length} in Plex`;
+  plexBadge.style.display = "inline-block";
+  transmissionBadge.textContent = `${torrentIndexEntries.filter((t) => t.inTransmission).length} in Transmission`;
+  transmissionBadge.style.display = "inline-block";
+
+  const attentionCount = torrentIndexEntries.filter(torrentNeedsAttention).length;
   attentionBadge.textContent = `⚠️ ${attentionCount} need${attentionCount === 1 ? "s" : ""} attention`;
   attentionBadge.style.display = attentionCount > 0 ? "inline-block" : "none";
-  okBadge.textContent = `✅ ${okCount} fully matched`;
-  okBadge.style.display = okCount > 0 ? "inline-block" : "none";
 
-  // At-a-glance view of how much of the seeding backlog is already
+  // At-a-glance view of how much of what's currently seeding is already
   // deduped vs. still costing double disk - independent of the
-  // needs-attention pair above (storageStatus isn't a correctness signal).
-  const dedupedCount = seedingTorrents.filter((t) => t.storageStatus === "deduped").length;
-  const duplicatedCount = seedingTorrents.filter((t) => t.storageStatus === "duplicate").length;
+  // needs-attention badge above (storageStatus isn't a correctness signal),
+  // and "n/a" (not currently in Transmission) for neither.
+  const dedupedCount = torrentIndexEntries.filter((t) => t.storageStatus === "deduped").length;
+  const duplicatedCount = torrentIndexEntries.filter((t) => t.storageStatus === "duplicate").length;
   dedupedBadge.textContent = `🔗 ${dedupedCount} deduped`;
   dedupedBadge.style.display = dedupedCount > 0 ? "inline-block" : "none";
   duplicatedBadge.textContent = `📦 ${duplicatedCount} duplicated`;
   duplicatedBadge.style.display = duplicatedCount > 0 ? "inline-block" : "none";
 
-  const query = document.getElementById("seeding-search").value.trim().toLowerCase();
+  const query = document.getElementById("index-search").value.trim().toLowerCase();
   const filtered = query
-    ? seedingTorrents.filter((t) => t.plan.torrentName.toLowerCase().includes(query))
-    : seedingTorrents.slice();
+    ? torrentIndexEntries.filter((t) => t.torrentName.toLowerCase().includes(query))
+    : torrentIndexEntries.slice();
   if (filtered.length === 0) {
-    listEl.innerHTML = `<p style="opacity:0.7;">No seeding torrents match "${esc(query)}".</p>`;
+    listEl.innerHTML = `<p style="opacity:0.7;">No torrents match "${esc(query)}".</p>`;
     return;
   }
 
-  const sortMode = document.getElementById("seeding-sort").value;
+  const sortMode = document.getElementById("index-sort").value;
   filtered.sort((a, b) => {
     if (sortMode === "attention") {
       const aAttn = torrentNeedsAttention(a);
       const bAttn = torrentNeedsAttention(b);
       if (aAttn !== bAttn) return aAttn ? -1 : 1;
     }
-    return a.plan.torrentName.localeCompare(b.plan.torrentName);
+    return a.torrentName.localeCompare(b.torrentName);
   });
 
+  const STATUS_SEEDING = 6;
   listEl.innerHTML = filtered.map((t) => {
-    const statusLabel = t.status === 6 ? "Seeding" : "Paused";
-    const statusClass = t.status === 6 ? "ok" : "";
-    const needsAttention = t.plan.matchedCount < t.plan.files.length;
-    const matchButtons = needsAttention
+    const downloadLink = `<a href="/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}">Download .torrent</a>`;
+
+    // Every action below needs a live Transmission id to actually do
+    // anything (they all either operate on Transmission's own RPC directly,
+    // or ask Transmission where a torrent's data currently lives) - a
+    // registry-only entry (not currently in Transmission) has nothing for
+    // any of them to act on, so all of this is gated on t.inTransmission.
+    if (!t.inTransmission) {
+      return `
+        <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
+          <div><strong>${esc(t.torrentName)}</strong>
+            <span class="status-msg" style="display:inline; padding:0.1rem 0.5rem;">Not in Transmission</span>
+            &nbsp;${formatBytes(t.totalBytes)}&nbsp;&middot; added ${esc(new Date(t.addedAt).toLocaleDateString())}
+          </div>
+          <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
+          <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">${downloadLink}</div>
+        </div>
+      `;
+    }
+
+    const statusLabel = t.status === STATUS_SEEDING ? "Seeding" : "Paused";
+    const statusClass = t.status === STATUS_SEEDING ? "ok" : "";
+    const needsMatch = t.plan.matchedCount < t.plan.files.length;
+    const matchButtons = needsMatch
       ? `
-          <button type="button" data-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}">Add to Plex library</button>
-          <button type="button" class="icon-btn subtle" data-force-add-to-library="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" title="Force file as new version - bypasses the &quot;already have this release&quot; check">${ICON_HAMMER}</button>
+          <button type="button" data-add-to-library="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}">Add to Plex library</button>
+          <button type="button" class="icon-btn subtle" data-force-add-to-library="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}" title="Force file as new version - bypasses the &quot;already have this release&quot; check">${ICON_HAMMER}</button>
         `
       : "";
     // percentComplete (bytes actually on disk, computed from the raw file
@@ -2065,7 +2000,7 @@ function renderSeedingList() {
     const mismatchNote = mismatch
       ? `<span title="Transmission's own percentDone only counts files it considers &quot;wanted&quot; - a torrent with deselected files can report 100% there while having nothing on disk."> (Transmission reports ${Math.round(t.percentDone * 100)}% - some files may be deselected)</span>`
       : "";
-    // Purely informational, independent of the needs-attention badges above
+    // Purely informational, independent of the needs-attention badge above
     // - a full duplicate isn't "wrong", just an opportunity to reclaim disk
     // space via Dedupe below. "n/a" (not a full match) renders nothing.
     const storageChip = {
@@ -2078,7 +2013,7 @@ function renderSeedingList() {
     }[t.storageStatus] || "";
     const dedupeButton =
       t.storageStatus === "duplicate"
-        ? `<button type="button" class="confirm-action" data-dedupe="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" title="Relinks this torrent to its Plex library copy and asks Transmission to re-verify it there. A clean verify makes the completed-folder copy safe to delete separately; a failed verify automatically reverts Transmission back to its original location - nothing is deleted either way.">Dedupe (reclaim disk space)</button>`
+        ? `<button type="button" class="confirm-action" data-dedupe="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}" title="Relinks this torrent to its Plex library copy and asks Transmission to re-verify it there. A clean verify makes the completed-folder copy safe to delete separately; a failed verify automatically reverts Transmission back to its original location - nothing is deleted either way.">Dedupe (reclaim disk space)</button>`
         : "";
     // Durable, not one-shot: recomputed fresh on every list load (see
     // seeding.ts's findOrphanOriginal), so it stays visible any time a
@@ -2089,11 +2024,11 @@ function renderSeedingList() {
       ? `<div style="font-size:0.85rem; color:var(--err); margin-top:0.25rem;">⚠️ original download-folder copy still exists (${formatBytes(t.orphanOriginal.totalBytes)}) - not yet reclaimed.</div>`
       : "";
     const deleteOrphanButton = t.orphanOriginal
-      ? `<button type="button" class="danger" style="flex:0 0 auto;" data-delete-orphan="${t.id}" data-orphan-dir="${esc(t.orphanOriginal.dir)}" data-orphan-name="${esc(t.orphanOriginal.name)}">Delete original copy (${formatBytes(t.orphanOriginal.totalBytes)})</button>`
+      ? `<button type="button" class="danger" style="flex:0 0 auto;" data-delete-orphan="${t.transmissionId}" data-orphan-dir="${esc(t.orphanOriginal.dir)}" data-orphan-name="${esc(t.orphanOriginal.name)}">Delete original copy (${formatBytes(t.orphanOriginal.totalBytes)})</button>`
       : "";
     return `
       <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
-        <div><strong>${esc(t.plan.torrentName)}</strong>
+        <div><strong>${esc(t.torrentName)}</strong>
           <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
           &nbsp;${percentOnDisk}% on disk${mismatchNote}&nbsp;&middot; Ratio: ${formatRatio(t.ratio)}${storageChip}
         </div>
@@ -2103,7 +2038,8 @@ function renderSeedingList() {
           ${matchButtons}
           ${dedupeButton}
           ${deleteOrphanButton}
-          <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.id}" data-torrent-name="${esc(t.plan.torrentName)}" data-percent-on-disk="${percentOnDisk}" title="Transmission-only: removes this torrent and deletes its downloaded data from Transmission. Never touches anything already filed in your Plex library.">Remove &amp; delete files</button>
+          <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}" data-percent-on-disk="${percentOnDisk}" title="Transmission-only: removes this torrent and deletes its downloaded data from Transmission. Never touches anything already filed in your Plex library.">Remove &amp; delete files</button>
+          ${downloadLink}
         </div>
       </div>
     `;
@@ -2113,7 +2049,7 @@ function renderSeedingList() {
     const originalLabel = btn.textContent;
     btn.addEventListener("click", () => {
       armDangerButton(btn, originalLabel, "CONFIRM", () =>
-        removeSeedingTorrent(
+        removeIndexTorrent(
           parseInt(btn.dataset.removeTorrent, 10),
           btn.dataset.torrentName,
           parseInt(btn.dataset.percentOnDisk, 10),
@@ -2125,7 +2061,7 @@ function renderSeedingList() {
 
   listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
     btn.addEventListener("click", () =>
-      addSeedingTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn.dataset.torrentName, btn, false)
+      addIndexTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn.dataset.torrentName, btn, false)
     );
   });
   listEl.querySelectorAll("[data-force-add-to-library]").forEach((btn) => {
@@ -2134,7 +2070,7 @@ function renderSeedingList() {
       const proceed = confirm(
         `This bypasses the "already have this release" check for "${torrentName}" and files it as a separate version regardless of what's already in the library. Only do this if you've confirmed the existing file is wrong or genuinely different. Continue?`
       );
-      if (proceed) addSeedingTorrentToLibrary(parseInt(btn.dataset.forceAddToLibrary, 10), torrentName, btn, true);
+      if (proceed) addIndexTorrentToLibrary(parseInt(btn.dataset.forceAddToLibrary, 10), torrentName, btn, true);
     });
   });
 
@@ -2142,7 +2078,7 @@ function renderSeedingList() {
     const originalLabel = btn.textContent;
     btn.addEventListener("click", () => {
       armDangerButton(btn, originalLabel, "CONFIRM", () =>
-        dedupeSeedingTorrent(parseInt(btn.dataset.dedupe, 10), btn.dataset.torrentName, btn)
+        dedupeIndexTorrent(parseInt(btn.dataset.dedupe, 10), btn.dataset.torrentName, btn)
       );
     });
   });
@@ -2158,14 +2094,14 @@ function renderSeedingList() {
 }
 
 /**
- * Converts a full-duplicate seeding torrent into a hardlink-backed one (see
+ * Converts a full-duplicate torrent into a hardlink-backed one (see
  * reseedApi.ts's /api/reseed/dedupe and dedupe.ts's commitDedupe) - relinks
  * its matched files to the Plex library copy and asks Transmission to
  * re-verify against them. Deliberately does NOT delete anything itself:
- * loadSeedingList() below re-fetches fresh state after a clean verify, and
+ * loadTorrentIndex() below re-fetches fresh state after a clean verify, and
  * if the original download-folder copy is still there (the common case -
  * see seeding.ts's findOrphanOriginal), the per-item render in
- * renderSeedingList() picks it up and shows a durable "Delete original
+ * renderTorrentIndex() picks it up and shows a durable "Delete original
  * copy" button on that torrent's own entry - not a one-shot button here
  * that vanishes the moment you navigate away or reload, which is exactly
  * the gap a real EROFS incident exposed (dedupe succeeded, the delete
@@ -2173,8 +2109,8 @@ function renderSeedingList() {
  * verify means commitDedupe already auto-reverted Transmission back to its
  * original location server-side - nothing here is broken, just reported.
  */
-async function dedupeSeedingTorrent(id, torrentName, btn) {
-  const statusEl = document.getElementById("seeding-action-status");
+async function dedupeIndexTorrent(id, torrentName, btn) {
+  const statusEl = document.getElementById("index-action-status");
   btn.disabled = true;
   statusEl.textContent = `Relinking "${torrentName}" to its Plex library copy and asking Transmission to re-verify…`;
   statusEl.className = "status-msg";
@@ -2189,7 +2125,7 @@ async function dedupeSeedingTorrent(id, torrentName, btn) {
       statusEl.className = "status-msg ok";
       statusEl.textContent = `"${torrentName}" is now deduped - Transmission verified 100% against the library copy. If its original download-folder copy still exists, a "Delete original copy" button now appears on its entry below.`;
       await loadActivity();
-      await loadSeedingList();
+      await loadTorrentIndex();
     } else if (result.reverted) {
       statusEl.className = "status-msg err";
       statusEl.textContent = `⚠️ Dedupe of "${torrentName}" failed Transmission's verify and was automatically reverted - it's untouched, still seeding from its original location.`;
@@ -2209,15 +2145,15 @@ async function dedupeSeedingTorrent(id, torrentName, btn) {
 
 /**
  * Deletes the now-orphaned original download-folder copy of a torrent that
- * was already deduped (its own durable button in renderSeedingList() -
+ * was already deduped (its own durable button in renderTorrentIndex() -
  * recomputed fresh on every list load via seeding.ts's findOrphanOriginal,
  * so it's available any time the original hasn't actually been deleted
  * yet, not just in the few seconds right after a Dedupe click) - the
  * explicit, separate follow-up step, never combined with dedupe itself.
  * Reports failure on the button's own text rather than a shared status
  * element, since a failure shouldn't wipe out anything else on the page.
- * On success, refreshes the seeding list so the item's warning note and
- * this button both disappear immediately rather than lingering stale.
+ * On success, refreshes the index so the item's warning note and this
+ * button both disappear immediately rather than lingering stale.
  */
 async function deleteOriginalCopy(dir, name, btn) {
   btn.disabled = true;
@@ -2229,7 +2165,7 @@ async function deleteOriginalCopy(dir, name, btn) {
     });
     btn.textContent = "Deleted";
     await loadActivity();
-    await loadSeedingList();
+    await loadTorrentIndex();
   } catch (err) {
     btn.disabled = false;
     btn.textContent = `Delete failed: ${err.message}`;
@@ -2246,14 +2182,14 @@ async function deleteOriginalCopy(dir, name, btn) {
  * and always files a distinctly-tagged copy - for when that check gets it
  * wrong (e.g. the existing file shares a broadcaster tag but is actually a
  * different release). The result is shown in the section-level
- * #seeding-action-status, not inline in the (about to be replaced) list
- * item - loadSeedingList() below does a full re-render of #seeding-list to
+ * #index-action-status, not inline in the (about to be replaced) list
+ * item - loadTorrentIndex() below does a full re-render of #index-list to
  * reflect the new match state, which would otherwise wipe out a
  * message shown inside that same container before there was any chance to
  * read it.
  */
-async function addSeedingTorrentToLibrary(id, torrentName, btn, force) {
-  const statusEl = document.getElementById("seeding-action-status");
+async function addIndexTorrentToLibrary(id, torrentName, btn, force) {
+  const statusEl = document.getElementById("index-action-status");
   btn.disabled = true;
   statusEl.textContent = force
     ? `Forcing "${torrentName}" into the Plex library as a new version…`
@@ -2268,7 +2204,7 @@ async function addSeedingTorrentToLibrary(id, torrentName, btn, force) {
     renderUploadResults(statusEl, data.results);
     statusEl.textContent = `"${torrentName}":\n${statusEl.textContent}`;
     await loadActivity();
-    await loadSeedingList();
+    await loadTorrentIndex();
   } catch (err) {
     statusEl.textContent = `Failed to add "${torrentName}": ${err.message}`;
     statusEl.className = "status-msg err";
@@ -2314,8 +2250,8 @@ function disarmDangerButton(btn, originalLabel) {
   btn.classList.remove("armed");
 }
 
-async function removeSeedingTorrent(id, torrentName, percentOnDisk, btn) {
-  const statusEl = document.getElementById("seeding-action-status");
+async function removeIndexTorrent(id, torrentName, percentOnDisk, btn) {
+  const statusEl = document.getElementById("index-action-status");
   btn.disabled = true;
   statusEl.textContent = `Removing "${torrentName}" from Transmission and deleting its downloaded data (${percentOnDisk}% of its bytes were on disk) - this does not touch anything already filed in your Plex library…`;
   statusEl.className = "status-msg";
@@ -2328,7 +2264,7 @@ async function removeSeedingTorrent(id, torrentName, percentOnDisk, btn) {
     statusEl.textContent = `"${torrentName}" removed from Transmission and its downloaded data deleted.`;
     statusEl.className = "status-msg ok";
     await loadActivity();
-    await loadSeedingList();
+    await loadTorrentIndex();
   } catch (err) {
     statusEl.textContent = `Failed to remove "${torrentName}": ${err.message}`;
     statusEl.className = "status-msg err";
@@ -2432,10 +2368,7 @@ async function commitReseedFile() {
     statusEl.textContent = lines.join("\n");
     statusEl.className = `status-msg ${ok ? "ok" : "err"}`;
     await loadActivity();
-    if (data.result.staged) {
-      await loadSeedingList();
-      await loadTorrentRegistry();
-    }
+    if (data.result.staged) await loadTorrentIndex();
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;
     statusEl.className = "status-msg err";
@@ -2484,17 +2417,17 @@ async function processReseedBatch(files) {
     listEl.appendChild(itemEl);
 
     // Cheap registry pre-check before the expensive preview (a full library
-    // walk) - the whole point of the registry at 1,500-torrent scale is
+    // walk) - the whole point of the index at 1,500-torrent scale is
     // skipping a repeat drop's already-handled files without re-walking the
     // library for each one. Fails open into the normal preview flow if the
     // check itself errors, rather than blocking a real reseed attempt.
     let alreadyRegistered = false;
     try {
-      const checkData = await api("/api/reseed/registry/check", { method: "POST", body: file });
+      const checkData = await api("/api/reseed/index/check", { method: "POST", body: file });
       alreadyRegistered = checkData.alreadyRegistered;
     } catch {}
     if (alreadyRegistered) {
-      itemEl.innerHTML = `<strong>${esc(file.name)}</strong><div class="status-msg" style="display:block; margin-top:0.25rem;">Already in the registry - skipped.</div>`;
+      itemEl.innerHTML = `<strong>${esc(file.name)}</strong><div class="status-msg" style="display:block; margin-top:0.25rem;">Already in the index - skipped.</div>`;
       continue;
     }
 
@@ -2533,8 +2466,7 @@ async function processReseedBatch(files) {
 
   statusEl.textContent = `Done - processed ${files.length} file(s).`;
   await loadActivity();
-  await loadSeedingList();
-  await loadTorrentRegistry();
+  await loadTorrentIndex();
 }
 
 async function commitBatchItem(file, itemEl) {
@@ -2929,30 +2861,22 @@ document.getElementById("refresh-activity-btn").addEventListener("click", () => 
     loadActivity
   );
 });
-document.getElementById("refresh-seeding-btn").addEventListener("click", () => {
+document.getElementById("refresh-index-btn").addEventListener("click", () => {
   // Manual refresh is a deliberate "clean slate" action - unlike the
   // automatic refresh after Add/Force/Remove (which deliberately leaves
-  // #seeding-action-status alone so its result stays readable), clear it
+  // #index-action-status alone so its result stays readable), clear it
   // here so old action results don't linger indefinitely.
-  const statusEl = document.getElementById("seeding-action-status");
+  const statusEl = document.getElementById("index-action-status");
   statusEl.textContent = "";
   statusEl.className = "status-msg";
   refreshWithFeedback(
-    document.getElementById("refresh-seeding-btn"),
-    document.getElementById("seeding-refresh-flash"),
-    loadSeedingList
+    document.getElementById("refresh-index-btn"),
+    document.getElementById("index-refresh-flash"),
+    loadTorrentIndex
   );
 });
-document.getElementById("seeding-search").addEventListener("input", renderSeedingList);
-document.getElementById("seeding-sort").addEventListener("change", renderSeedingList);
-document.getElementById("refresh-registry-btn").addEventListener("click", () => {
-  refreshWithFeedback(
-    document.getElementById("refresh-registry-btn"),
-    document.getElementById("registry-refresh-flash"),
-    loadTorrentRegistry
-  );
-});
-document.getElementById("registry-search").addEventListener("input", renderTorrentRegistry);
+document.getElementById("index-search").addEventListener("input", renderTorrentIndex);
+document.getElementById("index-sort").addEventListener("change", renderTorrentIndex);
 document.getElementById("clear-reseed-btn").addEventListener("click", () => {
   clearReseedResults();
   const flashEl = document.getElementById("reseed-clear-flash");
@@ -3143,8 +3067,7 @@ loadSettingsPanel();
 loadEvents();
 loadActivity();
 loadFullActivityLog();
-loadSeedingList();
-loadTorrentRegistry();
+loadTorrentIndex();
 </script>
 </body>
 </html>

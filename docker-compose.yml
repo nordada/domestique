@@ -68,6 +68,17 @@ services:
       HOTFOLDER_STABLE_POLLS: ${HOTFOLDER_STABLE_POLLS:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MENTION_USER_ID: ${DISCORD_MENTION_USER_ID:-}
+      # Optional: syncs every .torrent Transmission itself has ever been
+      # handed (including anything autobrr added directly, never touching
+      # Domestique) into Domestique's own torrent registry - see the
+      # README's "Torrent registry" section. Uses ":+" (the opposite of the
+      # ":-" defaults elsewhere in this block) deliberately: the container
+      # path below is fixed and always mounted (see the volumes: block), but
+      # the app itself needs to be able to tell "not configured" apart from
+      # "configured at this path" - ":+" makes this var genuinely empty
+      # (feature off) whenever TRANSMISSION_TORRENTS_HOST_DIR is unset,
+      # rather than always resolving to the fixed container path regardless.
+      TRANSMISSION_TORRENTS_DIR: ${TRANSMISSION_TORRENTS_HOST_DIR:+/transmission-torrents}
       # Optional web UI (config editor, match tester, activity log) at
       # /ui. Unlike the integrations above, leaving this unset does NOT
       # leave the UI reachable without a password - its routes respond 503
@@ -137,13 +148,25 @@ services:
       # Same first-run gotcha as settings.json/activity.json above: `touch
       # config/dedupe-state.json` before your first `docker compose up` here.
       - ./config/dedupe-state.json:${DEDUPE_STATE_CONTAINER_PATH:-/app/config/dedupe-state.json}
-      # Durable copy of every .torrent successfully staged through the Reseed
-      # tab (see torrentRegistry.ts) - lets you download it back later and
-      # skip re-processing it on a repeat batch drop. A directory mount, not
-      # a single file, so there's no first-run empty-directory gotcha like
-      # the file mounts above: Docker creating a directory here is exactly
-      # what's wanted.
+      # Durable copy of every .torrent Domestique has a record of (staged
+      # through the Index tab, or synced in from Transmission's own torrents
+      # directory below), keyed by info-hash (see torrentRegistry.ts) - lets
+      # you download any of them back later and skip re-processing an
+      # already-registered one on a repeat batch drop. A directory mount,
+      # not a single file, so there's no first-run empty-directory gotcha
+      # like the file mounts above: Docker creating a directory here is
+      # exactly what's wanted.
       - ./config/torrent-registry:${TORRENT_REGISTRY_CONTAINER_PATH:-/app/config/torrent-registry}
+      # Optional, read-only: Transmission's OWN .torrent-storage directory
+      # (see the README's "Torrent registry" section for how to find it) -
+      # lets Domestique capture every torrent Transmission has ever been
+      # handed, including anything autobrr added directly. Defaults to a
+      # harmless local placeholder (Docker auto-creates it empty, same as
+      # any other missing bind-mount source) when TRANSMISSION_TORRENTS_HOST_DIR
+      # is unset, so this line is always syntactically valid regardless -
+      # the app-side TRANSMISSION_TORRENTS_DIR env var above (not this mount
+      # itself) is what actually toggles the sync feature on/off.
+      - ${TRANSMISSION_TORRENTS_HOST_DIR:-./config/.transmission-torrents-empty}:/transmission-torrents:ro
       # Web UI static assets, bind-mounted read-only for the same reason as
       # config/events.json above - HTML/CSS/JS tweaks take effect on the next
       # request without an image rebuild.

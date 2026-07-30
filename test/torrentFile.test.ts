@@ -16,6 +16,16 @@ test("parseTorrentFile parses a single-file torrent", () => {
   assert.deepEqual(meta.files, [{ relativePath: "Tour de France Stage 5.mp4", length: 123456 }]);
 });
 
+test("parseTorrentFile computes infoHash, and the same content always produces the same hash", () => {
+  const buf = buildSingleFileTorrent("Tour de France Stage 5.mp4", 123456);
+  const meta = parseTorrentFile(buf);
+  assert.match(meta.infoHash, /^[0-9a-f]{40}$/);
+  assert.equal(parseTorrentFile(Buffer.from(buf)).infoHash, meta.infoHash);
+  // Different content -> different hash, same name/length but a distinct file list.
+  const other = buildMultiFileTorrent("Tour de France Stage 5.mp4", [{ path: ["a.mp4"], length: 1 }]);
+  assert.notEqual(parseTorrentFile(other).infoHash, meta.infoHash);
+});
+
 test("parseTorrentFile parses a multi-file torrent, prefixing each path with info.name", () => {
   const buf = buildMultiFileTorrent("Tour de France 2026", [
     { path: ["Stage 1.mp4"], length: 111 },

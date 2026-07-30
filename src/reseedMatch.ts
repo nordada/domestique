@@ -45,9 +45,16 @@ const MAX_REPORTED_CANDIDATES = 25;
  * (src/libraryIndex.ts) purely by exact byte size - deliberately never
  * guesses among multiple same-size candidates (see the "ambiguous" status);
  * Transmission's own piece-hash verify, not this function, is what actually
- * confirms a match is correct (see src/reseed.ts).
+ * confirms a match is correct (see src/reseed.ts). Only reads name/files -
+ * narrowed to Pick<> rather than the full TorrentMetainfo so callers working
+ * from Transmission's own live file list (dedupe.ts, seeding.ts), which
+ * never have a real .torrent's infoHash to provide, don't need to fabricate
+ * one just to satisfy this signature.
  */
-export function buildReseedPlan(meta: TorrentMetainfo, sizeIndex: Map<number, string[]>): ReseedPlan {
+export function buildReseedPlan(
+  meta: Pick<TorrentMetainfo, "name" | "files">,
+  sizeIndex: Map<number, string[]>
+): ReseedPlan {
   const files = meta.files.map((entry): FileMatch => {
     // A 0-byte file trivially "matches" every (or no) 0-byte file in the
     // library - neither outcome is meaningful, so it's just materialized

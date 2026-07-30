@@ -26,49 +26,61 @@ export const DEFAULT_TORRENT_REGISTRY_DIR = join(__dirname, "..", "config", "tor
 
 const TORRENT_EXT = ".torrent";
 
-export interface RegistryEntry {
-  torrentName: string;
+/**
+ * Deliberately dumb byte storage - this module never parses a .torrent's
+ * contents (no name, no file list). `infoHash` (see bencode.ts's
+ * computeInfoHash / torrentFile.ts's TorrentMetainfo) is the one identity a
+ * caller needs to provide, since it's what makes an entry here reliably
+ * correlate with a live Transmission torrent by hash instead of by a name
+ * that could collide or get renamed. See torrentIndex.ts for the layer that
+ * actually re-parses each entry's saved bytes into something displayable.
+ */
+export interface RegistryFileEntry {
+  infoHash: string;
   sizeBytes: number;
   addedAt: string;
 }
 
 /**
- * Confines a torrent name to a safe filename within registryDir before any
- * filesystem touch. `torrentName` is already validated as a single, safe
- * path segment by torrentFile.ts's sanitizePathSegment during parsing (no
- * `/`, `\`, NUL, `..`) - this re-confirms it rather than trusting that
- * blindly, the same "confine before touching the filesystem" discipline
- * used everywhere else in this app (e.g. commitDedupe's staging-dir check).
+ * Confines an info-hash to a safe filename within registryDir before any
+ * filesystem touch. In practice a lowercase-hex SHA1 digest can never
+ * contain a path separator or NUL byte, so this can't actually be defeated
+ * by a malformed hash - kept anyway as cheap defense-in-depth, the same
+ * "confine before touching the filesystem" discipline used everywhere else
+ * in this app (e.g. commitDedupe's staging-dir check).
  */
-function safeRegistryPath(torrentName: string, registryDir: string): string {
-  const path = join(registryDir, `${torrentName}${TORRENT_EXT}`);
+function safeRegistryPath(infoHash: string, registryDir: string): string {
+  const path = join(registryDir, `${infoHash}${TORRENT_EXT}`);
   if (!isPathWithin(path, registryDir)) {
-    throw new Error(`torrent name "${torrentName}" resolves outside the registry directory - refusing to touch it`);
+    throw new Error(`info-hash "${infoHash}" resolves outside the registry directory - refusing to touch it`);
   }
   return path;
 }
 
 /**
- * Saves a successfully-staged torrent's raw bytes for later download/
- * reference - see reseedApi.ts's /api/reseed/commit, which calls this
- * whenever a commit actually staged something (result.staged === true).
- * Overwrites any existing entry of the same name - re-committing the same
- * torrent just refreshes the saved copy, not an error.
+ * Saves a torrent's raw bytes for later download/reference, keyed by its
+ * info-hash - see reseedApi.ts's /api/reseed/commit (a successful stage)
+ * and transmissionTorrentSync.ts (autobrr-added torrents synced in from
+ * Transmission's own torrents directory). Overwrites any existing entry
+ * under the same hash - re-registering identical content just refreshes
+ * the saved copy, not an error (and can't actually differ, since the hash
+ * is derived from the content itself).
  */
-export async function registerTorrent(torrentName: string, buf: Buffer, registryDir: string): Promise<void> {
+export async function registerTorrent(infoHash: string, buf: Buffer, registryDir: string): Promise<void> {
   await mkdir(registryDir, { recursive: true });
-  await writeFile(safeRegistryPath(torrentName, registryDir), buf);
+  await writeFile(safeRegistryPath(infoHash, registryDir), buf);
 }
 
 /**
  * Cheap existence check - no parsing, no library walk - used by the batch
- * queue's pre-check (see reseedApi.ts's /api/reseed/registry/check) to
- * skip an already-registered torrent before the expensive preview/commit
- * cycle that's the whole reason this module exists.
+ * queue's pre-check (see reseedApi.ts's /api/reseed/index/check) to skip an
+ * already-registered torrent before the expensive preview/commit cycle,
+ * and by transmissionTorrentSync.ts to avoid re-copying something already
+ * captured.
  */
-export async function isRegistered(torrentName: string, registryDir: string): Promise<boolean> {
+export async function isRegistered(infoHash: string, registryDir: string): Promise<boolean> {
   try {
-    await stat(safeRegistryPath(torrentName, registryDir));
+    await stat(safeRegistryPath(infoHash, registryDir));
     return true;
   } catch {
     return false;
@@ -76,14 +88,14 @@ export async function isRegistered(torrentName: string, registryDir: string): Pr
 }
 
 /**
- * Lists every registered torrent's name/size/added-date - deliberately
- * doesn't parse each .torrent's own contents (that's the caller's job; see
- * reseedApi.ts's /api/reseed/registry route, which needs the parsed
- * metadata anyway to cross-reference against the library). Returns an
- * empty list rather than throwing if the directory doesn't exist yet -
- * "nothing registered" is a normal first-use state, not an error.
+ * Lists every registered torrent's hash/size/added-date - deliberately
+ * doesn't parse each .torrent's own contents (that's torrentIndex.ts's job,
+ * which needs the parsed metadata anyway to cross-reference against the
+ * library and Transmission). Returns an empty list rather than throwing if
+ * the directory doesn't exist yet - "nothing registered" is a normal
+ * first-use state, not an error.
  */
-export async function listRegistry(registryDir: string): Promise<RegistryEntry[]> {
+export async function listRegistry(registryDir: string): Promise<RegistryFileEntry[]> {
   let fileNames: string[];
   try {
     fileNames = (await readdir(registryDir)).filter((name) => name.endsWith(TORRENT_EXT));
@@ -92,22 +104,22 @@ export async function listRegistry(registryDir: string): Promise<RegistryEntry[]
   }
   return Promise.all(
     fileNames.map(async (fileName) => {
-      const torrentName = fileName.slice(0, -TORRENT_EXT.length);
+      const infoHash = fileName.slice(0, -TORRENT_EXT.length);
       const info = await stat(join(registryDir, fileName));
-      return { torrentName, sizeBytes: info.size, addedAt: info.mtime.toISOString() };
+      return { infoHash, sizeBytes: info.size, addedAt: info.mtime.toISOString() };
     })
   );
 }
 
 /**
  * Reads a previously-registered torrent's raw bytes back - see
- * reseedApi.ts's /api/reseed/registry/download route. Returns null (not a
- * thrown error) when nothing's registered under this name, or the name
+ * reseedApi.ts's /api/reseed/index/download route. Returns null (not a
+ * thrown error) when nothing's registered under this hash, or the hash
  * doesn't confine safely, so the route can 404/400 cleanly either way.
  */
-export async function getRegisteredTorrentBuf(torrentName: string, registryDir: string): Promise<Buffer | null> {
+export async function getRegisteredTorrentBuf(infoHash: string, registryDir: string): Promise<Buffer | null> {
   try {
-    return await readFile(safeRegistryPath(torrentName, registryDir));
+    return await readFile(safeRegistryPath(infoHash, registryDir));
   } catch {
     return null;
   }

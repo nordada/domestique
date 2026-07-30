@@ -273,7 +273,7 @@ rejected while still locked out.
   3. [Add a new show](#3-add-a-new-show)
   4. [Optional: Plex partial-scan](#4-optional-plex-partial-scan)
   5. [Optional: hot-folder ingestion](#5-optional-hot-folder-ingestion-bypass-transmission)
-  6. [Optional: reseed from your Plex library](#6-optional-reseed-from-your-plex-library)
+  6. [Optional: the Index tab (reseed from your Plex library, and a unified torrent view)](#6-optional-the-index-tab-reseed-from-your-plex-library-and-a-unified-torrent-view)
   7. [Optional: Discord notifications](#7-optional-discord-notifications)
   8. [Optional: web UI](#8-optional-web-ui)
 - [Known limitations / assumptions](#known-limitations--assumptions-check-these-against-reality-as-you-go)
@@ -599,20 +599,20 @@ webhook safe to fire twice means it's safe to just retry it on the next
 poll.
 
 **Why this needs its own volume mount**: `DOWNLOADS_DIR` is bind-mounted
-read-write in `docker-compose.yml` (see "Dedupe" under Currently seeding,
+read-write in `docker-compose.yml` (see "Dedupe" under the Torrent index,
 below, for why - it wasn't always). The hot folder specifically needs to
 *move* files (into its own `processed/` subfolder), so `docker-compose.yml`
 still layers a second, more specific mount for just
 `${DOWNLOADS_DIR}/domestique` on top of the main one, kept for its own
 isolation even though both are read-write now.
 
-### 6. Optional: reseed from your Plex library
+### 6. Optional: the Index tab (reseed from your Plex library, and a unified torrent view)
 
 Private trackers often need seeds long after a race first aired, and by
 then the file's usually been renamed away from whatever the tracker's own
 `.torrent` expected - by this app, or by hand. This feature closes that
 loop: drop the `.torrent` file for something your tracker says needs seeds
-into the **Reseed** tab, and it checks whether that content already exists
+into the **Index** tab, and it checks whether that content already exists
 somewhere in your library (matched by exact file size), then - once you
 confirm - stages it into the exact layout the torrent expects and hands it
 to Transmission, paused, to verify. Nothing is guessed: matching here is
@@ -666,17 +666,37 @@ setup when Plex, Transmission, and Domestique all mount the same host
 share), there's nothing extra to configure - Transmission just needs
 read-write access to that share, not read-only.
 
-The same tab's **Currently seeding** section lists every torrent
-Transmission is presently seeding or has paused - not just ones reseeded
-through this feature - each matched against the library by file size the
-same way Preview does, so you can see at a glance which Plex file
-corresponds to which seeding torrent. This is a live query against
-Transmission and the library on every load/refresh, not a stored history,
-so it always reflects current reality (and costs one library walk each
-time you open or refresh it). A search box filters the list by torrent
-name client-side, and the list itself is capped to a scrollable box, the
-same pattern the Events tab already uses for its own few-hundred-row table
-- fine even with several hundred seeding torrents.
+**The Torrent index, below the dropzone**: one unified table of every
+`.torrent` Domestique has a saved copy of - the `.torrent` file itself is
+the source of truth for what appears here, not Transmission's live list.
+An entry gets there one of two ways: staged through Preview/Commit above
+(single-file or batch), or synced in automatically from Transmission's own
+torrents directory if you've configured that (see "Capturing torrents
+added directly by autobrr" below) - which is what makes this cover torrents
+Transmission is seeding that never touched this app at all, not just ones
+reseeded through this tab. Each entry is identified by its **info-hash**
+(the same identifier Transmission itself uses), not by name - two
+unrelated torrents can share a name, and a rename shouldn't break the
+link, so hash is the one identity that's actually reliable.
+
+Per entry, two things are checked **live, every time the tab loads** -
+never stored, never cached: whether it's currently matched in your Plex
+library (by exact file size, the same way Preview does, with the matched
+path(s) shown), and whether it's currently seeding in Transmission (with
+its live status and ratio). Neither column is authoritative over the
+other - a torrent can leave Transmission (removed after seeding) or leave
+Plex (cleaned up) completely independently of the other, so an entry
+found in only one, both, or genuinely neither is all real, meaningful
+state, not an error. A search box filters by torrent name client-side,
+and the list itself is capped to a scrollable box, the same pattern the
+Events tab already uses for its own few-hundred-row table - fine even
+with several hundred entries.
+
+A row for a torrent that isn't currently in Transmission just shows its
+Plex-match status and a download link for its saved `.torrent` - none of
+the actions below apply, since they all either call Transmission's own
+RPC directly or ask Transmission where a torrent's data currently lives,
+and there's nothing live to act on.
 
 A torrent with an unmatched or ambiguous file - most often one that was
 never filed into Plex at all, or whose library copy is gone - gets an
@@ -725,20 +745,22 @@ disagree, both are shown side by side with a note explaining why, rather
 than silently picking one - the "on disk" figure is the one that actually
 matters when deciding whether it's safe to remove a torrent's data.
 
-Above the list, four pill badges summarize what's worth a look, each
-hidden when its own count is zero: how many torrents **need attention**
-(an unmatched or ambiguous file, a percentage mismatch, or an unreclaimed
-orphaned original - see Dedupe below) versus how many are **fully
-matched**, and separately, how many are already **🔗 deduped** versus
+Above the list, six pill badges summarize what's worth a look, each
+hidden when its own count is zero: the running **total**, how many are
+**in Plex**, how many are **in Transmission**, how many torrents **need
+attention** (an unmatched or ambiguous Plex file, a percentage mismatch,
+or an unreclaimed orphaned original - see Dedupe below), and separately,
+how many currently-seeding entries are already **🔗 deduped** versus
 still **📦 duplicated** - an at-a-glance view of how much of the seeding
 backlog still costs double disk without opening every item. The **Sort**
 control next to them defaults to "Needs attention first," so the torrents
 actually worth looking at surface at the top instead of getting lost among
 everything that's already fine; switching to "Name (A-Z)" sorts the list
-plainly alphabetically instead. Each entry also shows Transmission's own
-seeding **ratio** (uploaded/downloaded) next to its on-disk percentage -
-`N/A` when Transmission hasn't got a real figure yet (e.g. still checking),
-`∞` for a seed-only/injected torrent with nothing recorded as downloaded.
+plainly alphabetically instead. Each entry currently in Transmission also
+shows its seeding **ratio** (uploaded/downloaded) next to its on-disk
+percentage - `N/A` when Transmission hasn't got a real figure yet (e.g.
+still checking), `∞` for a seed-only/injected torrent with nothing
+recorded as downloaded.
 
 By default, normal ingestion always copies a torrent's data into the
 library rather than hardlinking it (see "How staging actually touches your
@@ -775,7 +797,7 @@ instead, with no action offered - only a full, unambiguous match is ever
 deduped automatically.
 
 **The "Delete original copy" button is durable, not one-shot** - it's
-recomputed fresh on every Currently seeding load (checking whether a
+recomputed fresh on every Torrent index load (checking whether a
 deduped torrent's original file is still confirmed present at its exact
 original path and size), not just shown briefly right after a successful
 Dedupe click. If a delete attempt fails or you never get to it, the button
@@ -797,27 +819,47 @@ on setups where Transmission's actual per-torrent download directory is a
 subfolder of the wider share (e.g. a `complete` subfolder distinct from
 the share root) rather than the share root itself.
 
-**Torrent registry**: every `.torrent` successfully staged through Preview/
-Commit above (single-file or batch) gets a durable copy saved to
-`config/torrent-registry/`, visible in its own section of the Reseed tab.
-This solves two things at once: you can download a previously-reseeded
-`.torrent` back later if you need it again, and dropping the same batch of
-files a second time (easy to do by accident at a few hundred/thousand
-files) skips anything already registered before it ever walks the library
-for it, rather than re-running the full Preview/Commit cycle for free. A
-torrent that never matched anything (nothing staged) is deliberately *not*
-registered, since that's exactly what you'd still want to revisit.
+**Torrent registry**: every `.torrent` behind the Torrent index above (both
+ones staged through Preview/Commit and ones synced in from Transmission's
+own torrents directory) gets a durable copy saved to
+`config/torrent-registry/`, named by its info-hash. This solves a few
+things at once: you can download any of them back later if you need one
+again; dropping the same batch of files a second time (easy to do by
+accident at a few hundred/thousand files) skips anything already
+registered before it ever walks the library for it, rather than
+re-running the full Preview/Commit cycle for nothing; and because the
+saved bytes are always re-parsed fresh (name, file list, size - nothing
+about a torrent is cached beyond the raw file itself), the `.torrent` is
+genuinely the one source of truth for what's in the index, not a snapshot
+that can drift from it. A torrent that never matched anything through
+Preview/Commit (nothing staged) is deliberately *not* registered that way,
+since that's exactly what you'd still want to revisit - though it can
+still show up via the autobrr sync below if Transmission ends up seeding
+it some other way.
 
-The section's three pill badges and per-row Plex/Transmission columns are a
-**live check every time it loads**, not stored state - a registered torrent
-can independently leave Transmission (removed after seeding) or leave Plex
-(cleaned up) without the other changing, so neither column is authoritative
-over the other; this is only ever a record of "this went through Reseed at
-some point," cross-referenced against current reality on each view. **This
-only records going forward from the moment it ships** - the same one-time
-limitation as `config/dedupe-state.json` above - so anything reseeded
-before this feature existed won't retroactively appear here; nothing forces
-re-adding it, this only affects whether the registry shows/skips it.
+**This only records going forward from the moment it ships** - the same
+one-time limitation as `config/dedupe-state.json` above - so a `.torrent`
+that would've qualified before this feature existed won't retroactively
+appear; nothing forces re-adding it, this only affects whether the
+registry shows/skips it.
+
+**Capturing torrents added directly by autobrr**: autobrr (or anything
+else) hands a `.torrent` straight to Transmission, never through
+Domestique - so without this, the registry would only ever see torrents
+that happened to go through this tab's Preview/Commit, missing what's
+actually the normal way most torrents arrive. Transmission itself keeps a
+permanent copy of every `.torrent` it's ever been handed in its own config
+directory (a `torrents` subfolder, next to its own `settings.json`/
+`resume/`). Point `TRANSMISSION_TORRENTS_HOST_DIR` in `.env` (or the
+matching Unraid CA template field) at that folder's **host** path and
+Domestique syncs anything not already in its own registry into it,
+matched by info-hash, every time the Index tab loads - mounted read-only,
+so this only ever reads from Transmission's side, never writes to it.
+Finding the right path: check your Transmission container's own Docker
+path mappings for whatever container path maps to its config directory
+(commonly `/config`), then look for a `torrents` subfolder inside that
+host path. Leave unset to disable - the index then only ever reflects
+torrents manually staged through this tab, same as before this existed.
 
 ### 7. Optional: Discord notifications
 
@@ -994,14 +1036,21 @@ so tweaking it doesn't require a rebuild.
   re-hardlinking an already-hardlinked torrent is a safe no-op, and doing
   so records the original location this time, making the button appear
   correctly afterward.
-- **The torrent registry only records `.torrent` files staged going
-  forward, from the moment `config/torrent-registry/` is introduced.**
-  Anything reseeded before this feature existed (including via a batch drop
-  processed before it shipped) has no entry, won't appear in the registry
-  view, and won't be caught by the skip-already-registered check on a
-  repeat drop - Transmission's own duplicate detection is still what
-  protects against actually re-adding it, just without the pre-check
-  savings. No backfill is planned; nothing forces re-adding these torrents.
+- **The torrent registry only records `.torrent` files going forward, from
+  the moment `config/torrent-registry/` is introduced.** Anything reseeded
+  (or, once configured, anything Transmission was already seeding) before
+  this feature existed has no entry, won't appear in the Torrent index, and
+  won't be caught by the skip-already-registered check on a repeat batch
+  drop - Transmission's own duplicate detection is still what protects
+  against actually re-adding it, just without the pre-check savings. No
+  backfill is planned; nothing forces re-adding these torrents.
+- **The Transmission-torrents-directory sync scans that whole directory on
+  every Index tab load**, not incrementally - fine given `.torrent` files
+  are small metadata, not the actual downloaded content (hashing a few
+  thousand of them is fast), but it does mean a very large, slow, or
+  briefly-unavailable mount adds to every load's latency. A read failure
+  there is best-effort and non-fatal (logged, not surfaced as an error) -
+  the index just falls back to whatever's already registered.
 
 ## Security posture
 
@@ -1094,7 +1143,7 @@ chown -R 99:100 /mnt/user/downloads/domestique   # hot-folder, if used
 The main `/downloads` mount needs no ownership change for normal ingestion
 to keep working, as long as the files are readable by the chosen user (on
 a default Unraid share they are) - only the optional "Delete original
-copy" action (see Dedupe, under Currently seeding) needs write access
+copy" action (see Dedupe, under the Torrent index) needs write access
 there too, and only for whatever specific files you choose to delete
 through it. A fresh install needs none of this: every file gets created by
 the right user from the start.

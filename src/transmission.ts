@@ -298,16 +298,18 @@ export interface TransmissionTorrentDetail {
   downloadDir: string;
   /** Total uploaded/downloaded ratio - Transmission's own RPC special-cases -1 (not available) and -2 (infinite, e.g. a seed-only/injected torrent with 0 recorded downloaded bytes). Passed straight through to the UI (see seeding.ts's SeedingTorrent.ratio) rather than reinterpreted here. */
   uploadRatio: number;
+  /** Transmission's own info-hash, lowercase hex - used by src/torrentIndex.ts to correlate a live torrent with a registry entry by hash rather than by name (see torrentFile.ts's TorrentMetainfo.infoHash, computed the same way independently from the saved .torrent's own bytes). */
+  hashString: string;
 }
 
 /**
  * Fetches every torrent Transmission currently knows about, with its full
- * file list and sizes - used by src/seeding.ts to size-match each one
- * against the library without needing that torrent's original .torrent
- * file at all (Transmission already has this information for anything
- * it's managing, reseeded through this app or not). Omitting `ids` from
- * the RPC args is what makes this return every torrent rather than a
- * specific one.
+ * file list and sizes - used by src/seeding.ts/src/torrentIndex.ts to
+ * size-match each one against the library and correlate it by hash without
+ * needing that torrent's original .torrent file at all (Transmission
+ * already has this information for anything it's managing, reseeded
+ * through this app or not). Omitting `ids` from the RPC args is what makes
+ * this return every torrent rather than a specific one.
  */
 export async function getAllTorrentsWithFiles(
   config: TransmissionConfig,
@@ -316,7 +318,7 @@ export async function getAllTorrentsWithFiles(
   const data = await rpcCall(
     config,
     "torrent-get",
-    { fields: ["id", "name", "status", "percentDone", "files", "downloadDir", "uploadRatio"] },
+    { fields: ["id", "name", "status", "percentDone", "files", "downloadDir", "uploadRatio", "hashString"] },
     timeoutMs
   );
   return (data.arguments?.torrents ?? []) as TransmissionTorrentDetail[];

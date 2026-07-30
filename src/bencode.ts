@@ -18,11 +18,11 @@
 
 /**
  * Minimal decode-only bencode parser - just enough for src/torrentFile.ts to
- * read a .torrent's name/file-list/sizes. No encoder (nothing here ever
- * produces bencode) and no preservation of raw byte spans (nothing here
- * computes a torrent's infohash - Transmission is handed the original,
- * untouched file bytes in src/transmission.ts and computes its own).
+ * read a .torrent's name/file-list/sizes, plus computeInfoHash below for its
+ * info-hash. No encoder (nothing here ever produces bencode).
  */
+
+import { createHash } from "node:crypto";
 
 export type BencodeValue = Buffer | number | BencodeValue[] | Map<string, BencodeValue>;
 
@@ -104,5 +104,35 @@ function decodeDict(c: Cursor): Map<string, BencodeValue> {
     const key = decodeString(c);
     const value = decodeValue(c);
     dict.set(key.toString("utf-8"), value);
+  }
+}
+
+/**
+ * A torrent's info-hash (the same identifier Transmission itself reports as
+ * `hashString`) is defined as the SHA1 of the *raw, original bytes* of the
+ * top-level "info" dict value - not a re-encoded structure. Re-encoding a
+ * decoded value risks producing different bytes than what a real client
+ * (including Transmission) hashed if anything about the original file's
+ * encoding isn't perfectly canonical, so this walks the root dict with the
+ * same low-level cursor the decoder above uses, capturing the exact byte
+ * span the "info" value occupies in the source buffer and hashing that
+ * slice directly - never touching the decoded (Map/Buffer/number) form.
+ */
+export function computeInfoHash(buf: Buffer): string {
+  const c = new Cursor(buf);
+  if (buf[c.pos] !== DICT_START) {
+    throw new Error("bencode: expected the torrent file's root to be a dict");
+  }
+  c.pos += 1;
+  for (;;) {
+    if (c.pos >= buf.length) throw new Error("bencode: unterminated dict (no top-level \"info\" key found)");
+    if (buf[c.pos] === END) throw new Error("bencode: torrent file has no top-level \"info\" key");
+    const key = decodeString(c).toString("utf-8");
+    if (key === "info") {
+      const infoStart = c.pos;
+      decodeValue(c); // advances c.pos past the info value without needing its decoded form
+      return createHash("sha1").update(buf.subarray(infoStart, c.pos)).digest("hex");
+    }
+    decodeValue(c); // not the key we want - still must advance past its value
   }
 }

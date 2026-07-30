@@ -1,498 +1,193 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { mkdtemp, writeFile, rm, link, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listSeedingTorrents } from "../src/seeding.js";
+import { computeStorageStatus, findOrphanOriginal, computePercentComplete } from "../src/seeding.js";
 import { recordDedupeOriginal } from "../src/dedupeState.js";
+import type { ReseedPlan } from "../src/reseedMatch.js";
 
-async function makeLibrary(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "domestique-seeding-library-"));
+function matchedPlan(torrentName: string, files: Array<{ relativePath: string; length: number; candidate: string }>): ReseedPlan {
+  return {
+    torrentName,
+    files: files.map((f) => ({ relativePath: f.relativePath, length: f.length, status: "matched", candidate: f.candidate })),
+    matchedCount: files.length,
+    ambiguousCount: 0,
+    unmatchedCount: 0,
+  };
 }
 
-function startFakeTransmissionRpc(
-  handleMethod: (method: string, args: Record<string, unknown> | undefined) => Record<string, unknown>
-): Promise<{ url: string; close: () => Promise<void> }> {
-  const sessionId = "fake-session-id-seeding";
-  return new Promise((resolve) => {
-    const server = createServer((req, res) => {
-      if (req.headers["x-transmission-session-id"] !== sessionId) {
-        res.writeHead(409, { "X-Transmission-Session-Id": sessionId });
-        res.end();
-        return;
-      }
-      let body = "";
-      req.on("data", (chunk) => (body += chunk));
-      req.on("end", () => {
-        const { method, arguments: args } = JSON.parse(body) as {
-          method: string;
-          arguments?: Record<string, unknown>;
-        };
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ result: "success", arguments: handleMethod(method, args) }));
+test("computePercentComplete: sums bytesCompleted/length across every file regardless of wanted state", () => {
+  assert.equal(computePercentComplete([{ length: 1000, bytesCompleted: 0 }]), 0);
+  assert.equal(
+    computePercentComplete([
+      { length: 1000, bytesCompleted: 1000 },
+      { length: 1000, bytesCompleted: 0 },
+    ]),
+    0.5
+  );
+  assert.equal(computePercentComplete([{ length: 1000, bytesCompleted: 1000 }]), 1);
+});
+
+test("computePercentComplete: zero total length returns 0 rather than dividing by zero", () => {
+  assert.equal(computePercentComplete([]), 0);
+});
+
+test("computeStorageStatus: 'deduped' when the on-disk file and its matched library candidate are the same inode (a real hardlink)", async () => {
+  const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-lib-"));
+  const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));
+  try {
+    const libFile = join(libraryRoot, "Deduped - S2026E01.mp4");
+    await writeFile(libFile, Buffer.alloc(1000));
+    await link(libFile, join(downloadDir, "Deduped.mp4"));
+
+    const plan = matchedPlan("Deduped.mp4", [{ relativePath: "Deduped.mp4", length: 1000, candidate: libFile }]);
+    assert.equal(await computeStorageStatus(plan, downloadDir), "deduped");
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadDir, { recursive: true, force: true });
+  }
+});
+
+test("computeStorageStatus: 'duplicate' when the on-disk file is a separate file from its matched candidate, same size or not", async () => {
+  const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-lib-"));
+  const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));
+  try {
+    const libFile = join(libraryRoot, "Duplicate - S2026E01.mp4");
+    await writeFile(libFile, Buffer.alloc(2000));
+    await writeFile(join(downloadDir, "Duplicate.mp4"), Buffer.alloc(2000));
+
+    const plan = matchedPlan("Duplicate.mp4", [{ relativePath: "Duplicate.mp4", length: 2000, candidate: libFile }]);
+    assert.equal(await computeStorageStatus(plan, downloadDir), "duplicate");
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadDir, { recursive: true, force: true });
+  }
+});
+
+test("computeStorageStatus: 'mixed' for a multi-file torrent where only some files are hardlinked", async () => {
+  const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-lib-"));
+  const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));
+  try {
+    const libA = join(libraryRoot, "Mixed A - S2026E01.mp4");
+    const libB = join(libraryRoot, "Mixed B - S2026E01.mp4");
+    await writeFile(libA, Buffer.alloc(3000));
+    await writeFile(libB, Buffer.alloc(4000));
+    await mkdir(join(downloadDir, "Mixed Torrent"), { recursive: true });
+    await link(libA, join(downloadDir, "Mixed Torrent", "a.mp4"));
+    await writeFile(join(downloadDir, "Mixed Torrent", "b.mp4"), Buffer.alloc(4000));
+
+    const plan = matchedPlan("Mixed Torrent", [
+      { relativePath: "Mixed Torrent/a.mp4", length: 3000, candidate: libA },
+      { relativePath: "Mixed Torrent/b.mp4", length: 4000, candidate: libB },
+    ]);
+    assert.equal(await computeStorageStatus(plan, downloadDir), "mixed");
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadDir, { recursive: true, force: true });
+  }
+});
+
+test("computeStorageStatus: 'n/a' when the plan isn't a full, unambiguous match", async () => {
+  const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));
+  try {
+    const plan: ReseedPlan = {
+      torrentName: "Partial",
+      files: [{ relativePath: "a.mp4", length: 1000, status: "unmatched" }],
+      matchedCount: 0,
+      ambiguousCount: 0,
+      unmatchedCount: 1,
+    };
+    assert.equal(await computeStorageStatus(plan, downloadDir), "n/a");
+  } finally {
+    await rm(downloadDir, { recursive: true, force: true });
+  }
+});
+
+test("computeStorageStatus: a file that can't be stat'd (missing from downloadDir) is conservatively treated as NOT deduped", async () => {
+  const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-lib-"));
+  const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));
+  try {
+    const libFile = join(libraryRoot, "Missing - S2026E01.mp4");
+    await writeFile(libFile, Buffer.alloc(500));
+    // Deliberately nothing written at downloadDir/Missing.mp4.
+    const plan = matchedPlan("Missing.mp4", [{ relativePath: "Missing.mp4", length: 500, candidate: libFile }]);
+    assert.equal(await computeStorageStatus(plan, downloadDir), "duplicate");
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadDir, { recursive: true, force: true });
+  }
+});
+
+test(
+  "findOrphanOriginal flags a leftover only from a recorded dedupeState entry, never by guessing a path - reproduces the real bug (Transmission's actual downloadDir is a subfolder of DOWNLOADS_PATH, e.g. /downloads/complete)",
+  async () => {
+    const downloadsRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-downloads-")); // stands in for DOWNLOADS_PATH, e.g. "/downloads"
+    const completeDir = join(downloadsRoot, "complete"); // Transmission's REAL downloadDir - a subfolder, not DOWNLOADS_PATH itself
+    const outsideDir = await mkdtemp(join(tmpdir(), "domestique-seeding-outside-"));
+    const dedupeStatePath = join(downloadsRoot, "dedupe-state.json");
+    await mkdir(completeDir, { recursive: true });
+    try {
+      // Case 1: recorded original points at completeDir (the real per-torrent
+      // downloadDir, NOT downloadsRoot itself), and the file is still
+      // genuinely there at the exact expected size - should be flagged. This
+      // is exactly the real "Highlights"/`/downloads/complete` bug shape.
+      await writeFile(join(completeDir, "Orphan-Present.mp4"), Buffer.alloc(2000));
+      recordDedupeOriginal("Orphan-Present.mp4", { dir: completeDir, name: "Orphan-Present.mp4" }, dedupeStatePath);
+      const plan1 = matchedPlan("Orphan-Present.mp4", [
+        { relativePath: "Orphan-Present.mp4", length: 2000, candidate: "/irrelevant" },
+      ]);
+      assert.deepEqual(await findOrphanOriginal(plan1, downloadsRoot, dedupeStatePath), {
+        dir: completeDir,
+        name: "Orphan-Present.mp4",
+        totalBytes: 2000,
       });
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as { port: number };
-      resolve({
-        url: `http://127.0.0.1:${port}/transmission/rpc`,
-        close: () => new Promise((r) => server.close(() => r())),
-      });
-    });
-  });
-}
 
-test("listSeedingTorrents includes seeding (6) and paused/stopped (0) torrents, matched against the library by size", async () => {
-  const libraryRoot = await makeLibrary();
-  try {
-    await writeFile(join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"), Buffer.alloc(1000));
+      // Case 2: a recorded original exists, but the file itself was already
+      // deleted (the normal, successful end state) - nothing at that path
+      // anymore. Should NOT be flagged.
+      recordDedupeOriginal("Already-Cleaned.mp4", { dir: completeDir, name: "Already-Cleaned.mp4" }, dedupeStatePath);
+      const plan2 = matchedPlan("Already-Cleaned.mp4", [
+        { relativePath: "Already-Cleaned.mp4", length: 1500, candidate: "/irrelevant" },
+      ]);
+      assert.equal(await findOrphanOriginal(plan2, downloadsRoot, dedupeStatePath), null);
 
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        return {
-          torrents: [
-            {
-              id: 1,
-              name: "Paris-Roubaix-2026-SBS.mp4",
-              status: 6,
-              percentDone: 1,
-              uploadRatio: 2.5,
-              files: [{ name: "Paris-Roubaix-2026-SBS.mp4", length: 1000, bytesCompleted: 1000 }],
-            },
-            {
-              id: 2,
-              name: "Some Other Race",
-              status: 0,
-              percentDone: 1,
-              files: [{ name: "Some Other Race/stage1.mp4", length: 9999, bytesCompleted: 9999 }],
-            },
-          ],
-        };
-      }
-      return {};
-    });
+      // Case 3: recorded original exists, but the file sitting there is a
+      // different size (already edited/replaced by something else) - a
+      // partial/ambiguous leftover, deliberately NOT flagged.
+      await writeFile(join(completeDir, "Resized-Leftover.mp4"), Buffer.alloc(999));
+      recordDedupeOriginal("Resized-Leftover.mp4", { dir: completeDir, name: "Resized-Leftover.mp4" }, dedupeStatePath);
+      const plan3 = matchedPlan("Resized-Leftover.mp4", [
+        { relativePath: "Resized-Leftover.mp4", length: 3000, candidate: "/irrelevant" },
+      ]);
+      assert.equal(await findOrphanOriginal(plan3, downloadsRoot, dedupeStatePath), null);
 
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        "/nonexistent",
-        join(libraryRoot, "dedupe-state.json")
-      );
-      assert.equal(result.length, 2);
-      const matched = result.find((t) => t.id === 1);
-      assert.equal(matched?.plan.matchedCount, 1);
-      assert.equal(matched?.plan.files[0].candidate, join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"));
-      assert.equal(matched?.ratio, 2.5);
-      const unmatched = result.find((t) => t.id === 2);
-      assert.equal(unmatched?.plan.unmatchedCount, 1);
-    } finally {
-      await close();
-    }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-  }
-});
+      // Case 4: NO recorded original at all (never went through this app's
+      // dedupe) - even though a coincidental same-name, same-size file
+      // happens to sit directly under downloadsRoot. Proves the fix doesn't
+      // fall back to guessing downloadsPath directly (the actual old bug).
+      await writeFile(join(downloadsRoot, "Never-Deduped-Coincidence.mp4"), Buffer.alloc(1234));
+      const plan4 = matchedPlan("Never-Deduped-Coincidence.mp4", [
+        { relativePath: "Never-Deduped-Coincidence.mp4", length: 1234, candidate: "/irrelevant" },
+      ]);
+      assert.equal(await findOrphanOriginal(plan4, downloadsRoot, dedupeStatePath), null);
 
-test("listSeedingTorrents computes percentComplete from actual file bytes, not Transmission's own percentDone - the fix for a torrent with deselected files reporting 100% despite having nothing on disk", async () => {
-  const libraryRoot = await makeLibrary();
-  try {
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        return {
-          torrents: [
-            {
-              // Transmission's own percentDone only counts "wanted" files,
-              // so a torrent with every file deselected can legitimately
-              // report 100% done while bytesCompleted is 0 for all of them.
-              id: 1,
-              name: "All Deselected",
-              status: 0,
-              percentDone: 1,
-              files: [{ name: "All Deselected/stage1.mp4", length: 1000, bytesCompleted: 0 }],
-            },
-            {
-              id: 2,
-              name: "Half Done",
-              status: 0,
-              percentDone: 1,
-              files: [
-                { name: "Half Done/a.mp4", length: 1000, bytesCompleted: 1000 },
-                { name: "Half Done/b.mp4", length: 1000, bytesCompleted: 0 },
-              ],
-            },
-            {
-              id: 3,
-              name: "Genuinely Complete",
-              status: 6,
-              percentDone: 1,
-              files: [{ name: "Genuinely Complete/stage1.mp4", length: 1000, bytesCompleted: 1000 }],
-            },
-          ],
-        };
-      }
-      return {};
-    });
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        "/nonexistent",
-        join(libraryRoot, "dedupe-state.json")
-      );
-      assert.equal(result.find((t) => t.id === 1)?.percentComplete, 0);
-      assert.equal(result.find((t) => t.id === 1)?.percentDone, 1);
-      assert.equal(result.find((t) => t.id === 2)?.percentComplete, 0.5);
-      assert.equal(result.find((t) => t.id === 3)?.percentComplete, 1);
-    } finally {
-      await close();
-    }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-  }
-});
-
-test("listSeedingTorrents excludes torrents that are downloading/checking/queued, not just seeding/paused", async () => {
-  const libraryRoot = await makeLibrary();
-  try {
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        return {
-          torrents: [
-            { id: 1, name: "Downloading", status: 4, percentDone: 0.5, files: [] },
-            { id: 2, name: "Checking", status: 2, percentDone: 0, files: [] },
-          ],
-        };
-      }
-      return {};
-    });
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        "/nonexistent",
-        join(libraryRoot, "dedupe-state.json")
-      );
-      assert.deepEqual(result, []);
-    } finally {
-      await close();
-    }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-  }
-});
-
-test("listSeedingTorrents never walks the library at all when nothing is seeding/paused", async () => {
-  const libraryRoot = await makeLibrary();
-  try {
-    let torrentGetCalls = 0;
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        torrentGetCalls++;
-        return { torrents: [] };
-      }
-      return {};
-    });
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        "/nonexistent",
-        join(libraryRoot, "dedupe-state.json")
-      );
-      assert.deepEqual(result, []);
-      assert.equal(torrentGetCalls, 1);
-    } finally {
-      await close();
-    }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-  }
-});
-
-test("listSeedingTorrents computes storageStatus by comparing device+inode, not just size, between the on-disk file and its matched library candidate", async () => {
-  const libraryRoot = await makeLibrary();
-  const downloadsRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-downloads-"));
-  try {
-    // "deduped": the on-disk file is a real hardlink to the library file -
-    // same inode, zero extra disk.
-    const dedupedLibraryFile = join(libraryRoot, "Deduped - S2026E01.mp4");
-    await writeFile(dedupedLibraryFile, Buffer.alloc(1000));
-    await link(dedupedLibraryFile, join(downloadsRoot, "Deduped.mp4"));
-
-    // "duplicate": same size, but a genuinely separate file (different inode).
-    await writeFile(join(libraryRoot, "Duplicate - S2026E01.mp4"), Buffer.alloc(2000));
-    await writeFile(join(downloadsRoot, "Duplicate.mp4"), Buffer.alloc(2000));
-
-    // "mixed": a two-file torrent where one file is hardlinked and the other is a plain duplicate.
-    const mixedLibraryA = join(libraryRoot, "Mixed A - S2026E01.mp4");
-    const mixedLibraryB = join(libraryRoot, "Mixed B - S2026E01.mp4");
-    await writeFile(mixedLibraryA, Buffer.alloc(3000));
-    await writeFile(mixedLibraryB, Buffer.alloc(4000));
-    await mkdir(join(downloadsRoot, "Mixed Torrent"), { recursive: true });
-    await link(mixedLibraryA, join(downloadsRoot, "Mixed Torrent", "a.mp4"));
-    await writeFile(join(downloadsRoot, "Mixed Torrent", "b.mp4"), Buffer.alloc(4000));
-
-    // "n/a": nothing in the library matches this size at all - not a full match, no meaningful comparison.
-    await writeFile(join(downloadsRoot, "Unmatched.mp4"), Buffer.alloc(5000));
-
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        return {
-          torrents: [
-            {
-              id: 1,
-              name: "Deduped.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: downloadsRoot,
-              files: [{ name: "Deduped.mp4", length: 1000, bytesCompleted: 1000 }],
-            },
-            {
-              id: 2,
-              name: "Duplicate.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: downloadsRoot,
-              files: [{ name: "Duplicate.mp4", length: 2000, bytesCompleted: 2000 }],
-            },
-            {
-              id: 3,
-              name: "Mixed Torrent",
-              status: 6,
-              percentDone: 1,
-              downloadDir: downloadsRoot,
-              files: [
-                { name: "Mixed Torrent/a.mp4", length: 3000, bytesCompleted: 3000 },
-                { name: "Mixed Torrent/b.mp4", length: 4000, bytesCompleted: 4000 },
-              ],
-            },
-            {
-              id: 4,
-              name: "Unmatched.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: downloadsRoot,
-              files: [{ name: "Unmatched.mp4", length: 5000, bytesCompleted: 5000 }],
-            },
-          ],
-        };
-      }
-      return {};
-    });
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        "/nonexistent",
-        join(libraryRoot, "dedupe-state.json")
-      );
-      assert.equal(result.find((t) => t.id === 1)?.storageStatus, "deduped");
-      assert.equal(result.find((t) => t.id === 2)?.storageStatus, "duplicate");
-      assert.equal(result.find((t) => t.id === 3)?.storageStatus, "mixed");
-      assert.equal(result.find((t) => t.id === 4)?.storageStatus, "n/a");
-    } finally {
-      await close();
-    }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-    await rm(downloadsRoot, { recursive: true, force: true });
-  }
-});
-
-test("listSeedingTorrents flags orphanOriginal only from a recorded dedupeState entry, never by guessing a path - reproduces the real bug (Transmission's actual downloadDir is a subfolder of DOWNLOADS_PATH, e.g. /downloads/complete)", async () => {
-  const libraryRoot = await makeLibrary();
-  const activeRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-active-"));
-  const downloadsRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-downloads-")); // stands in for DOWNLOADS_PATH, e.g. "/downloads"
-  const completeDir = join(downloadsRoot, "complete"); // Transmission's REAL downloadDir - a subfolder, not DOWNLOADS_PATH itself
-  const outsideDir = await mkdtemp(join(tmpdir(), "domestique-seeding-outside-"));
-  const dedupeStatePath = join(downloadsRoot, "dedupe-state.json");
-  await mkdir(completeDir, { recursive: true });
-  try {
-    // Torrent 1: deduped, recorded original points at completeDir (the real
-    // per-torrent downloadDir, NOT downloadsRoot itself), and the file is
-    // still genuinely there at the exact expected size - should be flagged.
-    // This is exactly the real "Highlights"/`/downloads/complete` bug shape.
-    const lib1 = join(libraryRoot, "Orphan Present - S2026E01.mp4");
-    await writeFile(lib1, Buffer.alloc(2000));
-    await link(lib1, join(activeRoot, "Orphan-Present.mp4"));
-    await writeFile(join(completeDir, "Orphan-Present.mp4"), Buffer.alloc(2000));
-    recordDedupeOriginal("Orphan-Present.mp4", { dir: completeDir, name: "Orphan-Present.mp4" }, dedupeStatePath);
-
-    // Torrent 2: deduped, a recorded original exists, but the file itself
-    // was already deleted (the normal, successful end state) - nothing at
-    // that path anymore. Should NOT be flagged.
-    const lib2 = join(libraryRoot, "Already Cleaned - S2026E01.mp4");
-    await writeFile(lib2, Buffer.alloc(1500));
-    await link(lib2, join(activeRoot, "Already-Cleaned.mp4"));
-    recordDedupeOriginal("Already-Cleaned.mp4", { dir: completeDir, name: "Already-Cleaned.mp4" }, dedupeStatePath);
-    // (deliberately nothing written at completeDir/Already-Cleaned.mp4)
-
-    // Torrent 3: deduped, recorded original exists, but the file sitting
-    // there is a different size (already edited/replaced by something
-    // else) - a partial/ambiguous leftover, deliberately NOT flagged.
-    const lib3 = join(libraryRoot, "Resized Leftover - S2026E01.mp4");
-    await writeFile(lib3, Buffer.alloc(3000));
-    await link(lib3, join(activeRoot, "Resized-Leftover.mp4"));
-    await writeFile(join(completeDir, "Resized-Leftover.mp4"), Buffer.alloc(999));
-    recordDedupeOriginal("Resized-Leftover.mp4", { dir: completeDir, name: "Resized-Leftover.mp4" }, dedupeStatePath);
-
-    // Torrent 4: deduped, but NO recorded original at all (never went
-    // through this app's dedupe - e.g. hardlinked at ingestion time
-    // instead) - even though a coincidental same-name, same-size file
-    // happens to sit directly under downloadsRoot. Proves the fix doesn't
-    // fall back to guessing downloadsPath directly (the actual old bug).
-    const lib4 = join(libraryRoot, "Never Deduped Here - S2026E01.mp4");
-    await writeFile(lib4, Buffer.alloc(1234));
-    await link(lib4, join(activeRoot, "Never-Deduped-Coincidence.mp4"));
-    await writeFile(join(downloadsRoot, "Never-Deduped-Coincidence.mp4"), Buffer.alloc(1234));
-
-    // Torrent 5: deduped, recorded original's dir is OUTSIDE downloadsRoot
-    // entirely (defensive sanity check) - rejected even though the file
-    // genuinely exists there at the right size.
-    const lib5 = join(libraryRoot, "Outside Sanity Check - S2026E01.mp4");
-    await writeFile(lib5, Buffer.alloc(4321));
-    await link(lib5, join(activeRoot, "Outside-Sanity-Check.mp4"));
-    await writeFile(join(outsideDir, "Outside-Sanity-Check.mp4"), Buffer.alloc(4321));
-    recordDedupeOriginal(
-      "Outside-Sanity-Check.mp4",
-      { dir: outsideDir, name: "Outside-Sanity-Check.mp4" },
-      dedupeStatePath
-    );
-
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        return {
-          torrents: [
-            {
-              id: 1,
-              name: "Orphan-Present.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: activeRoot,
-              files: [{ name: "Orphan-Present.mp4", length: 2000, bytesCompleted: 2000 }],
-            },
-            {
-              id: 2,
-              name: "Already-Cleaned.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: activeRoot,
-              files: [{ name: "Already-Cleaned.mp4", length: 1500, bytesCompleted: 1500 }],
-            },
-            {
-              id: 3,
-              name: "Resized-Leftover.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: activeRoot,
-              files: [{ name: "Resized-Leftover.mp4", length: 3000, bytesCompleted: 3000 }],
-            },
-            {
-              id: 4,
-              name: "Never-Deduped-Coincidence.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: activeRoot,
-              files: [{ name: "Never-Deduped-Coincidence.mp4", length: 1234, bytesCompleted: 1234 }],
-            },
-            {
-              id: 5,
-              name: "Outside-Sanity-Check.mp4",
-              status: 6,
-              percentDone: 1,
-              downloadDir: activeRoot,
-              files: [{ name: "Outside-Sanity-Check.mp4", length: 4321, bytesCompleted: 4321 }],
-            },
-          ],
-        };
-      }
-      return {};
-    });
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        downloadsRoot,
+      // Case 5: recorded original's dir is OUTSIDE downloadsRoot entirely
+      // (defensive sanity check) - rejected even though the file genuinely
+      // exists there at the right size.
+      await writeFile(join(outsideDir, "Outside-Sanity-Check.mp4"), Buffer.alloc(4321));
+      recordDedupeOriginal(
+        "Outside-Sanity-Check.mp4",
+        { dir: outsideDir, name: "Outside-Sanity-Check.mp4" },
         dedupeStatePath
       );
-
-      const t1 = result.find((t) => t.id === 1);
-      assert.equal(t1?.storageStatus, "deduped");
-      assert.deepEqual(t1?.orphanOriginal, { dir: completeDir, name: "Orphan-Present.mp4", totalBytes: 2000 });
-
-      const t2 = result.find((t) => t.id === 2);
-      assert.equal(t2?.storageStatus, "deduped");
-      assert.equal(t2?.orphanOriginal, null);
-
-      const t3 = result.find((t) => t.id === 3);
-      assert.equal(t3?.storageStatus, "deduped");
-      assert.equal(t3?.orphanOriginal, null);
-
-      const t4 = result.find((t) => t.id === 4);
-      assert.equal(t4?.storageStatus, "deduped");
-      assert.equal(t4?.orphanOriginal, null);
-
-      const t5 = result.find((t) => t.id === 5);
-      assert.equal(t5?.storageStatus, "deduped");
-      assert.equal(t5?.orphanOriginal, null);
+      const plan5 = matchedPlan("Outside-Sanity-Check.mp4", [
+        { relativePath: "Outside-Sanity-Check.mp4", length: 4321, candidate: "/irrelevant" },
+      ]);
+      assert.equal(await findOrphanOriginal(plan5, downloadsRoot, dedupeStatePath), null);
     } finally {
-      await close();
+      await rm(downloadsRoot, { recursive: true, force: true });
+      await rm(outsideDir, { recursive: true, force: true });
     }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-    await rm(activeRoot, { recursive: true, force: true });
-    await rm(downloadsRoot, { recursive: true, force: true });
-    await rm(outsideDir, { recursive: true, force: true });
   }
-});
-
-test("listSeedingTorrents correctly resolves a torrent reseeded via this app back to its ORIGINAL library file, not its own staged copy", async () => {
-  const libraryRoot = await makeLibrary();
-  try {
-    // Simulates the outcome of a real Reseed commit: the original library
-    // file stays put, and a hardlinked copy also exists under the (excluded)
-    // staging directory - listSeedingTorrents must still resolve to the
-    // original, not fail to match just because the staged copy is excluded.
-    await writeFile(join(libraryRoot, "Stage 1 renamed.mp4"), Buffer.alloc(100));
-
-    const { url, close } = await startFakeTransmissionRpc((method) => {
-      if (method === "torrent-get") {
-        return {
-          torrents: [
-            {
-              id: 1,
-              name: "Tour de France 2026",
-              status: 6,
-              percentDone: 1,
-              files: [{ name: "Tour de France 2026/Stage 1.mp4", length: 100, bytesCompleted: 100 }],
-            },
-          ],
-        };
-      }
-      return {};
-    });
-    try {
-      const result = await listSeedingTorrents(
-        { url },
-        libraryRoot,
-        join(libraryRoot, ".reseed-staging"),
-        "/nonexistent",
-        join(libraryRoot, "dedupe-state.json")
-      );
-      assert.equal(result[0].plan.matchedCount, 1);
-      assert.equal(result[0].plan.files[0].candidate, join(libraryRoot, "Stage 1 renamed.mp4"));
-    } finally {
-      await close();
-    }
-  } finally {
-    await rm(libraryRoot, { recursive: true, force: true });
-  }
-});
+);

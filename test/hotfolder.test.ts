@@ -162,6 +162,7 @@ function makeOpts(libraryRoot: string, configPath: string, settingsPath: string)
     downloadsPath: "/nonexistent",
     dedupeStatePath,
     torrentRegistryDir,
+    transmissionTorrentsDir: null,
     webui: null,
   };
 }

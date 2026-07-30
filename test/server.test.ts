@@ -26,6 +26,7 @@ async function makeScratch() {
     downloadsPath,
     dedupeStatePath,
     torrentRegistryDir,
+    transmissionTorrentsDir: null,
     webui: null,
   };
   return { opts, libraryRoot, downloadsPath };

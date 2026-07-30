@@ -8,8 +8,9 @@ import { createApp, type ServerOptions } from "../src/server.js";
 import { buildSingleFileTorrent, buildMultiFileTorrent } from "./torrentFixtures.js";
 import { getDedupeOriginal, recordDedupeOriginal } from "../src/dedupeState.js";
 import { registerTorrent, listRegistry } from "../src/torrentRegistry.js";
+import { parseTorrentFile } from "../src/torrentFile.js";
 
-async function makeScratchServer(downloadsPath?: string) {
+async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir: string | null = null) {
   const configDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-config-"));
   const libraryRoot = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-library-"));
   const configPath = join(configDir, "events.json");
@@ -29,6 +30,7 @@ async function makeScratchServer(downloadsPath?: string) {
     downloadsPath: downloadsPath ?? "/nonexistent",
     dedupeStatePath,
     torrentRegistryDir,
+    transmissionTorrentsDir,
     webui: { password: "correct-password" },
   };
 
@@ -218,57 +220,21 @@ test("POST /api/reseed/commit reports staged:false without touching Transmission
   }
 });
 
-test("GET /api/reseed/seeding without Transmission configured returns 400, no library walk needed", async () => {
-  const { baseUrl, close } = await makeScratchServer();
+test("GET /api/reseed/index works even with Transmission unconfigured, reporting every entry as not-in-Transmission rather than erroring", async () => {
+  const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
   try {
-    const res = await fetch(`${baseUrl}/api/reseed/seeding`, { headers: { Authorization: authHeader() } });
-    assert.equal(res.status, 400);
-    const body = await res.json();
-    assert.match(body.error, /isn't configured/i);
-  } finally {
-    await close();
-  }
-});
+    const torrentBuf = buildSingleFileTorrent("Something", 100);
+    const meta = parseTorrentFile(torrentBuf);
+    await registerTorrent(meta.infoHash, torrentBuf, torrentRegistryDir);
 
-test("GET /api/reseed/seeding returns seeding/paused torrents matched against the library", async () => {
-  const { baseUrl, libraryRoot, settingsPath, close: closeApp } = await makeScratchServer();
-  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
-    if (method === "torrent-get") {
-      return {
-        torrents: [
-          {
-            id: 1,
-            name: "Paris-Roubaix-2026-SBS.mp4",
-            status: 6,
-            percentDone: 1,
-            files: [{ name: "Paris-Roubaix-2026-SBS.mp4", length: 1000, bytesCompleted: 1000 }],
-          },
-          { id: 2, name: "Still Downloading", status: 4, percentDone: 0.2, files: [] },
-        ],
-      };
-    }
-    return {};
-  });
-  try {
-    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
-    await fs.writeFile(
-      settingsPath,
-      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
-      "utf-8"
-    );
-    await fs.writeFile(join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"), Buffer.alloc(1000));
-
-    const res = await fetch(`${baseUrl}/api/reseed/seeding`, { headers: { Authorization: authHeader() } });
+    const res = await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.equal(body.torrents.length, 1);
-    assert.equal(body.torrents[0].id, 1);
-    assert.equal(body.torrents[0].plan.matchedCount, 1);
-    assert.equal(body.torrents[0].plan.files[0].candidate, join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"));
+    assert.equal(body.torrents[0].inTransmission, false);
   } finally {
-    await closeApp();
-    await closeTransmission();
+    await close();
   }
 });
 
@@ -770,7 +736,7 @@ test("POST /api/reseed/delete-original deletes the file, logs an activity entry,
   }
 });
 
-test("POST /api/reseed/commit registers the torrent on a successful stage, but not on a no-match skip", async () => {
+test("POST /api/reseed/commit registers the torrent (keyed by info-hash) on a successful stage, but not on a no-match skip", async () => {
   const { baseUrl, libraryRoot, settingsPath, torrentRegistryDir, close: closeApp } = await makeScratchServer();
   const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
     if (method === "torrent-add") {
@@ -790,16 +756,17 @@ test("POST /api/reseed/commit registers the torrent on a successful stage, but n
     );
     await fs.writeFile(join(libraryRoot, "Registered Race - renamed.mp4"), Buffer.alloc(50));
 
+    const matchedTorrentBuf = buildSingleFileTorrent("Registered Race", 50);
     const matchedRes = await fetch(`${baseUrl}/api/reseed/commit`, {
       method: "POST",
       headers: { Authorization: authHeader() },
-      body: buildSingleFileTorrent("Registered Race", 50),
+      body: matchedTorrentBuf,
     });
     assert.equal((await matchedRes.json()).result.staged, true);
 
     const entries = await listRegistry(torrentRegistryDir);
     assert.equal(entries.length, 1);
-    assert.equal(entries[0].torrentName, "Registered Race");
+    assert.equal(entries[0].infoHash, parseTorrentFile(matchedTorrentBuf).infoHash);
 
     // A torrent that matches nothing must NOT be registered - a no-match
     // skip is exactly what should still be retryable later, not silently
@@ -819,12 +786,12 @@ test("POST /api/reseed/commit registers the torrent on a successful stage, but n
   }
 });
 
-test("POST /api/reseed/registry/check reports alreadyRegistered accurately, before and after registration", async () => {
+test("POST /api/reseed/index/check reports alreadyRegistered accurately (by hash), before and after registration", async () => {
   const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
   try {
     const torrentBuf = buildSingleFileTorrent("Check Me", 123);
 
-    const before = await fetch(`${baseUrl}/api/reseed/registry/check`, {
+    const before = await fetch(`${baseUrl}/api/reseed/index/check`, {
       method: "POST",
       headers: { Authorization: authHeader() },
       body: torrentBuf,
@@ -834,9 +801,9 @@ test("POST /api/reseed/registry/check reports alreadyRegistered accurately, befo
     assert.equal(beforeBody.torrentName, "Check Me");
     assert.equal(beforeBody.alreadyRegistered, false);
 
-    await registerTorrent("Check Me", torrentBuf, torrentRegistryDir);
+    await registerTorrent(parseTorrentFile(torrentBuf).infoHash, torrentBuf, torrentRegistryDir);
 
-    const after = await fetch(`${baseUrl}/api/reseed/registry/check`, {
+    const after = await fetch(`${baseUrl}/api/reseed/index/check`, {
       method: "POST",
       headers: { Authorization: authHeader() },
       body: torrentBuf,
@@ -848,10 +815,10 @@ test("POST /api/reseed/registry/check reports alreadyRegistered accurately, befo
   }
 });
 
-test("POST /api/reseed/registry/check rejects an invalid .torrent with a 400", async () => {
+test("POST /api/reseed/index/check rejects an invalid .torrent with a 400", async () => {
   const { baseUrl, close } = await makeScratchServer();
   try {
-    const res = await fetch(`${baseUrl}/api/reseed/registry/check`, {
+    const res = await fetch(`${baseUrl}/api/reseed/index/check`, {
       method: "POST",
       headers: { Authorization: authHeader() },
       body: Buffer.from("not a torrent"),
@@ -862,74 +829,96 @@ test("POST /api/reseed/registry/check rejects an invalid .torrent with a 400", a
   }
 });
 
-test("GET /api/reseed/registry cross-references every registered torrent against the live library and Transmission state, independently in each direction", async () => {
+test("GET /api/reseed/index cross-references every registered torrent against the live library and Transmission state (correlated by info-hash), independently in each direction", async () => {
   const { baseUrl, libraryRoot, settingsPath, torrentRegistryDir, close: closeApp } = await makeScratchServer();
-  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
-    if (method === "torrent-get") {
-      return {
-        torrents: [
-          { id: 1, name: "Both", status: 6, percentDone: 1, files: [] },
-          { id: 2, name: "TransmissionOnly", status: 6, percentDone: 1, files: [] },
-        ],
-      };
-    }
-    return {};
-  });
   try {
-    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
-    await fs.writeFile(
-      settingsPath,
-      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
-      "utf-8"
-    );
-
     // "Both" and "PlexOnly" each have a same-size library file, so both are
     // findable in Plex; "TransmissionOnly" and "Neither" deliberately don't.
     await fs.writeFile(join(libraryRoot, "Both - renamed.mp4"), Buffer.alloc(111));
     await fs.writeFile(join(libraryRoot, "PlexOnly - renamed.mp4"), Buffer.alloc(222));
 
-    await registerTorrent("Both", buildSingleFileTorrent("Both", 111), torrentRegistryDir);
-    await registerTorrent("PlexOnly", buildSingleFileTorrent("PlexOnly", 222), torrentRegistryDir);
-    await registerTorrent("TransmissionOnly", buildSingleFileTorrent("TransmissionOnly", 333), torrentRegistryDir);
-    await registerTorrent("Neither", buildSingleFileTorrent("Neither", 444), torrentRegistryDir);
+    const bothBuf = buildSingleFileTorrent("Both", 111);
+    const plexOnlyBuf = buildSingleFileTorrent("PlexOnly", 222);
+    const transmissionOnlyBuf = buildSingleFileTorrent("TransmissionOnly", 333);
+    const neitherBuf = buildSingleFileTorrent("Neither", 444);
+    await registerTorrent(parseTorrentFile(bothBuf).infoHash, bothBuf, torrentRegistryDir);
+    await registerTorrent(parseTorrentFile(plexOnlyBuf).infoHash, plexOnlyBuf, torrentRegistryDir);
+    await registerTorrent(parseTorrentFile(transmissionOnlyBuf).infoHash, transmissionOnlyBuf, torrentRegistryDir);
+    await registerTorrent(parseTorrentFile(neitherBuf).infoHash, neitherBuf, torrentRegistryDir);
 
-    const res = await fetch(`${baseUrl}/api/reseed/registry`, { headers: { Authorization: authHeader() } });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.ok, true);
-    assert.equal(body.summary.total, 4);
-    assert.equal(body.summary.inPlexCount, 2);
-    assert.equal(body.summary.inTransmissionCount, 2);
+    const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method) => {
+      if (method === "torrent-get") {
+        return {
+          torrents: [
+            {
+              id: 1,
+              name: "Both (renamed live in Transmission)", // deliberately mismatched name - hash must still correlate
+              status: 6,
+              percentDone: 1,
+              hashString: parseTorrentFile(bothBuf).infoHash,
+              files: [],
+            },
+            {
+              id: 2,
+              name: "TransmissionOnly",
+              status: 6,
+              percentDone: 1,
+              hashString: parseTorrentFile(transmissionOnlyBuf).infoHash,
+              files: [],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    try {
+      const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+      await fs.writeFile(
+        settingsPath,
+        JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+        "utf-8"
+      );
 
-    const byName = Object.fromEntries(body.torrents.map((t: { torrentName: string }) => [t.torrentName, t]));
-    assert.deepEqual(
-      { inPlex: byName.Both.inPlex, inTransmission: byName.Both.inTransmission },
-      { inPlex: true, inTransmission: true }
-    );
-    assert.deepEqual(
-      { inPlex: byName.PlexOnly.inPlex, inTransmission: byName.PlexOnly.inTransmission },
-      { inPlex: true, inTransmission: false }
-    );
-    assert.deepEqual(
-      { inPlex: byName.TransmissionOnly.inPlex, inTransmission: byName.TransmissionOnly.inTransmission },
-      { inPlex: false, inTransmission: true }
-    );
-    assert.deepEqual(
-      { inPlex: byName.Neither.inPlex, inTransmission: byName.Neither.inTransmission },
-      { inPlex: false, inTransmission: false }
-    );
+      const res = await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.summary.total, 4);
+      assert.equal(body.summary.inPlexCount, 2);
+      assert.equal(body.summary.inTransmissionCount, 2);
+
+      const byName = Object.fromEntries(body.torrents.map((t: { torrentName: string }) => [t.torrentName, t]));
+      assert.deepEqual(
+        { inPlex: byName.Both.inPlex, inTransmission: byName.Both.inTransmission },
+        { inPlex: true, inTransmission: true }
+      );
+      assert.deepEqual(
+        { inPlex: byName.PlexOnly.inPlex, inTransmission: byName.PlexOnly.inTransmission },
+        { inPlex: true, inTransmission: false }
+      );
+      assert.deepEqual(
+        { inPlex: byName.TransmissionOnly.inPlex, inTransmission: byName.TransmissionOnly.inTransmission },
+        { inPlex: false, inTransmission: true }
+      );
+      assert.deepEqual(
+        { inPlex: byName.Neither.inPlex, inTransmission: byName.Neither.inTransmission },
+        { inPlex: false, inTransmission: false }
+      );
+    } finally {
+      await closeTransmission();
+    }
   } finally {
     await closeApp();
-    await closeTransmission();
   }
 });
 
-test("GET /api/reseed/registry reports every entry as not-in-Transmission (rather than failing) when Transmission isn't configured", async () => {
+test("GET /api/reseed/index reports every entry as not-in-Transmission (rather than failing) when Transmission isn't configured", async () => {
   const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
   try {
-    await registerTorrent("No Transmission Configured", buildSingleFileTorrent("No Transmission Configured", 50), torrentRegistryDir);
+    const buf = buildSingleFileTorrent("No Transmission Configured", 50);
+    await registerTorrent(parseTorrentFile(buf).infoHash, buf, torrentRegistryDir);
 
-    const res = await fetch(`${baseUrl}/api/reseed/registry`, { headers: { Authorization: authHeader() } });
+    const res = await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.summary.total, 1);
@@ -940,32 +929,56 @@ test("GET /api/reseed/registry reports every entry as not-in-Transmission (rathe
   }
 });
 
-test("GET /api/reseed/registry/download serves back the exact bytes previously registered, and 404s an unknown/malformed name", async () => {
+test("GET /api/reseed/index/download serves back the exact bytes previously registered by hash, and 404s an unknown/malformed hash", async () => {
   const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
   try {
     const torrentBuf = buildSingleFileTorrent("Download Me", 999);
-    await registerTorrent("Download Me", torrentBuf, torrentRegistryDir);
+    const infoHash = parseTorrentFile(torrentBuf).infoHash;
+    await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
 
-    const res = await fetch(`${baseUrl}/api/reseed/registry/download?name=${encodeURIComponent("Download Me")}`, {
+    const res = await fetch(`${baseUrl}/api/reseed/index/download?hash=${encodeURIComponent(infoHash)}`, {
       headers: { Authorization: authHeader() },
     });
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "application/x-bittorrent");
+    assert.match(res.headers.get("content-disposition") ?? "", /filename="Download Me\.torrent"/);
     const downloaded = Buffer.from(await res.arrayBuffer());
     assert.deepEqual(downloaded, torrentBuf);
 
-    const missing = await fetch(`${baseUrl}/api/reseed/registry/download?name=${encodeURIComponent("Never Registered")}`, {
+    const missing = await fetch(`${baseUrl}/api/reseed/index/download?hash=${encodeURIComponent("f".repeat(40))}`, {
       headers: { Authorization: authHeader() },
     });
     assert.equal(missing.status, 404);
 
-    // Path-traversal attempt in `name` - must 404 like any other unknown
-    // name, not throw or escape the registry directory.
-    const traversal = await fetch(`${baseUrl}/api/reseed/registry/download?name=${encodeURIComponent("../../etc/passwd")}`, {
+    // Path-traversal attempt in `hash` - must 404 like any other unknown
+    // hash, not throw or escape the registry directory.
+    const traversal = await fetch(`${baseUrl}/api/reseed/index/download?hash=${encodeURIComponent("../../etc/passwd")}`, {
       headers: { Authorization: authHeader() },
     });
     assert.equal(traversal.status, 404);
   } finally {
     await close();
+  }
+});
+
+test("GET /api/reseed/index syncs new .torrent files from the configured Transmission-torrents directory before building the response, without needing a separate Preview/Commit at all", async () => {
+  const transmissionTorrentsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-transmission-torrents-"));
+  const { baseUrl, close } = await makeScratchServer(undefined, transmissionTorrentsDir);
+  try {
+    const torrentBuf = buildSingleFileTorrent("Autobrr Added", 321);
+    // Transmission's own naming convention for this file is irrelevant -
+    // the sync re-parses the bytes for real identity, never trusting the
+    // filename.
+    await fs.writeFile(join(transmissionTorrentsDir, "whatever-transmission-called-it.torrent"), torrentBuf);
+
+    const res = await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.torrents.length, 1);
+    assert.equal(body.torrents[0].torrentName, "Autobrr Added");
+    assert.equal(body.torrents[0].infoHash, parseTorrentFile(torrentBuf).infoHash);
+  } finally {
+    await close();
+    await fs.rm(transmissionTorrentsDir, { recursive: true, force: true });
   }
 });

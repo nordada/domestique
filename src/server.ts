@@ -52,8 +52,10 @@ export interface ServerOptions {
   downloadsPath: string;
   /** Where dedupeState.ts persists each deduped torrent's original download-folder location - see seeding.ts's findOrphanOriginal for why this can't just be reconstructed live from Transmission. */
   dedupeStatePath: string;
-  /** Directory torrentRegistry.ts saves a copy of every successfully-staged Reseed .torrent into - see reseedApi.ts's /api/reseed/registry routes. */
+  /** Directory torrentRegistry.ts saves a copy of every registered .torrent into (staged through the Index tab, or synced in from Transmission's own torrents directory) - see reseedApi.ts's /api/reseed/index routes. */
   torrentRegistryDir: string;
+  /** Host-mounted, read-only copy of Transmission's OWN .torrent-storage directory (its own config dir's "torrents" subfolder) - see transmissionTorrentSync.ts. Null when not configured, the same on/off-by-presence convention as hotfolder's own settings; unlike torrentRegistryDir this is never written to. */
+  transmissionTorrentsDir: string | null;
   webui: WebUiConfig | null;
 }
 
@@ -448,6 +450,11 @@ export function optionsFromEnv(): ServerOptions {
   // path - DOWNLOADS_PATH lets this be overridden if that mount target
   // ever changes, mirroring CONFIG_PATH/SETTINGS_PATH above.
   const downloadsPath = process.env.DOWNLOADS_PATH || "/downloads";
+  // Optional, on/off by presence (empty string counts as unset, same as
+  // every other "|| " check here) - see docker-compose.yml's comment on why
+  // this is left genuinely empty rather than defaulted to a fixed path when
+  // the user hasn't configured a real host mount for it.
+  const transmissionTorrentsDir = process.env.TRANSMISSION_TORRENTS_DIR || null;
 
   if (!libraryRoot) {
     throw new Error("LIBRARY_ROOT environment variable is required (Plex library root path)");
@@ -464,6 +471,7 @@ export function optionsFromEnv(): ServerOptions {
     downloadsPath,
     dedupeStatePath,
     torrentRegistryDir,
+    transmissionTorrentsDir,
     webui,
   };
 }
