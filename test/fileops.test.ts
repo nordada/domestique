@@ -68,6 +68,25 @@ test("resolveSourceItems skips raw DVD navigation files (.BUP/.IFO, VIDEO_TS.VOB
   assert.equal(items.find((i) => i.sourceFile.endsWith("VTS_01_2.VOB"))?.parsed.partNum, 2);
 });
 
+test("resolveSourceItems skips DVD-recorder housekeeping files (VIDEO_RM.DAT/PVR_TEMP.USR/DVD_REC.USR) sitting alongside real content", async () => {
+  // Real incident: "Giro D'Italia History 1909-1993" carries a VIDEO_RM
+  // folder (recorder metadata, a different disc-authoring convention than
+  // the VIDEO_TS one above) whose junk files permanently counted as
+  // "unmatched" in reseedMatch.ts's plan - a Plex library never contains
+  // these, so they could never match anything either way.
+  const { sourceDir } = await makeScratch();
+  const folder = join(sourceDir, "Some Recorder Rip");
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(join(folder, "VIDEO_RM.DAT"), "x");
+  await fs.writeFile(join(folder, "PVR_TEMP.USR"), "x");
+  await fs.writeFile(join(folder, "DVD_REC.USR"), "x");
+  await fs.writeFile(join(folder, "VTS_01_1.VOB"), "real video");
+
+  const items = await resolveSourceItems(sourceDir, "Some Recorder Rip");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sourceFile.split("/").pop(), "VTS_01_1.VOB");
+});
+
 test("resolveSourceItems folds in a VIDEO_TS subfolder's files when the release keeps the standard DVD folder layout instead of flattening it", async () => {
   // Real incident, a second variant of the same underlying release shape:
   // some DVD rips flatten VIDEO_TS.BUP/VTS_01_N.VOB straight into the

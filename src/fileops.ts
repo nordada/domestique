@@ -61,9 +61,25 @@ const VIDEO_EXT_FALLBACK = "mp4";
 // as non-content.
 const DVD_NAVIGATION_EXTENSIONS = new Set(["bup", "ifo"]);
 
+// A second, unrelated disc-navigation convention seen in the wild: some DVD
+// *recorders* (not DVD-Video authoring software) write their own recording-
+// management housekeeping into a "VIDEO_RM" folder alongside the real
+// VIDEO_TS content - VIDEO_RM.DAT/PVR_TEMP.USR/DVD_REC.USR are exactly this
+// (the real incident this fixed: "Giro D'Italia History 1909-1993" carries
+// both a VIDEO_TS folder with 3 real VTS_01_N.VOB parts, correctly matched,
+// and a VIDEO_RM folder whose 3 junk files permanently counted as
+// "unmatched" - a Plex library never contains recorder-metadata files, so
+// they could never match anything, same false-partial-match shape as the
+// original VIDEO_TS.BUP/IFO case). Matched by exact filename, not a broad
+// extension check, since .DAT specifically is also a real video container
+// on VCD-format discs (AVSEQ01.DAT etc.) - excluding it by extension alone
+// would misclassify genuine video content on a different disc format.
+const DVD_RECORDER_NAVIGATION_FILENAMES = new Set(["video_rm.dat", "pvr_temp.usr", "dvd_rec.usr"]);
+
 export function isDvdNavigationFile(filename: string): boolean {
   const ext = extname(filename).slice(1).toLowerCase();
   if (DVD_NAVIGATION_EXTENSIONS.has(ext)) return true;
+  if (DVD_RECORDER_NAVIGATION_FILENAMES.has(filename.toLowerCase())) return true;
   return /^video_ts\.vob$/i.test(filename);
 }
 

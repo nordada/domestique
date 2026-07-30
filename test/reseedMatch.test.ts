@@ -196,6 +196,35 @@ test("buildReseedPlan excludes DVD navigation files (.IFO/.BUP/VIDEO_TS.VOB) fro
   assert.equal(plan.matchedCount, plan.files.length);
 });
 
+test("buildReseedPlan excludes DVD-recorder housekeeping files (VIDEO_RM.DAT/PVR_TEMP.USR/DVD_REC.USR) from the match denominator", () => {
+  // Real incident, found live on the user's own library: "Giro D'Italia
+  // History 1909-1993" carries both a VIDEO_TS folder (3 real VTS_01_N.VOB
+  // parts, all correctly filed) and a VIDEO_RM folder (recorder metadata
+  // from a different disc-authoring convention than VIDEO_TS's own
+  // .IFO/.BUP) - the torrent showed a permanent "Partial match: 3/6" purely
+  // because those 3 junk files could never match anything in the library.
+  const meta: TorrentMetainfo = {
+    name: "Giro D'Italia History 1909-1993",
+    files: [
+      { relativePath: "Giro D'Italia History 1909-1993/VIDEO_TS/VTS_01_1.VOB", length: 100 },
+      { relativePath: "Giro D'Italia History 1909-1993/VIDEO_TS/VTS_01_2.VOB", length: 200 },
+      { relativePath: "Giro D'Italia History 1909-1993/VIDEO_TS/VTS_01_3.VOB", length: 300 },
+      { relativePath: "Giro D'Italia History 1909-1993/VIDEO_RM/VIDEO_RM.DAT", length: 10 },
+      { relativePath: "Giro D'Italia History 1909-1993/VIDEO_RM/PVR_TEMP.USR", length: 20 },
+      { relativePath: "Giro D'Italia History 1909-1993/VIDEO_RM/DVD_REC.USR", length: 30 },
+    ],
+  };
+  const index = new Map([
+    [100, ["/library/Giro D'Italia History/Giro D'Italia History - S1993E01 - pt01.vob"]],
+    [200, ["/library/Giro D'Italia History/Giro D'Italia History - S1993E01 - pt02.vob"]],
+    [300, ["/library/Giro D'Italia History/Giro D'Italia History - S1993E01 - pt03.vob"]],
+  ]);
+  const plan = buildReseedPlan(meta, index);
+  assert.equal(plan.files.length, 3);
+  assert.equal(plan.matchedCount, 3);
+  assert.equal(plan.matchedCount, plan.files.length);
+});
+
 test("applyManualOverrides promotes an ambiguous file to matched when a recorded pick is one of its own candidates", () => {
   const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/stage1.mp4", length: 100 }] };
   const index = new Map([[100, ["/library/Race/a.mp4", "/library/Race/b.mp4"]]]);

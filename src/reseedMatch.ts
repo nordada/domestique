@@ -218,8 +218,9 @@ export function buildReseedPlan(
   meta: Pick<TorrentMetainfo, "name" | "files">,
   sizeIndex: Map<number, string[]>
 ): ReseedPlan {
-  // Raw DVD-Video navigation files (.IFO/.BUP/VIDEO_TS.VOB) never get copied
-  // into the library (see fileops.ts's isDvdNavigationFile) and so can never
+  // Raw DVD navigation/recorder-metadata files (.IFO/.BUP/VIDEO_TS.VOB, plus
+  // DVD-recorder housekeeping like VIDEO_RM.DAT - see fileops.ts's
+  // isDvdNavigationFile) never get copied into the library and so can never
   // show up "matched" here - counting them left every DVD-rip torrent stuck
   // showing a permanent, false "Partial match" even when every real video
   // part was correctly filed, which in turn made the Index tab's "Add to
