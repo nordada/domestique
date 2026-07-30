@@ -173,6 +173,8 @@ Plex library (matched by exact file size) and Transmission (live seeding
 status) - neither is authoritative over the other, so a torrent found in
 only one, both, or neither is all real, meaningful state.
 
+<img src="docs/screenshots/index-overview.png" width="560" alt="Torrent Index tab: filter pills row, then a table of torrents showing a mix of matched, partial-match, ambiguous, deduped, duplicated, and missing-from-Plex states">
+
 **Stat/filter pills** above the table summarize the whole set at a glance -
 total, in Plex, in Transmission, seeding, on disk, ⚠️ need attention,
 🔗 deduped, 📦 duplicated, and a deliberately muted **missing from Plex**
@@ -198,6 +200,9 @@ checkbox for every currently-filtered row), and a bulk action bar appears
 showing how many of your selection are eligible for each action - clicking
 one only ever touches the eligible subset, skipping the rest silently
 rather than erroring. The actions:
+
+<img src="docs/screenshots/index-bulk-actions.png" width="560" alt="A row selected, with the bulk action bar showing eligible counts per action: Add to Plex library, Re-add to Transmission, Verify data, Dedupe, Delete leftover copy, Remove from Transmission, Archive">
+
 
 - **Add to Plex library** - runs each eligible torrent through the normal
   parse/match/copy pipeline, for torrents whose data was never filed into
@@ -256,6 +261,8 @@ pick the right one by hand instead of renaming/moving files in the library.
 The pick is remembered (keyed by the torrent's own info-hash) and applied
 on every future preview, stage, dedupe, and Index-tab load of that torrent,
 not just this one screen.
+
+<img src="docs/screenshots/index-resolve-modal.png" width="560" alt="Resolve ambiguous files dialog: one dropdown per ambiguous file, each listing every same-size library candidate, best guess first">
 
 **The percentage shown is deliberately not Transmission's own
 `percentDone`** - Transmission only counts files it considers "wanted"
@@ -357,6 +364,8 @@ its **Archive** action (see above) - name, size, and when it was archived,
 each with an **Unarchive** button that brings it straight back into the
 Index. Nothing here was ever deleted; archiving only ever hides an entry
 from the main list.
+
+<img src="docs/screenshots/settings-archive.png" width="560" alt="Settings tab's Archive panel: one archived torrent listed with its size, archived-at timestamp, and an Unarchive button">
 
 ## Requirements
 
