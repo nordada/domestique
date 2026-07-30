@@ -118,6 +118,32 @@ test("buildReseedPlan mixes matched/ambiguous/unmatched across a multi-file torr
   assert.equal(plan.unmatchedCount, 1);
 });
 
+test("buildReseedPlan excludes DVD navigation files (.IFO/.BUP/VIDEO_TS.VOB) from both the file list and the match denominator", () => {
+  // The real incident this fixed: a DVD-rip torrent whose 5 real VTS video
+  // files were all correctly filed still showed a permanent "Partial match"
+  // (5 matched of 10 total) because the torrent's 5 .IFO/.BUP nav files can
+  // never be "matched" - fileops.ts never copies them into the library in
+  // the first place. That false partial-match, in turn, made the Index
+  // tab's "Add to Plex library" bulk action offer itself for an
+  // already-fully-filed torrent, and clicking it force-copied duplicates.
+  const meta: TorrentMetainfo = {
+    name: "1985 Giro d'Italia",
+    files: [
+      { relativePath: "1985 Giro d'Italia/VIDEO_TS/VTS_01_1.VOB", length: 100 },
+      { relativePath: "1985 Giro d'Italia/VIDEO_TS/VTS_01_0.IFO", length: 10 },
+      { relativePath: "1985 Giro d'Italia/VIDEO_TS/VTS_01_0.BUP", length: 10 },
+      { relativePath: "1985 Giro d'Italia/VIDEO_TS/VIDEO_TS.VOB", length: 5 },
+      { relativePath: "1985 Giro d'Italia/VIDEO_TS/VIDEO_TS.IFO", length: 5 },
+      { relativePath: "1985 Giro d'Italia/VIDEO_TS/VIDEO_TS.BUP", length: 5 },
+    ],
+  };
+  const index = new Map([[100, ["/library/Giro D'Italia/Season 1985/Giro D'Italia - S1985E01 - pt01.vob"]]]);
+  const plan = buildReseedPlan(meta, index);
+  assert.equal(plan.files.length, 1);
+  assert.equal(plan.matchedCount, 1);
+  assert.equal(plan.matchedCount, plan.files.length);
+});
+
 test("applyManualOverrides promotes an ambiguous file to matched when a recorded pick is one of its own candidates", () => {
   const meta: TorrentMetainfo = { name: "Race", files: [{ relativePath: "Race/stage1.mp4", length: 100 }] };
   const index = new Map([[100, ["/library/a.mp4", "/library/b.mp4"]]]);

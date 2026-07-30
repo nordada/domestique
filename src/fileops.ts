@@ -61,7 +61,7 @@ const VIDEO_EXT_FALLBACK = "mp4";
 // as non-content.
 const DVD_NAVIGATION_EXTENSIONS = new Set(["bup", "ifo"]);
 
-function isDvdNavigationFile(filename: string): boolean {
+export function isDvdNavigationFile(filename: string): boolean {
   const ext = extname(filename).slice(1).toLowerCase();
   if (DVD_NAVIGATION_EXTENSIONS.has(ext)) return true;
   return /^video_ts\.vob$/i.test(filename);

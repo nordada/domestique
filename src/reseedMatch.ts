@@ -19,6 +19,7 @@
 import { basename, dirname } from "node:path";
 import type { TorrentMetainfo } from "./torrentFile.js";
 import { parseName, mergeParsed, type ParsedName } from "./parser.js";
+import { isDvdNavigationFile } from "./fileops.js";
 
 export type FileMatchStatus = "matched" | "ambiguous" | "unmatched";
 
@@ -152,7 +153,18 @@ export function buildReseedPlan(
   meta: Pick<TorrentMetainfo, "name" | "files">,
   sizeIndex: Map<number, string[]>
 ): ReseedPlan {
-  const files = meta.files.map((entry): FileMatch => {
+  // Raw DVD-Video navigation files (.IFO/.BUP/VIDEO_TS.VOB) never get copied
+  // into the library (see fileops.ts's isDvdNavigationFile) and so can never
+  // show up "matched" here - counting them left every DVD-rip torrent stuck
+  // showing a permanent, false "Partial match" even when every real video
+  // part was correctly filed, which in turn made the Index tab's "Add to
+  // Plex library" bulk action offer itself for already-fully-filed torrents
+  // and produced a duplicate "REVIEW - forced" copy when clicked. Excluded
+  // from the plan entirely - same as they never reach the parser in
+  // resolveSourceItems - rather than counted as an unmatchable status.
+  const contentEntries = meta.files.filter((entry) => !isDvdNavigationFile(basename(entry.relativePath)));
+
+  const files = contentEntries.map((entry): FileMatch => {
     // A 0-byte file trivially "matches" every (or no) 0-byte file in the
     // library - neither outcome is meaningful, so it's just materialized
     // directly at staging time (see reseedStage.ts) rather than searched for.
