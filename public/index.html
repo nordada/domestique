@@ -1113,6 +1113,13 @@ function esc(s) {
 const ICON_REFRESH = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 const ICON_CHECK_CIRCLE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+// Recolorable via currentColor (unlike the ❌ emoji, whose red is baked
+// into the glyph itself, not CSS-controllable) - used specifically where a
+// "not matched" state is common/expected rather than alarming (see
+// plexSummary), so it can be dimmed to a plain neutral grey instead of
+// reading as an error on a table where this might be true for hundreds of
+// entries at once.
+const ICON_X_MUTED = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 // "Force file as new version" is a plain labeled checkbox in the bulk
 // action bar now (see #bulk-force-checkbox), not an icon-only button - an
 // unlabeled hammer glyph there read as broken/unclear in practice.
@@ -1947,9 +1954,16 @@ async function loadTorrentIndex() {
  * percentComplete/percentDone are null otherwise), since that's just as
  * worth flagging even though there's nothing to click to "fix" it here.
  */
+/** A torrent that's simply never been filed into Plex at all - no match, but also no ambiguity to review. Deliberately its own category, not part of torrentNeedsAttention below: on a large library this can genuinely be true for hundreds of entries at once (old archived torrents never filed here), which is expected/normal, not something to review one at a time. */
+function torrentMissingFromPlex(t) {
+  return t.plan.matchedCount === 0 && t.plan.ambiguousCount === 0;
+}
+
+/** Genuinely worth a human look: a partial or ambiguous library match (some, but not all, files found; or multiple same-size candidates this app deliberately refused to guess between), a live/on-disk percentage mismatch, an unreclaimed dedupe leftover, or a flagged-dirty integrity check. Deliberately does NOT include a torrent that's simply missing from Plex entirely (see torrentMissingFromPlex above) - that's a separate, much more common condition that doesn't need the same one-at-a-time review treatment. */
 function torrentNeedsAttention(t) {
   return (
-    t.plan.matchedCount < t.plan.files.length ||
+    (t.plan.matchedCount > 0 && t.plan.matchedCount < t.plan.files.length) ||
+    t.plan.ambiguousCount > 0 ||
     (t.inTransmission && Math.abs(t.percentComplete - t.percentDone) > 0.01) ||
     Boolean(t.orphanOriginal) ||
     Boolean(t.lastVerify && !t.lastVerify.clean)
@@ -1988,6 +2002,8 @@ const INDEX_PILLS = [
     predicate: (t) => t.inTransmission && t.status === STATUS_SEEDING, label: (n) => `${n} seeding` },
   { id: "ondisk", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
     predicate: (t) => t.percentComplete === 1, label: (n) => `${n} on disk` },
+  { id: "missing", role: "filter", colorClass: "neutral", display: "count", alwaysShow: false,
+    predicate: torrentMissingFromPlex, label: (n) => `${n} missing from Plex` },
   { id: "attention", role: "filter", colorClass: "err", display: "count", alwaysShow: false,
     predicate: torrentNeedsAttention, label: (n) => `⚠️ ${n} need${n === 1 ? "s" : ""} attention` },
   { id: "deduped", role: "filter", colorClass: "ok", display: "count", alwaysShow: false,
@@ -2072,7 +2088,12 @@ function plexSummary(t) {
   }
   if (t.plan.ambiguousCount > 0) return { icon: "⚠️", title: `${t.plan.ambiguousCount} ambiguous same-size candidate(s) - not guessed` };
   if (t.plan.matchedCount > 0) return { icon: "⚠️", title: `Partial match: ${t.plan.matchedCount}/${t.plan.files.length} file(s)` };
-  return { icon: "❌", title: "No match found in the library" };
+  // Genuinely absent, not ambiguous or partial - grey rather than red,
+  // since on a large library this can easily be true for hundreds of
+  // entries at once (e.g. old archived torrents never filed here), not an
+  // error worth alarming over. See torrentNeedsAttention below for why this
+  // case is also deliberately excluded from the "needs attention" count.
+  return { icon: `<span style="color:var(--border);">${ICON_X_MUTED}</span>`, title: "No match found in the library" };
 }
 
 // Click-header-to-sort, same mechanic as the Events tab's own
