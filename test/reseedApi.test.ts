@@ -982,3 +982,33 @@ test("GET /api/reseed/index syncs new .torrent files from the configured Transmi
     await fs.rm(transmissionTorrentsDir, { recursive: true, force: true });
   }
 });
+
+test("GET /api/reseed/index cleans up legacy name-keyed registry files as part of its own request handling, before correlating against Transmission - reproduces the real 904-vs-634 inflated-count incident", async () => {
+  const { baseUrl, torrentRegistryDir, close } = await makeScratchServer();
+  try {
+    const buf = buildSingleFileTorrent("TdF-2021-Stage-03", 6401256143);
+    const infoHash = parseTorrentFile(buf).infoHash;
+
+    // The legacy name-keyed file, from before the registry became hash-keyed...
+    await fs.mkdir(torrentRegistryDir, { recursive: true });
+    await fs.writeFile(join(torrentRegistryDir, "TdF-2021-Stage-03.torrent"), buf);
+    // ...coexisting with its correctly hash-keyed re-registration of the SAME content.
+    await registerTorrent(infoHash, buf, torrentRegistryDir);
+
+    const res = await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+
+    // Only one entry should be reported - the duplicate is gone, not double-counted.
+    assert.equal(body.torrents.length, 1);
+    assert.equal(body.torrents[0].infoHash, infoHash);
+
+    // The legacy file is actually gone from disk, not just hidden from the response.
+    await assert.rejects(fs.stat(join(torrentRegistryDir, "TdF-2021-Stage-03.torrent")));
+    const entries = await listRegistry(torrentRegistryDir);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].infoHash, infoHash);
+  } finally {
+    await close();
+  }
+});

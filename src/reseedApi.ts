@@ -30,6 +30,7 @@ import { readBody, readBodyBuffer, BodyTooLargeError, TORRENT_BODY_LIMIT_BYTES }
 import { parseTorrentFile } from "./torrentFile.js";
 import { registerTorrent, isRegistered, getRegisteredTorrentBuf } from "./torrentRegistry.js";
 import { syncFromTransmissionTorrentsDir } from "./transmissionTorrentSync.js";
+import { migrateLegacyRegistryEntries } from "./torrentRegistryMigration.js";
 import { buildTorrentIndex } from "./torrentIndex.js";
 import type { ServerOptions } from "./server.js";
 import type { ProcessTorrentDone } from "./upload.js";
@@ -357,13 +358,19 @@ export async function handleReseedRequest(
    * meaningful on its own. The Transmission-torrents-dir sync itself is
    * entirely best-effort (see syncFromTransmissionTorrentsDir's own doc
    * comment) - a failure there never blocks the index from loading with
-   * whatever was already registered.
+   * whatever was already registered. Also runs migrateLegacyRegistryEntries
+   * first (see its own doc comment) to clean up any leftover name-keyed
+   * registry file from before this app's registry became hash-keyed -
+   * otherwise a legacy file and its correctly hash-keyed re-sync sit side
+   * by side and both correlate to the same live Transmission torrent,
+   * double-counting it.
    */
   if (req.method === "GET" && url.pathname === "/api/reseed/index") {
     try {
       const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
       const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
 
+      await migrateLegacyRegistryEntries(opts.torrentRegistryDir);
       await syncFromTransmissionTorrentsDir(opts.transmissionTorrentsDir, opts.torrentRegistryDir);
 
       const { entries, summary } = await buildTorrentIndex({
