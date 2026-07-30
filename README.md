@@ -30,6 +30,11 @@ didn't know held one.
   overwriting or guessing wrong
 - Optionally tells Plex to rescan just the folder that changed, and posts a
   summary of what happened to Discord
+- Also works backwards: the **Torrent Index** tab gives you one unified,
+  filterable view of every torrent it knows about (whether staged through
+  it or already seeding in Transmission), cross-referenced live against
+  your Plex library, with bulk actions to reseed, verify, dedupe, or
+  archive clutter without deleting anything
 
 Runs anywhere Docker does - Unraid, Synology, a bare Linux box, or macOS
 (via Docker Desktop or [Colima](https://github.com/abiosoft/colima)) - the
@@ -161,6 +166,17 @@ Saves are validated the same way a hand-edit of the JSON file would be
 instead of corrupting the file. See [Add a new show](#3-add-a-new-show)
 below for what each field actually means.
 
+**Cover art**: once a show's been saved (reopen it to see this - it's not
+on the initial Add form), a **Logo** section lets you set the image
+Domestique composites into that show's generated Plex poster. Three ways
+to provide one: **Upload logo** (any image file from your own computer),
+**Search Wikipedia** (looks up the race name, falling back to a broader
+Wikimedia Commons search if no Wikipedia article has a usable image - see
+Settings below for the global defaults this composites onto), or **Add
+from URL** (any direct image link). Each show can also **override** the
+global background color/gradient/logo-size defaults for just that one
+poster, via a checkbox in the same section.
+
 ### Torrent Index tab
 
 One unified table of every torrent Domestique has a saved `.torrent` for -
@@ -286,6 +302,19 @@ cosmetic, stored per-server (not per-browser like the theme toggle).
 
 <img src="docs/screenshots/settings-appearance.png" width="560" alt="Appearance section: accent color field with a live swatch preview">
 
+**Cover art:** generates an actual Plex poster (`poster.jpg`) for a show
+once it has an uploaded logo (see the Events tab above) - most niche race
+series aren't recognized by Plex's own metadata agents, so this is how
+they get real artwork instead of a blank placeholder. Purely opt-in per
+show: nothing is generated for a show with no logo. Sets the global
+background color (plus an optional gradient end color - blank uses a
+solid fill) and logo scale every poster uses by default, unless a specific
+show overrides them from its own Events-tab entry. **Regenerate all
+posters** rebuilds every existing poster from these settings - useful
+after changing a color scheme, without re-uploading every logo. These
+colors are independent of the Appearance accent color above (that's this
+web UI's own theme; this is what shows up inside Plex itself).
+
 **Status polling:** how often the header's status icons refresh in the
 background. Lower means more current information, but also more frequent
 requests to Transmission/Plex/your indexer site; the default (20s) is a
@@ -336,6 +365,26 @@ equivalent.
 
 <img src="docs/screenshots/settings-indexer.png" width="560" alt="External indexer settings section: URL and check interval">
 
+**Reseed from library** (also where **Library filing** lives): two
+related settings, both Settings-only with no `.env` equivalent. **File
+mode** controls how a *normal* completed download gets filed - the
+Transmission webhook, hot-folder, upload, and "Add to Plex library" all go
+through this, not just the Reseed tab. "Dual copies" (the default) keeps
+the downloads-share and library files genuinely separate, at the cost of
+double disk space per torrent - the reason the Torrent Index tab's Dedupe
+action exists. "Hardlink" saves that space from the start instead, falling
+back to a real copy (logged, not silent) when the downloads share and
+library are on different filesystems. Below that, the **staging directory
+override** is where the Torrent Index tab's own reseed-from-library
+feature stages files before handing them to Transmission - see [step
+6](#6-optional-the-index-tab-reseed-from-your-plex-library-and-a-unified-torrent-view)
+for the full hardlink-staging mechanics and why the default (a hidden
+folder inside your library root) matters.
+
+**Webhook security** and **Login lockout** below live together under one
+**Security** subtab in the actual UI - same content as documented here,
+just grouped under one heading.
+
 **Webhook security:** `/webhook/torrent-done` (what Transmission's hook
 script calls) has no authentication of its own; it's meant to be reached
 only by that script, trusted implicitly on a LAN. If you ever expose this
@@ -366,6 +415,12 @@ Index. Nothing here was ever deleted; archiving only ever hides an entry
 from the main list.
 
 <img src="docs/screenshots/settings-archive.png" width="560" alt="Settings tab's Archive panel: one archived torrent listed with its size, archived-at timestamp, and an Unarchive button">
+
+**Activity log:** the complete activity history (up to the last 100
+events), including ones already marked as read on the Activity tab -
+nothing gets deleted when you clear or mark an entry read there. The same
+underlying data as the Activity tab's own list, just the full history
+instead of only what's unread.
 
 ## Requirements
 
@@ -409,9 +464,17 @@ from the main list.
 1. Transmission finishes a download and runs `scripts/torrent-done.sh`
    (installed wherever Transmission itself runs), which POSTs the torrent's
    dir/name/id/hash as JSON to this app's `/webhook/torrent-done` endpoint.
-2. The app parses the raw name (`src/parser.ts`) to pull out year, stage
-   number, part number, gender/age/discipline category hints, and
-   highlights/presentation flags.
+2. For a multi-file download, it walks the torrent's folder recursively
+   (arbitrarily nested subfolders, not just a single level), skipping known
+   non-content files as it goes - DVD navigation/recorder metadata, and
+   generic scene-release companions like `.nfo`/`.srt`/`.sfv` (see
+   `src/fileops.ts`'s `isNonContentFile`) - so they never get archived as
+   bogus episodes or counted against a match. Each real file's name is
+   parsed (`src/parser.ts`) merged with every ancestor folder's name (most
+   specific wins) to pull out year, stage/part number, category hints, and
+   highlights/presentation flags - useful when that signal lives on a
+   folder name rather than the leaf filename itself (e.g. a year-per-folder
+   archive).
 3. It matches those tokens against `config/events.json` (`src/matcher.ts`) to
    find the right show. If nothing matches, it **auto-creates** a best-effort
    entry (title-cased from the leftover tokens, filed as a one-day race) and
@@ -624,8 +687,8 @@ rebuild needed. Minimal example:
 (hot-folder, Discord) is also editable live afterward via the web UI's
 Settings panel** (see step 8) - no container restart needed. (The reseed
 feature in between, step 6, has no `.env` equivalent at all - it's
-Settings-only, same as Transmission/indexer below.) The env vars below are
-a **one-time seed only**: the first time `config/settings.json` doesn't
+Settings-only, same as Transmission/indexer/Cover art below.) The env vars
+below are a **one-time seed only**: the first time `config/settings.json` doesn't
 exist yet, it's created from whatever's set in `.env`; after that the file
 is authoritative
 and these env vars are ignored on every later boot. Delete
@@ -1001,6 +1064,18 @@ combined with others (they AND together, so "seeding" plus "in Plex" shows
 only rows matching both). Click "total" to clear every active pill filter
 at once.
 
+**A torrent shows "Partial match" but "Add to Plex library" doesn't change anything - not even an error, it just... doesn't help.**
+Check whether that torrent's actually been downloaded (its "On disk"
+percentage). A "match" only means some library file happens to share a
+torrent file's exact byte size - completely independent of whether *this*
+torrent's own data has ever touched disk. A torrent sitting at 0%, paused,
+can coincidentally "partial match" a totally different, older release of
+the same content by size alone, with nothing real available to file yet.
+Domestique already accounts for this (a 0%-downloaded partial match
+doesn't count toward "needs attention," and "Add to Plex library" won't
+even offer itself for one) - if you're seeing this on a torrent that *has*
+actually downloaded, that's a genuine gap worth reporting.
+
 ## Known limitations / assumptions (check these against reality as you go)
 
 - **UCI XCC/XCO World Cup** isn't in `config/events.json` yet - it wasn't in
@@ -1051,20 +1126,48 @@ at once.
   different broadcaster releases for a Nationals-type show - narrow enough
   that it's left as a known gap rather than adding more regex complexity.
 - **Reseed matching starts from exact file size only** - it never hashes
-  file content itself. When more than one library file shares a torrent
-  file's exact byte size, a second pass scores each candidate by how well
-  its filename lines up with the torrent's own (stage/episode/part/disc
-  number, year, broadcaster, resolution, and general token overlap - see
-  `src/reseedMatch.ts`'s `scoreCandidate`) and auto-resolves a clear winner;
-  anything short of a clear winner stays "ambiguous," with candidates still
-  ranked best-guess-first for the Index tab's **Resolve** picker (click the
-  Plex-column icon on an ambiguous row) to default sensibly. A resolved-via-
-  guess match shows a 🔍 instead of a plain ✅ in that column, since it's
-  only as good as this scoring until the torrent is next staged or deduped -
-  the real correctness check is still Transmission's own piece-hash verify
-  after Stage & hand off (or Dedupe), not this matching step, and a wrong
-  guess is caught there (left paused for review on Stage, auto-reverted on
-  Dedupe) rather than silently trusted.
+  file content itself. Before scoring, any candidate that shares zero
+  "identity" token with the torrent (after stripping quality/season/part
+  noise and structural remnants like a bare `s`/`e01`/`pt01` - see
+  `src/reseedMatch.ts`'s `identityTokens`/`isStructuralRemnant`) is excluded
+  outright, not just scored lower - this is what stops a same-size file from
+  an unrelated race (e.g. a Giro stage coincidentally matching a Tour de
+  France file's byte size) from ever being offered as a candidate. When more
+  than one library file both shares a torrent file's exact byte size *and*
+  passes that identity gate, a second pass scores each remaining candidate by
+  how well its filename lines up with the torrent's own (stage/episode/part/
+  disc number, year, broadcaster, resolution, and general token overlap - see
+  `scoreCandidate`) and auto-resolves a clear winner; anything short of a
+  clear winner stays "ambiguous," with candidates still ranked best-guess-
+  first for the Index tab's **Resolve** picker (click the Plex-column icon on
+  an ambiguous row) to default sensibly. A resolved-via-guess match shows a
+  🔍 instead of a plain ✅ in that column, since it's only as good as this
+  scoring until the torrent is next staged or deduped - the real correctness
+  check is still Transmission's own piece-hash verify after Stage & hand off
+  (or Dedupe), not this matching step, and a wrong guess is caught there
+  (left paused for review on Stage, auto-reverted on Dedupe) rather than
+  silently trusted.
+- **Non-content-file recognition is a fixed, curated list** (DVD navigation
+  files, DVD-recorder housekeeping files, and generic scene-release
+  companions like `.nfo`/`.srt`/`.ssp` - see `src/fileops.ts`'s
+  `isNonContentFile`) - a file extension or filename that isn't in that list
+  is treated as real content, which means an unrecognized companion file
+  could still get counted as a "file" for match-total purposes. Add new
+  extensions/filenames to that list as odd tracker releases turn them up.
+- **The recursive subfolder walk skips a fixed, curated list of junk folder
+  names** (Sample/Extras/Subs/Screens/Proof and similar - see
+  `src/fileops.ts`'s `JUNK_FOLDER_NAMES`), capped at 8 levels deep. A
+  differently-named junk folder won't be recognized and its contents will be
+  walked and parsed like any other subfolder.
+- **A bare trailing number with no recognized keyword is still a gap** - the
+  part-number fallbacks (`Part`, `Disc`, `CD`, `Week`/`Tape`/`Day`, `#N`,
+  bare `NofM`, `VTS_NN_MM`) all require some keyword or established pattern
+  next to the number. A release split as e.g. `File.1`/`File.2` with no
+  keyword at all, or numbered with Roman numerals (`I`/`II`/`III`), still
+  parses to an identical show/episode identity for every part - only the
+  first can be filed automatically, the rest need a manual **Force** (via
+  "Add to Plex library" on the Index tab, then deleting the resulting
+  duplicate if Plex mis-sorts it) until a matching convention is added.
 - **BitTorrent v2-only torrents** (the newer "file tree" layout, BEP 52)
   aren't supported by the reseed feature - they're rejected outright with a
   clear error rather than silently mis-parsed. Hybrid v1+v2 torrents work
@@ -1136,10 +1239,13 @@ Some deliberate design choices, since this can end up handling a torrent
 webhook and (optionally) sitting behind a public domain. None of this is a
 guarantee, just the posture the code is built around:
 
-- **No runtime dependencies.** The server is built entirely on Node's
-  standard library; the production image installs zero third-party
-  packages (`package.json` has an empty `dependencies`). There is almost
-  no supply-chain surface to compromise.
+- **One runtime dependency, deliberately.** The server itself is built
+  entirely on Node's standard library. The only third-party package is
+  [`sharp`](https://sharp.pixelplumbing.com/), used solely by the Cover art
+  feature to normalize uploaded logos and composite Plex posters - if that
+  feature is never used, that code path is never exercised. Everything
+  else (routing, matching, parsing, Transmission/Plex API calls) has zero
+  supply-chain surface to compromise.
 - **Nothing shells out.** There is no `child_process` use anywhere, so
   there is no command-injection surface, even though release names and
   paths flow through the whole pipeline.
@@ -1234,14 +1340,21 @@ npm install
 npm test
 ```
 
+37 test files, no mocking of the filesystem or network - everything runs
+against real scratch directories and an in-process HTTP server.
 `test/fixtures.ts` holds real torrent/download names gathered from this
 library while designing the tool; `parser.test.ts`, `matcher.test.ts`, and
-`namer.test.ts` exercise the pipeline against them, including the exact
-Tour de France / World Championships / Nationals destination examples this
-tool was built to reproduce. `fileops.test.ts` covers the resolution-aware
-copy/skip/review-upgrade behavior and the broadcaster-based alternate-version
-logic (including multi-part alternates) against real scratch directories (no
-mocking of the filesystem).
+`namer.test.ts` exercise the ingest pipeline against them, including the
+exact Tour de France / World Championships / Nationals destination examples
+this tool was built to reproduce. `fileops.test.ts` covers the
+resolution-aware copy/skip/review-upgrade behavior, the broadcaster-based
+alternate-version logic, and non-content-file/junk-folder handling during
+the recursive subfolder walk. `reseedMatch.test.ts` and `dedupe.test.ts`
+cover the Index tab's reseed matching (including the race-identity gate)
+and dedupe workflow; `archiveState.test.ts` and `torrentIndex.test.ts`
+cover the Archive feature; `coverArt.test.ts` covers poster generation; and
+`reseedApi.test.ts`/`server.test.ts`/`webui.test.ts` exercise the web API
+and UI surface end to end.
 
 For an end-to-end check without touching real data: `docker compose up
 --build`, then `curl` the webhook directly:
@@ -1254,11 +1367,14 @@ curl -X POST http://localhost:8420/webhook/torrent-done \
 
 ## Development
 
-`package.json`'s version bumps automatically on every commit (`0.1.001`,
-`0.1.002`, ...) via a pre-commit hook at `.githooks/pre-commit`, shown in the
-web UI's footer. It's baked into `package.json` rather than computed from git
-history at runtime because the deployed copy on TOWER excludes `.git`
-entirely. A fresh clone needs to opt into it once:
+`package.json`'s version bumps automatically on every commit
+(`0.2.173`, `0.2.174`, ...) via a pre-commit hook at
+`.githooks/pre-commit`, shown in the web UI's footer. The patch digit is
+the running total commit count - it never resets, even across a middle-digit
+bump - so it's a rough age/activity indicator, not a SemVer-style release
+count. It's baked into `package.json` rather than computed from git history
+at runtime because the deployed copy on TOWER excludes `.git` entirely. A
+fresh clone needs to opt into it once:
 
 ```
 git config core.hooksPath .githooks
