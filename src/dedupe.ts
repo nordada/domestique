@@ -16,14 +16,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { rm, copyFile, mkdir } from "node:fs/promises";
+import { join, dirname, basename } from "node:path";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan, applyManualOverrides, type ReseedPlan } from "./reseedMatch.js";
 import { getManualMatches } from "./matchOverrides.js";
 import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
 import { computePercentComplete } from "./seeding.js";
-import { isPathWithin } from "./fileops.js";
+import { isPathWithin, isDvdNavigationFile } from "./fileops.js";
 import {
   getAllTorrentsWithFiles,
   setTorrentLocation,
@@ -64,6 +64,21 @@ function isCleanVerify(verify: TorrentVerifyResult | null): verify is TorrentVer
  * <torrentName>/` convention commitReseed uses, repoints Transmission at
  * that directory, and forces a real hash verify - never trusting this
  * app's own size-only matching alone, same philosophy as reseed.ts.
+ *
+ * Also copies along any DVD navigation/recorder-metadata files (see
+ * fileops.ts's isDvdNavigationFile) that `plan.files` deliberately excludes
+ * from matching - they're real files Transmission's torrent still declares
+ * and will check on verify, even though reseedMatch.ts is right to never
+ * expect a library match for them (a Plex library never contains them).
+ * Copied (not hardlinked - there's no library counterpart to link to) from
+ * the torrent's OWN pre-dedupe download location, which is still exactly
+ * where they already are at this point. Real incident this fixed: a
+ * torrent with real content fully matched (VIDEO_TS's VTS_NN_MM.VOB parts)
+ * alongside a VIDEO_RM housekeeping folder passed the full-match gate below
+ * (correctly, per the fix that excluded VIDEO_RM from the denominator) but
+ * then failed verify outright - the staging dir had the real video staged
+ * but was simply missing the (tiny, harmless) nav files Transmission still
+ * expected, so every attempt reverted instead of ever completing.
  *
  * Unlike commitReseed, there's no `.torrent` file to work from here (this
  * torrent arrived via autobrr, not a manual reseed upload), so this always
@@ -142,6 +157,25 @@ export async function commitDedupe(
 
   const perTorrentDir = await prepareStagingDir(requestedDir);
   const stagedFiles = await stageMatchedFiles(plan, perTorrentDir);
+
+  // Bring along whatever reseedMatch.ts excluded from plan.files entirely
+  // (see this function's own doc comment) - real files Transmission still
+  // expects to find, even though they were correctly never matching
+  // material. Best-effort: a copy failure here just means the following
+  // verify legitimately comes back incomplete and the existing revert path
+  // below handles it exactly like any other unlucky verify failure, rather
+  // than throwing and aborting the whole dedupe attempt over what's always
+  // a tiny, non-essential file.
+  for (const f of torrent.files) {
+    if (!isDvdNavigationFile(basename(f.name))) continue;
+    try {
+      const destPath = join(perTorrentDir, f.name);
+      await mkdir(dirname(destPath), { recursive: true });
+      await copyFile(join(torrent.downloadDir, f.name), destPath);
+    } catch (err) {
+      console.warn(`[dedupe] failed to carry along navigation file "${f.name}" for "${torrent.name}": ${err}`);
+    }
+  }
 
   await setTorrentLocation(transmissionConfig, id, perTorrentDir);
   await verifyTorrent(transmissionConfig, id);

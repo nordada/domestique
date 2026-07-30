@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, writeFile, stat, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, mkdir, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitDedupe } from "../src/dedupe.js";
@@ -97,6 +97,70 @@ test("commitDedupe hardlinks the matched library file, repoints Transmission the
       const stagedPath = join(result.perTorrentDir, "Milan-San-Remo-2026-SBS.mp4");
       const [stagedStat, libraryStat] = await Promise.all([stat(stagedPath), stat(libraryFile)]);
       assert.equal(stagedStat.ino, libraryStat.ino);
+    } finally {
+      await close();
+    }
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadsRoot, { recursive: true, force: true });
+  }
+});
+
+test("commitDedupe carries along DVD navigation files reseedMatch.ts excludes from the plan, so Transmission's verify finds the complete file set", async () => {
+  // Real incident: a torrent with real content fully matched (VIDEO_TS's
+  // VTS_NN_MM.VOB) alongside excluded DVD-nav files (VIDEO_TS.BUP here)
+  // passed the full-match gate (correctly - see reseedMatch.ts's
+  // isDvdNavigationFile exclusion) but then failed verify outright, because
+  // the staging dir had the real video staged but was simply missing the
+  // nav file Transmission's torrent still declares and checks on verify.
+  const { libraryRoot, stagingRoot, downloadsRoot, overridesPath } = await makeLibrary();
+  try {
+    const libraryFile = join(libraryRoot, "Giro D'Italia - S1985E01 - pt01.vob");
+    await writeFile(libraryFile, Buffer.alloc(1000));
+
+    const torrentFolder = join(downloadsRoot, "1985 Giro d'Italia", "VIDEO_TS");
+    await mkdir(torrentFolder, { recursive: true });
+    await writeFile(join(torrentFolder, "VTS_01_1.VOB"), Buffer.alloc(1000));
+    const navContent = Buffer.from("dvd navigation metadata, not real video");
+    await writeFile(join(torrentFolder, "VIDEO_TS.BUP"), navContent);
+
+    const { url, close } = await startFakeTransmissionRpc((method, args) => {
+      if (method === "torrent-get") {
+        if (args?.ids === undefined) {
+          return {
+            torrents: [
+              {
+                id: 11,
+                name: "1985 Giro d'Italia",
+                hashString: "hash11",
+                status: 6,
+                percentDone: 1,
+                downloadDir: downloadsRoot,
+                files: [
+                  { name: "1985 Giro d'Italia/VIDEO_TS/VTS_01_1.VOB", length: 1000, bytesCompleted: 1000 },
+                  { name: "1985 Giro d'Italia/VIDEO_TS/VIDEO_TS.BUP", length: navContent.length, bytesCompleted: navContent.length },
+                ],
+              },
+            ],
+          };
+        }
+        return { torrents: [{ id: 11, status: 6, error: 0, errorString: "", percentDone: 1 }] };
+      }
+      return {};
+    });
+    try {
+      const result = await commitDedupe(11, libraryRoot, stagingRoot, { url }, overridesPath);
+      assert.equal(result.staged, true);
+      assert.equal(result.reverted, false);
+      assert.equal(result.plan.files.length, 1, "the nav file never appears in the plan at all");
+
+      const stagedVob = join(result.perTorrentDir, "1985 Giro d'Italia/VIDEO_TS/VTS_01_1.VOB");
+      const [stagedStat, libraryStat] = await Promise.all([stat(stagedVob), stat(libraryFile)]);
+      assert.equal(stagedStat.ino, libraryStat.ino);
+
+      const stagedNav = join(result.perTorrentDir, "1985 Giro d'Italia/VIDEO_TS/VIDEO_TS.BUP");
+      const copiedContent = await readFile(stagedNav);
+      assert.deepEqual(copiedContent, navContent);
     } finally {
       await close();
     }
