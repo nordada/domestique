@@ -673,6 +673,57 @@ test("POST /api/reseed/dedupe refuses a torrent that isn't a full match, with no
   }
 });
 
+test("POST /api/reseed/dedupe refuses a torrent that isn't fully downloaded yet, with a message distinct from the no-full-match case", async () => {
+  const downloadsDir = await fs.mkdtemp(join(tmpdir(), "domestique-reseedapi-downloads-"));
+  const { baseUrl, libraryRoot, settingsPath, activityPath, close: closeApp } = await makeScratchServer(downloadsDir);
+  await fs.writeFile(join(libraryRoot, "Partial - S2026E01.mp4"), Buffer.alloc(1000));
+  const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method, args) => {
+    if (method === "torrent-get" && args?.ids === undefined) {
+      return {
+        torrents: [
+          {
+            id: 9,
+            name: "Partial-2026.mp4",
+            status: 6,
+            percentDone: 1,
+            downloadDir: downloadsDir,
+            // Fully matches the library by declared size, but not actually
+            // finished downloading yet.
+            files: [{ name: "Partial-2026.mp4", length: 1000, bytesCompleted: 300 }],
+          },
+        ],
+      };
+    }
+    return {};
+  });
+  try {
+    const current = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify({ ...current, transmission: { url: transmissionUrl } }) + "\n",
+      "utf-8"
+    );
+    const res = await fetch(`${baseUrl}/api/reseed/dedupe`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 9 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.staged, false);
+    assert.equal(body.result.reverted, false);
+    assert.equal(body.result.refusedReason, "incomplete");
+
+    const activity = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activity[0].reviewWorthy, true);
+    assert.match(activity[0].lines.join("\n"), /isn't fully downloaded yet/);
+  } finally {
+    await closeApp();
+    await closeTransmission();
+    await fs.rm(downloadsDir, { recursive: true, force: true });
+  }
+});
+
 test("POST /api/reseed/delete-original rejects a body without dir/name", async () => {
   const { baseUrl, close } = await makeScratchServer();
   try {

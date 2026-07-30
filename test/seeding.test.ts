@@ -65,6 +65,27 @@ test("computeStorageStatus: 'duplicate' when the on-disk file is a separate file
   }
 });
 
+test("computeStorageStatus: 'n/a', not 'duplicate', for a torrent that isn't fully downloaded yet - real bug this closes: a still-downloading torrent has nothing hardlinked, so it fell into 'duplicate' by default and incorrectly offered Dedupe", async () => {
+  const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-lib-"));
+  const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));
+  try {
+    const libFile = join(libraryRoot, "Partial - S2026E01.mp4");
+    await writeFile(libFile, Buffer.alloc(1000));
+    // A separate (not hardlinked) file sitting at the expected on-disk path,
+    // same as any genuine duplicate - the only difference is the caller
+    // reports this torrent isn't fully downloaded yet.
+    await writeFile(join(downloadDir, "Partial.mp4"), Buffer.alloc(1000));
+
+    const plan = matchedPlan("Partial.mp4", [{ relativePath: "Partial.mp4", length: 1000, candidate: libFile }]);
+    assert.equal(await computeStorageStatus(plan, downloadDir, 0.42), "n/a");
+    // The default (omitted) percentComplete still means "assume complete" - existing callers/tests are unaffected.
+    assert.equal(await computeStorageStatus(plan, downloadDir), "duplicate");
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadDir, { recursive: true, force: true });
+  }
+});
+
 test("computeStorageStatus: 'mixed' for a multi-file torrent where only some files are hardlinked", async () => {
   const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-seeding-lib-"));
   const downloadDir = await mkdtemp(join(tmpdir(), "domestique-seeding-dl-"));

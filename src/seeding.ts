@@ -65,9 +65,26 @@ export function computePercentComplete(files: { length: number; bytesCompleted: 
  * percentComplete mismatch note) is conservatively treated as NOT deduped
  * rather than silently skipped, since claiming "deduped" is a safety-
  * relevant claim this app should never get wrong optimistically.
+ *
+ * Refuses to classify anything for a torrent that isn't fully downloaded
+ * yet (`percentComplete`, from computePercentComplete above - defaults to 1
+ * so existing callers/tests that don't care about completeness are
+ * unaffected). Real bug this closes: a partially-downloaded torrent's
+ * on-disk bytes are never hardlinked to the library (there's nothing to
+ * hardlink until the download finishes), so without this check every
+ * still-downloading torrent fell into "duplicate" by default - showing a
+ * "full copy, Dedupe would reclaim this disk space" claim that was flatly
+ * untrue, and offering Dedupe as an action that would have silently
+ * abandoned whatever fraction was genuinely downloading in favor of the
+ * library's already-complete copy.
  */
-export async function computeStorageStatus(plan: ReseedPlan, downloadDir: string): Promise<StorageStatus> {
+export async function computeStorageStatus(
+  plan: ReseedPlan,
+  downloadDir: string,
+  percentComplete: number = 1
+): Promise<StorageStatus> {
   if (plan.matchedCount !== plan.files.length) return "n/a";
+  if (percentComplete < 1) return "n/a";
 
   let anyDeduped = false;
   let anyDuplicate = false;

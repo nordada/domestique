@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { buildSizeIndex } from "./libraryIndex.js";
 import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
 import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
+import { computePercentComplete } from "./seeding.js";
 import { isPathWithin } from "./fileops.js";
 import {
   getAllTorrentsWithFiles,
@@ -46,6 +47,8 @@ export interface DedupeResult {
   /** Where Transmission had this torrent's data before this call - only meaningful once `staged` is true, since that's the one case where the caller needs it (to offer deleting the now-orphaned original download-folder copy). */
   originalLocation?: TorrentOriginalLocation;
   verify: TorrentVerifyResult | null;
+  /** Set only when staged and reverted are both false - why nothing was attempted, so the caller can report something more useful than a generic refusal. */
+  refusedReason?: "incomplete" | "no-full-match";
 }
 
 function isCleanVerify(verify: TorrentVerifyResult | null): verify is TorrentVerifyResult {
@@ -99,7 +102,18 @@ export async function commitDedupe(
   );
 
   if (plan.matchedCount !== plan.files.length) {
-    return { staged: false, reverted: false, plan, stagedFiles: [], perTorrentDir: "", verify: null };
+    return { staged: false, reverted: false, plan, stagedFiles: [], perTorrentDir: "", verify: null, refusedReason: "no-full-match" };
+  }
+
+  // Never trust the client's cached storageStatus - re-derive this ground
+  // truth right before acting, same posture as the matchedCount check
+  // above. A torrent that isn't fully downloaded yet has nothing hardlinked
+  // (there's nothing complete to compare), so it always looks like a
+  // "duplicate" by default - refusing here is what stops Dedupe from
+  // silently abandoning a still-downloading torrent's real progress in
+  // favor of the library's already-complete copy.
+  if (computePercentComplete(torrent.files) < 1) {
+    return { staged: false, reverted: false, plan, stagedFiles: [], perTorrentDir: "", verify: null, refusedReason: "incomplete" };
   }
 
   const requestedDir = join(stagingRoot, plan.torrentName);

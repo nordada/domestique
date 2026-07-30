@@ -128,7 +128,53 @@ test("commitDedupe refuses a torrent that isn't a full, unambiguous match - no f
       const result = await commitDedupe(3, libraryRoot, stagingRoot, { url });
       assert.equal(result.staged, false);
       assert.equal(result.reverted, false);
+      assert.equal(result.refusedReason, "no-full-match");
       assert.equal(result.plan.matchedCount, 0);
+
+      // Only the initial torrent-get - never touched location/verify/staging.
+      assert.deepEqual(calls, ["torrent-get"]);
+      await assert.rejects(() => stat(stagingRoot));
+    } finally {
+      await close();
+    }
+  } finally {
+    await rm(libraryRoot, { recursive: true, force: true });
+    await rm(downloadsRoot, { recursive: true, force: true });
+  }
+});
+
+test("commitDedupe refuses a torrent that isn't fully downloaded yet, even though it's a full library match - no filesystem or Transmission side effects, never abandons a still-downloading torrent's real progress for the library's already-complete copy", async () => {
+  const { libraryRoot, stagingRoot, downloadsRoot } = await makeLibrary();
+  try {
+    await writeFile(join(libraryRoot, "Partial - S2026E01.mp4"), Buffer.alloc(1000));
+
+    const calls: string[] = [];
+    const { url, close } = await startFakeTransmissionRpc((method, args) => {
+      calls.push(method);
+      if (method === "torrent-get" && args?.ids === undefined) {
+        return {
+          torrents: [
+            {
+              id: 5,
+              name: "Partial-2026.mp4",
+              status: 6,
+              percentDone: 1,
+              downloadDir: downloadsRoot,
+              // Fully matches the library by declared size, but only 420 of
+              // the real 1000 bytes are actually on disk - not done yet.
+              files: [{ name: "Partial-2026.mp4", length: 1000, bytesCompleted: 420 }],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    try {
+      const result = await commitDedupe(5, libraryRoot, stagingRoot, { url });
+      assert.equal(result.staged, false);
+      assert.equal(result.reverted, false);
+      assert.equal(result.refusedReason, "incomplete");
+      assert.equal(result.plan.matchedCount, 1); // it IS a real library match - that's not why this refused
 
       // Only the initial torrent-get - never touched location/verify/staging.
       assert.deepEqual(calls, ["torrent-get"]);

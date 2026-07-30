@@ -303,7 +303,9 @@ export async function handleReseedRequest(
       const lines: string[] = [];
       if (!result.staged && !result.reverted) {
         lines.push(
-          `⚠️ "${result.plan.torrentName}" isn't a full, unambiguous match against the library - refusing to dedupe.`
+          result.refusedReason === "incomplete"
+            ? `⚠️ "${result.plan.torrentName}" isn't fully downloaded yet - refusing to dedupe.`
+            : `⚠️ "${result.plan.torrentName}" isn't a full, unambiguous match against the library - refusing to dedupe.`
         );
       } else if (result.staged) {
         lines.push(`🔗 deduped "${result.plan.torrentName}" - Transmission verified 100% against the library copy.`);

@@ -137,7 +137,8 @@ export async function buildTorrentIndex(
         };
       }
 
-      const storageStatus = await computeStorageStatus(plan, live.downloadDir);
+      const percentComplete = computePercentComplete(live.files);
+      const storageStatus = await computeStorageStatus(plan, live.downloadDir, percentComplete);
       return {
         infoHash: regEntry.infoHash,
         torrentName: meta.name,
@@ -149,7 +150,7 @@ export async function buildTorrentIndex(
         transmissionId: live.id,
         status: live.status,
         percentDone: live.percentDone,
-        percentComplete: computePercentComplete(live.files),
+        percentComplete,
         storageStatus,
         orphanOriginal:
           storageStatus === "deduped" ? await findOrphanOriginal(plan, opts.downloadsPath, opts.dedupeStatePath) : null,
