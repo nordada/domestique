@@ -129,17 +129,57 @@ export function isNonContentFile(filename: string): boolean {
   return /^video_ts\.vob$/i.test(filename);
 }
 
+// Folder names never worth recursing into - real incident this guards
+// against: a naive general-recursive walk (see resolveSourceItems below)
+// would otherwise vacuum up a low-quality preview clip sitting in a
+// "Sample" folder, or a screenshot in "Proof", as if it were real episode
+// content. Exact (case-insensitive) name match, not a substring test - a
+// real release folder like "1999.Giro.d'Italia.WCP.VHS.rip" doesn't
+// collide with any of these.
+const JUNK_FOLDER_NAMES = new Set(["sample", "samples", "extra", "extras", "subs", "subtitles", "screens", "screenshots", "proof"]);
+
+// Safety net against a pathological/adversarial directory tree, not a
+// limit expected to ever actually bind on a real release - nothing
+// evidenced in this app's real usage nests anywhere close to this deep.
+const MAX_WALK_DEPTH = 8;
+
+interface WalkedFile {
+  name: string;
+  dir: string;
+  /** Subfolder names from the torrent's own top-level folder down to this file's immediate parent, root-first - see resolveSourceItems' doc comment on how these fold into parsing. */
+  ancestorNames: string[];
+}
+
+async function walkForFiles(dir: string, ancestorNames: string[], depth: number): Promise<WalkedFile[]> {
+  if (depth > MAX_WALK_DEPTH) return [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files: WalkedFile[] = entries.filter((e) => e.isFile()).map((e) => ({ name: e.name, dir, ancestorNames }));
+  for (const entry of entries) {
+    if (!entry.isDirectory() || JUNK_FOLDER_NAMES.has(entry.name.toLowerCase())) continue;
+    files.push(...(await walkForFiles(join(dir, entry.name), [...ancestorNames, entry.name], depth + 1)));
+  }
+  return files;
+}
+
 /**
  * Given the directory Transmission downloaded into and the torrent's name,
  * figures out whether it's a single file or a folder of files, and returns
- * one SourceItem per file to archive. For folders, each file is parsed using
- * its own name merged with the folder's name (see parser.mergeParsed) since
- * part/stage info lives on the individual filenames in this library.
- * Non-content files (see isNonContentFile - DVD navigation/recorder
- * metadata, generic scene-release companion files) are skipped entirely,
- * never even reaching the parser. A "VIDEO_TS" subfolder, if present, is
- * folded in alongside the top level's own files - otherwise this is
- * single-level only, deliberately not a general recursive walk.
+ * one SourceItem per file to archive. For folders, each file is parsed by
+ * merging its own name with every ancestor subfolder's name plus the
+ * torrent's own top-level name (see parser.mergeParsed), root-to-leaf, most
+ * specific (the file's own name) always winning - since part/stage/year
+ * info can live on any of those, not just the immediate filename (a real
+ * incident this fixed: "Giro di Italia/Giro di Italia 1999/1999...WCP.VHS.
+ * rip/1999...Tape.1.avi" needs its year from the middle folder names, not
+ * the top-level torrent name alone). A genuine recursive walk (capped at
+ * MAX_WALK_DEPTH, skipping known-junk folder names like "Sample" - see
+ * above) rather than the single-level-plus-one-special-cased-"VIDEO_TS"-
+ * folder scan this used to be: real content in the wild routinely sits
+ * nested under arbitrarily-named subfolders (year folders, per-disc
+ * release folders), not just that one DVD-spec-defined name. Non-content
+ * files (see isNonContentFile - DVD navigation/recorder metadata, generic
+ * scene-release companion files) are skipped entirely, never even reaching
+ * the parser, regardless of which folder they're found in.
  */
 export async function resolveSourceItems(
   torrentDir: string,
@@ -155,38 +195,21 @@ export async function resolveSourceItems(
   }
 
   const folderParsed = parseName(torrentName);
-  const topEntries = await fs.readdir(topLevelPath, { withFileTypes: true });
-  const fileEntries: { name: string; dir: string }[] = topEntries
-    .filter((e) => e.isFile())
-    .map((e) => ({ name: e.name, dir: topLevelPath }));
-
-  // Some DVD-rip releases keep the standard DVD-Video folder layout - a
-  // "VIDEO_TS" subfolder holding the navigation/video files - rather than
-  // flattening them straight into the release folder (both shapes show up
-  // in the wild for the exact same kind of release). Folded in alongside
-  // whatever's already at the top level, not instead of it, so a stray nfo/
-  // poster sitting next to a real VIDEO_TS folder still gets picked up too.
-  // Only this one well-defined DVD-spec folder name is special-cased -
-  // deliberately not a general recursive-subfolder walk, which would be a
-  // much bigger change than anything evidenced so far.
-  const videoTsDir = topEntries.find((e) => e.isDirectory() && e.name.toUpperCase() === "VIDEO_TS");
-  if (videoTsDir) {
-    const videoTsPath = join(topLevelPath, videoTsDir.name);
-    const videoTsEntries = await fs.readdir(videoTsPath, { withFileTypes: true });
-    fileEntries.push(...videoTsEntries.filter((e) => e.isFile()).map((e) => ({ name: e.name, dir: videoTsPath })));
-  }
+  const fileEntries = await walkForFiles(topLevelPath, [], 0);
 
   const items: SourceItem[] = [];
-  for (const { name, dir } of fileEntries) {
+  for (const { name, dir, ancestorNames } of fileEntries) {
     if (isNonContentFile(name)) continue;
     const ext = extname(name).slice(1).toLowerCase() || VIDEO_EXT_FALLBACK;
     const nameNoExt = basename(name, extname(name));
-    const fileParsed = parseName(nameNoExt);
-    items.push({
-      sourceFile: join(dir, name),
-      parsed: mergeParsed(folderParsed, fileParsed),
-      ext,
-    });
+
+    let parsed = folderParsed;
+    for (const ancestorName of ancestorNames) {
+      parsed = mergeParsed(parsed, parseName(ancestorName));
+    }
+    parsed = mergeParsed(parsed, parseName(nameNoExt));
+
+    items.push({ sourceFile: join(dir, name), parsed, ext });
   }
   return items;
 }

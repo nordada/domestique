@@ -85,6 +85,41 @@ test("resolveSourceItems skips generic non-video companion files (.nfo/.srt/.ssp
   assert.equal(items[0].sourceFile.split("/").pop(), "TdF-2019-Stage-17-(ESHD)-Part-3-of-4.mp4");
 });
 
+test("resolveSourceItems recurses into arbitrarily-named nested subfolders, merging each ancestor folder's own name into parsing", async () => {
+  // Real incident, found live in the user's own library: "Giro di Italia"
+  // organizes every year's content into its own subfolder ("Giro di Italia
+  // 1999/"), sometimes with a further release-folder nested inside that
+  // ("1999.Giro.d'Italia.WCP.VHS.rip/") - none of these are "VIDEO_TS", so
+  // the old single-level-plus-one-special-case scan found ZERO files for
+  // this entire torrent. "Add to Plex library" reported success (nothing to
+  // do isn't an error) while silently filing nothing at all, every time.
+  // The filename here deliberately carries NO year itself, so this only
+  // passes if the year is genuinely picked up from an ancestor folder name,
+  // not just coincidentally already present in the leaf filename.
+  const { sourceDir } = await makeScratch();
+  const nested = join(sourceDir, "Giro di Italia", "Giro di Italia 1999", "1999.Giro.d'Italia.WCP.VHS.rip");
+  await fs.mkdir(nested, { recursive: true });
+  await fs.writeFile(join(nested, "Tape1.avi"), "real video");
+
+  const items = await resolveSourceItems(sourceDir, "Giro di Italia");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sourceFile.split("/").pop(), "Tape1.avi");
+  assert.equal(items[0].parsed.year, 1999);
+  assert.equal(items[0].parsed.yearWasExplicit, true);
+});
+
+test("resolveSourceItems does not recurse into known-junk folder names (Sample/Extras/etc)", async () => {
+  const { sourceDir } = await makeScratch();
+  const folder = join(sourceDir, "Race-2026");
+  await fs.mkdir(join(folder, "Sample"), { recursive: true });
+  await fs.writeFile(join(folder, "Sample", "race-sample.mp4"), "not real content");
+  await fs.writeFile(join(folder, "Race-2026.mp4"), "real video");
+
+  const items = await resolveSourceItems(sourceDir, "Race-2026");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sourceFile.split("/").pop(), "Race-2026.mp4");
+});
+
 test("resolveSourceItems skips DVD-recorder housekeeping files (VIDEO_RM.DAT/PVR_TEMP.USR/DVD_REC.USR) sitting alongside real content", async () => {
   // Real incident: "Giro D'Italia History 1909-1993" carries a VIDEO_RM
   // folder (recorder metadata, a different disc-authoring convention than
