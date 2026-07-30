@@ -114,6 +114,45 @@ test("extracts 'CD N' the same way, another common legacy multi-disc naming conv
   assert.ok(!p.tokens.includes("cd"));
 });
 
+test("extracts 'Week N' / 'Tape N' / 'Day N' as a bare part number, same collision class as Disc N/CD N", () => {
+  // Real-world case, found live in a user's actual library: a multi-year
+  // "Giro di Italia" archive had several years split into "Week 1"/
+  // "Week 2"/"Week 3" or "Tape 1"/"Tape 2" with no other differentiator -
+  // every one parsed to the identical show/episode identity, only the
+  // first of each year's set could ever be filed, the rest permanently
+  // "destination already exists".
+  const week2 = parseName("2009 Giro d'Italia - Week 2");
+  const week3 = parseName("2009 Giro d'Italia - Week 3");
+  assert.equal(week2.partNum, 2);
+  assert.equal(week3.partNum, 3);
+  assert.ok(!week2.tokens.includes("week"));
+
+  const tape1 = parseName("1999.Giro.d'Italia.Tape.1");
+  const tape2 = parseName("1999.Giro.d'Italia.Tape.2");
+  assert.equal(tape1.partNum, 1);
+  assert.equal(tape2.partNum, 2);
+  assert.ok(!tape1.tokens.includes("tape"));
+
+  const day1 = parseName("Race 2020 Day 1");
+  assert.equal(day1.partNum, 1);
+});
+
+test("extracts a bare '#N' as a part number, without misreading an audio-channel tag like '5.1'/'7.1' as one", () => {
+  const seg2 = parseName("2006 Giro d'Italia #2");
+  const seg3 = parseName("2006 Giro d'Italia #3");
+  assert.equal(seg2.partNum, 2);
+  assert.equal(seg3.partNum, 3);
+  assert.ok(!seg2.tokens.includes("2"));
+
+  // The actual real-world risk this pattern was scoped narrowly to avoid -
+  // "5.1"/"7.1" (Dolby surround channel counts) must never be read as a
+  // part number, since they carry no "#" or "part"/"disc"/"week" keyword.
+  const surround51 = parseName("Race 2020 AAC 5.1");
+  const surround71 = parseName("Race 2020 DTS 7.1");
+  assert.equal(surround51.partNum, null);
+  assert.equal(surround71.partNum, null);
+});
+
 test("extracts VTS_NN_MM (raw DVD-Video rip naming) as a bare part number, using the segment number and ignoring the title-set number", () => {
   // Real-world case: a DVD rip's video content is split across
   // VTS_01_1.VOB through VTS_01_5.VOB (an old DVD file-size-limit

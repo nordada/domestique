@@ -182,18 +182,46 @@ export function parseName(rawInput: string): ParsedName {
         if (discExtraction.match) {
           partNum = parseInt(discExtraction.match[1], 10);
         } else {
-          // Raw DVD-Video rip naming: "VTS_01_2" is title-set 01, video
-          // segment 2 - old DVDs split one continuous title across several
-          // ~1GB VOB files purely due to filesystem size limits, so segment
-          // number is genuinely a part number (the title-set number itself
-          // is ignored - see fileops.ts's resolveSourceItems, which already
-          // filters out the "part 0" navigation-only .BUP/.IFO/VIDEO_TS.VOB
-          // files entirely before parsing ever sees them, so every VTS file
-          // that reaches here is real video content).
-          const vtsExtraction = extractAndRemove(working, /\bvts[-_. ]?0*(\d+)[-_. ]?0*(\d+)\b/i);
-          working = vtsExtraction.working;
-          if (vtsExtraction.match) {
-            partNum = parseInt(vtsExtraction.match[2], 10);
+          // "Week N" / "Tape N" / "Day N" - same idea as Part/Disc N, seen
+          // on older VHS-rip and multi-week archive releases (e.g. a
+          // multi-year Giro d'Italia archive split into "Week 1"/"Week 2"/
+          // "Week 3" per year, or an old VHS rip split across "Tape 1"/
+          // "Tape 2"). Real incident this fixed: several years of a real
+          // "Giro di Italia" archive torrent each had 2-3 files named this
+          // way, and without a recognized keyword every one of them parsed
+          // to the exact same identity - only the first ever filed, the
+          // rest permanently "destination already exists".
+          const weekTapeDayExtraction = extractAndRemove(working, /\b(?:week|tape|day)[-_. ]?0*(\d+)\b/i);
+          working = weekTapeDayExtraction.working;
+          if (weekTapeDayExtraction.match) {
+            partNum = parseInt(weekTapeDayExtraction.match[1], 10);
+          } else {
+            // "#N" - a bare hash-prefixed number, seen on some older
+            // releases as a plain segment marker (e.g. "2006 Giro d'Italia
+            // #2.m4v"). "#" is specific enough not to collide with anything
+            // else this parser recognizes - deliberately not a fully bare
+            // trailing number, which would risk misreading an audio-channel
+            // tag like "5.1"/"7.1" as a part number.
+            const hashExtraction = extractAndRemove(working, /#[-_. ]?0*(\d+)\b/);
+            working = hashExtraction.working;
+            if (hashExtraction.match) {
+              partNum = parseInt(hashExtraction.match[1], 10);
+            } else {
+              // Raw DVD-Video rip naming: "VTS_01_2" is title-set 01, video
+              // segment 2 - old DVDs split one continuous title across
+              // several ~1GB VOB files purely due to filesystem size
+              // limits, so segment number is genuinely a part number (the
+              // title-set number itself is ignored - see fileops.ts's
+              // resolveSourceItems, which already filters out the "part 0"
+              // navigation-only .BUP/.IFO/VIDEO_TS.VOB files entirely
+              // before parsing ever sees them, so every VTS file that
+              // reaches here is real video content).
+              const vtsExtraction = extractAndRemove(working, /\bvts[-_. ]?0*(\d+)[-_. ]?0*(\d+)\b/i);
+              working = vtsExtraction.working;
+              if (vtsExtraction.match) {
+                partNum = parseInt(vtsExtraction.match[2], 10);
+              }
+            }
           }
         }
       }
