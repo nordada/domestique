@@ -129,6 +129,7 @@ async function makeScratchServer(webui: { password: string; username?: string } 
     downloadsPath: "/nonexistent",
     dedupeStatePath: join(configDir, "dedupe-state.json"),
     verifyStatePath: join(configDir, "verify-state.json"),
+    matchOverridesPath: join(configDir, "match-overrides.json"),
     torrentRegistryDir: join(configDir, "torrent-registry"),
     transmissionTorrentsDir: null,
     webui,

@@ -699,6 +699,15 @@ the actions below apply, since they all either call Transmission's own
 RPC directly or ask Transmission where a torrent's data currently lives,
 and there's nothing live to act on.
 
+A row whose Plex match is still ambiguous after auto-guessing (see the
+matching-details note further down) shows a clickable ⚠️ in the Plex
+column - clicking it opens a **Resolve** dialog listing every same-size
+candidate for each ambiguous file (best guess first), so you can pick the
+right one by hand instead of renaming/moving files in the library. The
+pick is remembered (keyed by the torrent's own info-hash) and applied on
+every future preview, stage, dedupe, and Index-tab load of that torrent -
+not just this one screen.
+
 A torrent with an unmatched or ambiguous file - most often one that was
 never filed into Plex at all, or whose library copy is gone - gets an
 **Add to Plex library** button instead of (or alongside) a size match.
@@ -1024,12 +1033,21 @@ at once.
   practice this only matters if the *same* country/category/year gets two
   different broadcaster releases for a Nationals-type show - narrow enough
   that it's left as a known gap rather than adding more regex complexity.
-- **Reseed matching is by exact file size only** - it never hashes file
-  content itself. Two unrelated files that happen to be exactly the same
-  size both show up "ambiguous" and neither is guessed at; rename or move
-  one out of the way and re-run Preview if you want it resolved. The real
-  correctness check is Transmission's own piece-hash verify after Stage &
-  hand off, not this matching step.
+- **Reseed matching starts from exact file size only** - it never hashes
+  file content itself. When more than one library file shares a torrent
+  file's exact byte size, a second pass scores each candidate by how well
+  its filename lines up with the torrent's own (stage/episode/part/disc
+  number, year, broadcaster, resolution, and general token overlap - see
+  `src/reseedMatch.ts`'s `scoreCandidate`) and auto-resolves a clear winner;
+  anything short of a clear winner stays "ambiguous," with candidates still
+  ranked best-guess-first for the Index tab's **Resolve** picker (click the
+  Plex-column icon on an ambiguous row) to default sensibly. A resolved-via-
+  guess match shows a 🔍 instead of a plain ✅ in that column, since it's
+  only as good as this scoring until the torrent is next staged or deduped -
+  the real correctness check is still Transmission's own piece-hash verify
+  after Stage & hand off (or Dedupe), not this matching step, and a wrong
+  guess is caught there (left paused for review on Stage, auto-reverted on
+  Dedupe) rather than silently trusted.
 - **BitTorrent v2-only torrents** (the newer "file tree" layout, BEP 52)
   aren't supported by the reseed feature - they're rejected outright with a
   clear error rather than silently mis-parsed. Hybrid v1+v2 torrents work

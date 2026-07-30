@@ -153,6 +153,7 @@ function makeOpts(libraryRoot: string, configPath: string, settingsPath: string)
   const activityPath = join(dirname(configPath), "activity.json");
   const dedupeStatePath = join(dirname(configPath), "dedupe-state.json");
   const verifyStatePath = join(dirname(configPath), "verify-state.json");
+  const matchOverridesPath = join(dirname(configPath), "match-overrides.json");
   const torrentRegistryDir = join(dirname(configPath), "torrent-registry");
   return {
     port: 0,
@@ -163,6 +164,7 @@ function makeOpts(libraryRoot: string, configPath: string, settingsPath: string)
     downloadsPath: "/nonexistent",
     dedupeStatePath,
     verifyStatePath,
+    matchOverridesPath,
     torrentRegistryDir,
     transmissionTorrentsDir: null,
     webui: null,

@@ -18,6 +18,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
   const activityPath = join(configDir, "activity.json");
   const dedupeStatePath = join(configDir, "dedupe-state.json");
   const verifyStatePath = join(configDir, "verify-state.json");
+  const matchOverridesPath = join(configDir, "match-overrides.json");
   const torrentRegistryDir = join(configDir, "torrent-registry");
   await fs.writeFile(configPath, JSON.stringify({ shows: [] }) + "\n", "utf-8");
   await fs.writeFile(settingsPath, JSON.stringify({ plex: null, discord: null, hotfolder: null }) + "\n", "utf-8");
@@ -31,6 +32,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
     downloadsPath: downloadsPath ?? "/nonexistent",
     dedupeStatePath,
     verifyStatePath,
+    matchOverridesPath,
     torrentRegistryDir,
     transmissionTorrentsDir,
     webui: { password: "correct-password" },
@@ -49,6 +51,7 @@ async function makeScratchServer(downloadsPath?: string, transmissionTorrentsDir
     activityPath,
     dedupeStatePath,
     verifyStatePath,
+    matchOverridesPath,
     torrentRegistryDir,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
@@ -574,6 +577,7 @@ test("POST /api/reseed/dedupe hardlinks a full-duplicate torrent to the library,
             {
               id: 6,
               name: "Il-Lombardia-2026.mp4",
+              hashString: "hash6",
               status: 6,
               percentDone: 1,
               downloadDir: downloadsDir,
@@ -637,6 +641,7 @@ test("POST /api/reseed/dedupe refuses a torrent that isn't a full match, with no
           {
             id: 7,
             name: "Nothing-Like-This.mp4",
+            hashString: "hash7",
             status: 6,
             percentDone: 1,
             downloadDir: downloadsDir,
@@ -684,6 +689,7 @@ test("POST /api/reseed/dedupe refuses a torrent that isn't fully downloaded yet,
           {
             id: 9,
             name: "Partial-2026.mp4",
+            hashString: "hash9b",
             status: 6,
             percentDone: 1,
             downloadDir: downloadsDir,
@@ -1010,6 +1016,94 @@ test("GET /api/reseed/index/download serves back the exact bytes previously regi
       headers: { Authorization: authHeader() },
     });
     assert.equal(traversal.status, 404);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/index/resolve records a manual pick and it's reflected in a later GET /api/reseed/index, and /clear undoes it", async () => {
+  const { baseUrl, libraryRoot, torrentRegistryDir, close } = await makeScratchServer();
+  try {
+    const torrentBuf = buildSingleFileTorrent("Ambiguous", 500);
+    const infoHash = parseTorrentFile(torrentBuf).infoHash;
+    await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
+    await fs.writeFile(join(libraryRoot, "Candidate A.mp4"), Buffer.alloc(500));
+    await fs.writeFile(join(libraryRoot, "Candidate B.mp4"), Buffer.alloc(500));
+
+    const before = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.equal(before.torrents[0].inPlex, false);
+    assert.equal(before.torrents[0].plan.ambiguousCount, 1);
+    const relativePath = before.torrents[0].plan.files[0].relativePath;
+    const candidate = join(libraryRoot, "Candidate B.mp4");
+
+    const resolveRes = await fetch(`${baseUrl}/api/reseed/index/resolve`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash, relativePath, candidate }),
+    });
+    assert.equal(resolveRes.status, 200);
+
+    const after = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.equal(after.torrents[0].inPlex, true);
+    assert.equal(after.torrents[0].plan.files[0].candidate, candidate);
+    assert.equal(after.torrents[0].plan.files[0].resolvedBy, "manual");
+
+    const clearRes = await fetch(`${baseUrl}/api/reseed/index/resolve/clear`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: infoHash, relativePath }),
+    });
+    assert.equal(clearRes.status, 200);
+
+    const afterClear = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
+    assert.equal(afterClear.torrents[0].inPlex, false);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/index/resolve rejects a candidate that isn't currently one of the file's own live ambiguous candidates", async () => {
+  const { baseUrl, libraryRoot, torrentRegistryDir, close } = await makeScratchServer();
+  try {
+    const torrentBuf = buildSingleFileTorrent("Ambiguous", 500);
+    const infoHash = parseTorrentFile(torrentBuf).infoHash;
+    await registerTorrent(infoHash, torrentBuf, torrentRegistryDir);
+    await fs.writeFile(join(libraryRoot, "Candidate A.mp4"), Buffer.alloc(500));
+    await fs.writeFile(join(libraryRoot, "Candidate B.mp4"), Buffer.alloc(500));
+
+    const res = await fetch(`${baseUrl}/api/reseed/index/resolve`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hash: infoHash,
+        relativePath: "Ambiguous",
+        candidate: join(libraryRoot, "Not A Real Candidate.mp4"),
+      }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+  } finally {
+    await close();
+  }
+});
+
+test("POST /api/reseed/index/resolve rejects an unknown hash with a 404, and a missing field with a 400", async () => {
+  const { baseUrl, libraryRoot, close } = await makeScratchServer();
+  try {
+    const unknown = await fetch(`${baseUrl}/api/reseed/index/resolve`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: "f".repeat(40), relativePath: "x", candidate: join(libraryRoot, "x.mp4") }),
+    });
+    assert.equal(unknown.status, 404);
+
+    const missingField = await fetch(`${baseUrl}/api/reseed/index/resolve`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: "f".repeat(40) }),
+    });
+    assert.equal(missingField.status, 400);
   } finally {
     await close();
   }

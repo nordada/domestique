@@ -119,6 +119,17 @@
      not opacity, per this table's own earlier sticky-header lesson: opacity
      would fade this row's own background too, not just the text. */
   .index-name-path { display: block; font-size: 0.75rem; color: color-mix(in srgb, currentColor 55%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The Resolve modal (manual ambiguous-file picker) - same overlay-plus-
+     centered-card shape as any other lightweight modal, built from this
+     app's own existing --border/--bg-card vars rather than new ones, since
+     nothing else in this page needed a real modal before this. */
+  #resolve-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+  #resolve-modal-card { background: canvas; border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; width: 100%; max-width: 640px; max-height: 85vh; overflow-y: auto; }
+  .resolve-file-block { border-top: 1px solid var(--border); padding: 0.75rem 0; }
+  .resolve-file-block:first-child { border-top: none; }
+  .resolve-file-name { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; word-break: break-all; }
+  .resolve-file-row { display: flex; gap: 0.5rem; align-items: center; }
+  .resolve-file-row select { flex: 1; min-width: 0; }
   /* Very light background wash on the header cells whose values only ever
      come from Transmission's own live state (Status/On disk/Ratio/Storage
      all show a dash with no live entry) - just enough to read as "these are
@@ -809,6 +820,19 @@
     </table>
   </div>
 </section>
+
+<div id="resolve-modal-overlay" class="hidden">
+  <div id="resolve-modal-card">
+    <div class="toolbar">
+      <h2 style="margin:0" id="resolve-modal-title">Resolve ambiguous files</h2>
+      <button type="button" class="icon-btn subtle" id="resolve-modal-close" title="Close"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <p style="font-size:0.85rem; opacity:0.75; margin-top:-0.25rem;">
+      Every same-size library file Domestique found for each entry below, best guess first - byte size alone can't tell them apart, so pick the one that's actually this file. Staging or deduping this torrent afterward still re-verifies against Transmission's own piece hashes.
+    </p>
+    <div id="resolve-modal-body"></div>
+  </div>
+</div>
 
 </div>
 
@@ -2097,10 +2121,28 @@ let lastFilteredEntries = [];
  */
 function plexSummary(t) {
   if (t.inPlex) {
-    const path = t.plan.files.find((f) => f.candidate)?.candidate ?? "";
+    const matchedFile = t.plan.files.find((f) => f.candidate);
+    const path = matchedFile?.candidate ?? "";
+    // A guessed/manual match came from among several same-size candidates,
+    // not a lone one - worth a visibly different icon/tooltip even though
+    // it's still `inPlex: true`, since it's only as good as a filename-score
+    // guess (or a human's own pick) until this torrent is next staged or
+    // deduped, which re-verifies it against Transmission's own piece hashes.
+    if (matchedFile?.resolvedBy === "guess") {
+      return { icon: "🔍", title: `${path} (auto-matched by filename among ${matchedFile.candidates?.length ?? "several"} same-size candidates - confirmed once staged/deduped)` };
+    }
+    if (matchedFile?.resolvedBy === "manual") {
+      return { icon: "✅", title: `${path} (manually resolved among several same-size candidates)` };
+    }
     return { icon: "✅", title: path };
   }
-  if (t.plan.ambiguousCount > 0) return { icon: "⚠️", title: `${t.plan.ambiguousCount} ambiguous same-size candidate(s) - not guessed` };
+  if (t.plan.ambiguousCount > 0) {
+    return {
+      icon: "⚠️",
+      title: `${t.plan.ambiguousCount} ambiguous same-size candidate(s) - click to resolve manually`,
+      resolvable: true,
+    };
+  }
   if (t.plan.matchedCount > 0) return { icon: "⚠️", title: `Partial match: ${t.plan.matchedCount}/${t.plan.files.length} file(s)` };
   // Genuinely absent, not ambiguous or partial - grey rather than red,
   // since on a large library this can easily be true for hundreds of
@@ -2233,6 +2275,9 @@ function renderTorrentIndex() {
       ? ` <span style="color:var(--err);" title="Verify data came back only ${Math.round(t.lastVerify.percentDone * 100)}% clean as of ${esc(new Date(t.lastVerify.checkedAt).toLocaleString())} - likely corruption, left paused for review.">⚠️</span>`
       : "";
     const plex = plexSummary(t);
+    const plexCell = plex.resolvable
+      ? `<button type="button" class="icon-btn subtle resolve-open-btn" data-hash="${esc(t.infoHash)}">${plex.icon}</button>`
+      : plex.icon;
     return `
       <tr>
         <td><input type="checkbox" class="index-row-checkbox" data-hash="${esc(t.infoHash)}" ${checked}></td>
@@ -2241,7 +2286,7 @@ function renderTorrentIndex() {
         <td>${percentCell}</td>
         <td>${ratioCell}</td>
         <td title="${esc(storageTitle)}">${storageIcon}${orphanMarker}</td>
-        <td title="${esc(plex.title)}">${plex.icon}</td>
+        <td title="${esc(plex.title)}">${plexCell}</td>
         <td>${formatBytes(t.totalBytes)}</td>
         <td>${esc(new Date(t.addedAt).toLocaleDateString())}</td>
         <td><a href="/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}" title="Download .torrent" class="icon-btn subtle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a></td>
@@ -2257,10 +2302,77 @@ function renderTorrentIndex() {
       updateBulkActionBar();
     });
   });
+  tbody.querySelectorAll(".resolve-open-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const t = torrentIndexEntries.find((e) => e.infoHash === btn.dataset.hash);
+      if (t) openResolveModal(t);
+    });
+  });
   updateSelectAllCheckboxState();
   updateBulkActionBar();
   updateIndexSortHeaders();
 }
+
+/**
+ * Manual fallback for a same-size ambiguity reseedMatch.ts's own filename
+ * scoring couldn't confidently resolve on its own (see plexSummary's
+ * "resolvable" flag, set only when ambiguousCount > 0) - one <select> per
+ * ambiguous file, candidates already ranked best-guess-first by the server,
+ * a per-file Save posting straight to /api/reseed/index/resolve. Saving
+ * reloads the whole Index tab (same "let a fresh fetch be the source of
+ * truth" pattern every other action in this tab already follows) rather
+ * than patching this one row in place.
+ */
+function openResolveModal(t) {
+  const ambiguous = t.plan.files.filter((f) => f.status === "ambiguous");
+  document.getElementById("resolve-modal-title").textContent = `Resolve ambiguous files - ${t.torrentName}`;
+  document.getElementById("resolve-modal-body").innerHTML = ambiguous.map((f, i) => `
+    <div class="resolve-file-block">
+      <div class="resolve-file-name">${esc(f.relativePath)} <span style="opacity:0.7; font-weight:400;">(${formatBytes(f.length)})</span></div>
+      <div class="resolve-file-row">
+        <select data-relative-path="${esc(f.relativePath)}">
+          ${(f.candidates || []).map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}
+        </select>
+        <button type="button" class="primary resolve-save-btn" data-index="${i}">Save</button>
+      </div>
+      <div class="status-msg" id="resolve-status-${i}"></div>
+    </div>
+  `).join("") || `<p style="opacity:0.7;">Nothing left to resolve for this torrent - refresh the list if this looks stale.</p>`;
+
+  document.getElementById("resolve-modal-body").querySelectorAll(".resolve-save-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const block = btn.closest(".resolve-file-block");
+      const select = block.querySelector("select");
+      const statusEl = block.querySelector(".status-msg");
+      btn.disabled = true;
+      statusEl.textContent = "";
+      try {
+        await api("/api/reseed/index/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hash: t.infoHash, relativePath: select.dataset.relativePath, candidate: select.value }),
+        });
+        closeResolveModal();
+        await loadTorrentIndex();
+      } catch (err) {
+        statusEl.textContent = `Failed: ${err.message}`;
+        statusEl.classList.add("err");
+        btn.disabled = false;
+      }
+    });
+  });
+
+  document.getElementById("resolve-modal-overlay").classList.remove("hidden");
+}
+
+function closeResolveModal() {
+  document.getElementById("resolve-modal-overlay").classList.add("hidden");
+}
+
+document.getElementById("resolve-modal-close").addEventListener("click", closeResolveModal);
+document.getElementById("resolve-modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "resolve-modal-overlay") closeResolveModal();
+});
 
 /** Reflects whether every currently-*filtered* row is selected (checked), none are (unchecked), or some are (the native indeterminate state) - "select all" only ever means "all visible under the current search filter," never literally every entry regardless of it. */
 function updateSelectAllCheckboxState() {

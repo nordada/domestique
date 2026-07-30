@@ -31,6 +31,7 @@ import { sendDiscordNotification } from "./discord.js";
 import { recordActivity, DEFAULT_ACTIVITY_PATH } from "./activity.js";
 import { DEFAULT_DEDUPE_STATE_PATH } from "./dedupeState.js";
 import { DEFAULT_VERIFY_STATE_PATH } from "./verifyState.js";
+import { DEFAULT_MATCH_OVERRIDES_PATH } from "./matchOverrides.js";
 import { DEFAULT_TORRENT_REGISTRY_DIR } from "./torrentRegistry.js";
 import { webUiConfigFromEnv, handleWebUiRequest, constantTimeEqual, type WebUiConfig } from "./webui.js";
 import { readBody, BodyTooLargeError } from "./body.js";
@@ -55,6 +56,8 @@ export interface ServerOptions {
   dedupeStatePath: string;
   /** Where verifyState.ts persists each torrent's most recent forced piece-hash re-check result - see torrentVerify.ts's checkTorrentIntegrity and reseedApi.ts's /api/reseed/verify route. */
   verifyStatePath: string;
+  /** Where matchOverrides.ts persists a human's own pick for an ambiguous same-size file (see reseedApi.ts's /api/reseed/index/resolve route) - applied on top of every fresh reseed plan, alongside the automatic filename-score guess reseedMatch.ts already attempts. */
+  matchOverridesPath: string;
   /** Directory torrentRegistry.ts saves a copy of every registered .torrent into (staged through the Index tab, or synced in from Transmission's own torrents directory) - see reseedApi.ts's /api/reseed/index routes. */
   torrentRegistryDir: string;
   /** Host-mounted, read-only copy of Transmission's OWN .torrent-storage directory (its own config dir's "torrents" subfolder) - see transmissionTorrentSync.ts. Null when not configured, the same on/off-by-presence convention as hotfolder's own settings; unlike torrentRegistryDir this is never written to. */
@@ -448,6 +451,7 @@ export function optionsFromEnv(): ServerOptions {
   const activityPath = process.env.ACTIVITY_PATH || DEFAULT_ACTIVITY_PATH;
   const dedupeStatePath = process.env.DEDUPE_STATE_PATH || DEFAULT_DEDUPE_STATE_PATH;
   const verifyStatePath = process.env.VERIFY_STATE_PATH || DEFAULT_VERIFY_STATE_PATH;
+  const matchOverridesPath = process.env.MATCH_OVERRIDES_PATH || DEFAULT_MATCH_OVERRIDES_PATH;
   const torrentRegistryDir = process.env.TORRENT_REGISTRY_DIR || DEFAULT_TORRENT_REGISTRY_DIR;
   // Fixed by convention (see docker-compose.yml's DOWNLOADS_DIR mount and
   // the README) rather than DOWNLOADS_DIR itself, which is only ever a host
@@ -475,6 +479,7 @@ export function optionsFromEnv(): ServerOptions {
     downloadsPath,
     dedupeStatePath,
     verifyStatePath,
+    matchOverridesPath,
     torrentRegistryDir,
     transmissionTorrentsDir,
     webui,

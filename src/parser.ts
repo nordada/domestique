@@ -165,15 +165,19 @@ export function parseName(rawInput: string): ParsedName {
         partNum = parseInt(bareOfExtraction.match[1], 10);
         partTotal = parseInt(bareOfExtraction.match[2], 10);
       } else {
-        // "Disc N" / "CD N" - the same idea as Part N but from older
-        // multi-disc DVD-rip-style releases (e.g. a "(Complete)" boxset
-        // split across several .avi files, one per disc). Treated as an
+        // "Disc N" / "CD N" / "DVD N" - the same idea as Part N but from
+        // older multi-disc DVD-rip-style releases (e.g. a "(Complete)"
+        // boxset split across several .avi files, one per disc, commonly
+        // labeled "DVD1"/"DVD2"/etc rather than "Disc"). Treated as an
         // alias for a bare part number so it reuses the existing pt0N
         // naming/grouping machinery rather than needing its own concept -
         // without this, every disc parses to the exact same identity and
         // only the first one can ever be filed, the rest permanently
-        // "destination already exists".
-        const discExtraction = extractAndRemove(working, /\b(?:disc|cd)[-_. ]?0*(\d+)\b/i);
+        // "destination already exists" (and, in reseedMatch.ts, every
+        // same-size DVD-era file in a multi-disc set is indistinguishable
+        // from its siblings, since there's no other signal to tell them
+        // apart by).
+        const discExtraction = extractAndRemove(working, /\b(?:disc|cd|dvd)[-_. ]?0*(\d+)\b/i);
         working = discExtraction.working;
         if (discExtraction.match) {
           partNum = parseInt(discExtraction.match[1], 10);

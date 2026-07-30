@@ -7,11 +7,15 @@ import { join } from "node:path";
 import { commitDedupe } from "../src/dedupe.js";
 import { DEFAULT_RESEED_STAGING_SUBDIR } from "../src/reseed.js";
 
-async function makeLibrary(): Promise<{ libraryRoot: string; stagingRoot: string; downloadsRoot: string }> {
+async function makeLibrary(): Promise<{ libraryRoot: string; stagingRoot: string; downloadsRoot: string; overridesPath: string }> {
   const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-dedupe-library-"));
   const stagingRoot = join(libraryRoot, DEFAULT_RESEED_STAGING_SUBDIR);
   const downloadsRoot = await mkdtemp(join(tmpdir(), "domestique-dedupe-downloads-"));
-  return { libraryRoot, stagingRoot, downloadsRoot };
+  // Lives in downloadsRoot, not libraryRoot - commitDedupe's own buildSizeIndex
+  // call only ever walks libraryRoot, so this stray JSON file can't turn up
+  // as a spurious same-size candidate for anything.
+  const overridesPath = join(downloadsRoot, "match-overrides.json");
+  return { libraryRoot, stagingRoot, downloadsRoot, overridesPath };
 }
 
 /** Scriptable fake Transmission RPC server, same shape as transmission.test.ts's startFakeTransmissionRpc. */
@@ -48,7 +52,7 @@ function startFakeTransmissionRpc(
 }
 
 test("commitDedupe hardlinks the matched library file, repoints Transmission there, and reports success on a clean verify", async () => {
-  const { libraryRoot, stagingRoot, downloadsRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, downloadsRoot, overridesPath } = await makeLibrary();
   try {
     const libraryFile = join(libraryRoot, "Milan-San Remo - S2026E01.mp4");
     await writeFile(libraryFile, Buffer.alloc(1000));
@@ -64,6 +68,7 @@ test("commitDedupe hardlinks the matched library file, repoints Transmission the
               {
                 id: 9,
                 name: "Milan-San-Remo-2026-SBS.mp4",
+                hashString: "hash9",
                 status: 6,
                 percentDone: 1,
                 downloadDir: downloadsRoot,
@@ -77,7 +82,7 @@ test("commitDedupe hardlinks the matched library file, repoints Transmission the
       return {};
     });
     try {
-      const result = await commitDedupe(9, libraryRoot, stagingRoot, { url });
+      const result = await commitDedupe(9, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.staged, true);
       assert.equal(result.reverted, false);
       assert.deepEqual(result.originalLocation, { dir: downloadsRoot, name: "Milan-San-Remo-2026-SBS.mp4" });
@@ -102,7 +107,7 @@ test("commitDedupe hardlinks the matched library file, repoints Transmission the
 });
 
 test("commitDedupe refuses a torrent that isn't a full, unambiguous match - no filesystem or Transmission side effects at all", async () => {
-  const { libraryRoot, stagingRoot, downloadsRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, downloadsRoot, overridesPath } = await makeLibrary();
   try {
     // Nothing in the library matches this size - unmatched, not a full match.
     const calls: string[] = [];
@@ -114,6 +119,7 @@ test("commitDedupe refuses a torrent that isn't a full, unambiguous match - no f
             {
               id: 3,
               name: "Nothing-Like-This.mp4",
+              hashString: "hash3",
               status: 6,
               percentDone: 1,
               downloadDir: downloadsRoot,
@@ -125,7 +131,7 @@ test("commitDedupe refuses a torrent that isn't a full, unambiguous match - no f
       return {};
     });
     try {
-      const result = await commitDedupe(3, libraryRoot, stagingRoot, { url });
+      const result = await commitDedupe(3, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.staged, false);
       assert.equal(result.reverted, false);
       assert.equal(result.refusedReason, "no-full-match");
@@ -144,7 +150,7 @@ test("commitDedupe refuses a torrent that isn't a full, unambiguous match - no f
 });
 
 test("commitDedupe refuses a torrent that isn't fully downloaded yet, even though it's a full library match - no filesystem or Transmission side effects, never abandons a still-downloading torrent's real progress for the library's already-complete copy", async () => {
-  const { libraryRoot, stagingRoot, downloadsRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, downloadsRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Partial - S2026E01.mp4"), Buffer.alloc(1000));
 
@@ -157,6 +163,7 @@ test("commitDedupe refuses a torrent that isn't fully downloaded yet, even thoug
             {
               id: 5,
               name: "Partial-2026.mp4",
+              hashString: "hash5",
               status: 6,
               percentDone: 1,
               downloadDir: downloadsRoot,
@@ -170,7 +177,7 @@ test("commitDedupe refuses a torrent that isn't fully downloaded yet, even thoug
       return {};
     });
     try {
-      const result = await commitDedupe(5, libraryRoot, stagingRoot, { url });
+      const result = await commitDedupe(5, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.staged, false);
       assert.equal(result.reverted, false);
       assert.equal(result.refusedReason, "incomplete");
@@ -189,7 +196,7 @@ test("commitDedupe refuses a torrent that isn't fully downloaded yet, even thoug
 });
 
 test("commitDedupe automatically reverts to the original location when the post-relocate verify isn't clean", async () => {
-  const { libraryRoot, stagingRoot, downloadsRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, downloadsRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"), Buffer.alloc(500));
     await writeFile(join(downloadsRoot, "Paris-Roubaix-2026.mp4"), Buffer.alloc(500));
@@ -205,6 +212,7 @@ test("commitDedupe automatically reverts to the original location when the post-
               {
                 id: 4,
                 name: "Paris-Roubaix-2026.mp4",
+                hashString: "hash4",
                 status: 6,
                 percentDone: 1,
                 downloadDir: downloadsRoot,
@@ -223,7 +231,7 @@ test("commitDedupe automatically reverts to the original location when the post-
       return {};
     });
     try {
-      const result = await commitDedupe(4, libraryRoot, stagingRoot, { url });
+      const result = await commitDedupe(4, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.staged, false);
       assert.equal(result.reverted, true);
       // The verify reported back is the DIRTY one from right after relocating, not the post-revert confirmation.

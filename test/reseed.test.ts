@@ -3,14 +3,20 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtemp, mkdir, writeFile, readFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { previewReseed, commitReseed, DEFAULT_RESEED_STAGING_SUBDIR } from "../src/reseed.js";
 import { buildSingleFileTorrent, buildMultiFileTorrent } from "./torrentFixtures.js";
 
-async function makeLibrary(): Promise<{ libraryRoot: string; stagingRoot: string }> {
+async function makeLibrary(): Promise<{ libraryRoot: string; stagingRoot: string; overridesPath: string }> {
   const libraryRoot = await mkdtemp(join(tmpdir(), "domestique-reseed-library-"));
   const stagingRoot = join(libraryRoot, DEFAULT_RESEED_STAGING_SUBDIR);
-  return { libraryRoot, stagingRoot };
+  // Deliberately outside libraryRoot - buildSizeIndex walks that tree for
+  // real candidate files, and this JSON file has no business showing up as
+  // one. Cleaned up alongside libraryRoot's own mkdtemp dir isn't possible
+  // (different root), so each test's own finally block removes it too.
+  const overridesRoot = await mkdtemp(join(tmpdir(), "domestique-reseed-overrides-"));
+  const overridesPath = join(overridesRoot, "match-overrides.json");
+  return { libraryRoot, stagingRoot, overridesPath };
 }
 
 /** Scriptable fake Transmission RPC server, same shape as transmission.test.ts's startFakeTransmissionRpc. */
@@ -47,50 +53,53 @@ function startFakeTransmissionRpc(
 }
 
 test("previewReseed matches a torrent's expected file against a same-size library file under a different name", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"), Buffer.alloc(1000));
     const torrentBuf = buildSingleFileTorrent("Paris-Roubaix-2026-SBS.mp4", 1000);
 
-    const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot);
+    const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot, overridesPath);
     assert.equal(plan.matchedCount, 1);
     assert.equal(plan.files[0].candidate, join(libraryRoot, "Paris-Roubaix - S2026E01.mp4"));
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });
 
 test("previewReseed excludes the staging directory from its own candidate search", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     await mkdir(join(stagingRoot, "Old Torrent"), { recursive: true });
     await writeFile(join(stagingRoot, "Old Torrent", "leftover.mp4"), Buffer.alloc(500));
     const torrentBuf = buildSingleFileTorrent("Something.mp4", 500);
 
-    const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot);
+    const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot, overridesPath);
     assert.equal(plan.matchedCount, 0);
     assert.equal(plan.unmatchedCount, 1);
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });
 
 test("commitReseed never touches the filesystem or Transmission when nothing matched", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     const torrentBuf = buildSingleFileTorrent("Nothing-Like-This-Exists.mp4", 123456789);
     // An unreachable URL - if commitReseed ever tried to call Transmission, this would throw/hang.
-    const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url: "http://127.0.0.1:1" });
+    const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url: "http://127.0.0.1:1" }, overridesPath);
     assert.equal(result.staged, false);
     assert.equal(result.transmission, undefined);
     await assert.rejects(() => stat(stagingRoot));
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });
 
 test("commitReseed stages matched files, hands Transmission the original torrent bytes with download-dir/paused, and reports its verify result", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Stage 1 renamed.mp4"), Buffer.alloc(100));
     await writeFile(join(libraryRoot, "Stage 2 renamed.mp4"), Buffer.alloc(200));
@@ -119,7 +128,7 @@ test("commitReseed stages matched files, hands Transmission the original torrent
     });
 
     try {
-      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url });
+      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.staged, true);
       assert.equal(result.stagedFiles.length, 2);
       assert.equal(receivedMetainfo, torrentBuf.toString("base64"));
@@ -137,11 +146,12 @@ test("commitReseed stages matched files, hands Transmission the original torrent
     }
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });
 
 test("commitReseed stages only the matched files of a partially-matched torrent, leaving unmatched/ambiguous entries unstaged", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Stage 1 renamed.mp4"), Buffer.alloc(100));
     // Two same-size files for the "ambiguous" stage2 slot - never guessed.
@@ -162,7 +172,7 @@ test("commitReseed stages only the matched files of a partially-matched torrent,
     });
 
     try {
-      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url });
+      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.matchedCount, 1);
       assert.equal(result.ambiguousCount, 1);
       assert.equal(result.unmatchedCount, 1);
@@ -176,11 +186,12 @@ test("commitReseed stages only the matched files of a partially-matched torrent,
     }
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });
 
 test("commitReseed leaves a torrent paused (started:false) when Transmission reports an error after verifying, even at 100%", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Stage 1 renamed.mp4"), Buffer.alloc(100));
     const torrentBuf = buildSingleFileTorrent("Errored Race.mp4", 100);
@@ -196,7 +207,7 @@ test("commitReseed leaves a torrent paused (started:false) when Transmission rep
     });
 
     try {
-      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url });
+      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.transmission?.started, false);
       assert.equal(torrentStartCalled, false);
     } finally {
@@ -204,11 +215,12 @@ test("commitReseed leaves a torrent paused (started:false) when Transmission rep
     }
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });
 
 test("commitReseed still reports staged:true with started:false if Transmission accepts the verify but the start call itself fails", async () => {
-  const { libraryRoot, stagingRoot } = await makeLibrary();
+  const { libraryRoot, stagingRoot, overridesPath } = await makeLibrary();
   try {
     await writeFile(join(libraryRoot, "Stage 1 renamed.mp4"), Buffer.alloc(100));
     const torrentBuf = buildSingleFileTorrent("Flaky Race.mp4", 100);
@@ -235,7 +247,7 @@ test("commitReseed still reports staged:true with started:false if Transmission 
     const url = `http://127.0.0.1:${address.port}/transmission/rpc`;
 
     try {
-      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url });
+      const result = await commitReseed(torrentBuf, libraryRoot, stagingRoot, { url }, overridesPath);
       assert.equal(result.staged, true);
       assert.equal(result.transmission?.verify?.percentDone, 1);
       assert.equal(result.transmission?.started, false);
@@ -244,5 +256,6 @@ test("commitReseed still reports staged:true with started:false if Transmission 
     }
   } finally {
     await rm(libraryRoot, { recursive: true, force: true });
+    await rm(dirname(overridesPath), { recursive: true, force: true });
   }
 });

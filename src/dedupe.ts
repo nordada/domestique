@@ -19,7 +19,8 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { buildSizeIndex } from "./libraryIndex.js";
-import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
+import { buildReseedPlan, applyManualOverrides, type ReseedPlan } from "./reseedMatch.js";
+import { getManualMatches } from "./matchOverrides.js";
 import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
 import { computePercentComplete } from "./seeding.js";
 import { isPathWithin } from "./fileops.js";
@@ -87,7 +88,8 @@ export async function commitDedupe(
   id: number,
   libraryRoot: string,
   stagingRoot: string,
-  transmissionConfig: TransmissionConfig
+  transmissionConfig: TransmissionConfig,
+  overridesPath?: string
 ): Promise<DedupeResult> {
   const torrents = await getAllTorrentsWithFiles(transmissionConfig);
   const torrent = torrents.find((t) => t.id === id);
@@ -96,10 +98,16 @@ export async function commitDedupe(
   }
 
   const sizeIndex = await buildSizeIndex(libraryRoot, { excludeDirs: [stagingRoot] });
-  const plan = buildReseedPlan(
+  const rawPlan = buildReseedPlan(
     { name: torrent.name, files: torrent.files.map((f) => ({ relativePath: f.name, length: f.length })) },
     sizeIndex
   );
+  // Keyed by Transmission's own live hashString, not a .torrent's parsed
+  // infoHash - see this function's own doc comment on why there's no real
+  // .torrent to work from here (matchOverrides.ts lowercases both forms of
+  // the same identifier internally, so a pick recorded from the Index tab
+  // still applies here).
+  const plan = applyManualOverrides(rawPlan, getManualMatches(torrent.hashString, overridesPath));
 
   if (plan.matchedCount !== plan.files.length) {
     return { staged: false, reverted: false, plan, stagedFiles: [], perTorrentDir: "", verify: null, refusedReason: "no-full-match" };

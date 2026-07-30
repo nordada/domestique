@@ -19,7 +19,8 @@
 import { join } from "node:path";
 import { parseTorrentFile } from "./torrentFile.js";
 import { buildSizeIndex } from "./libraryIndex.js";
-import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
+import { buildReseedPlan, applyManualOverrides, type ReseedPlan } from "./reseedMatch.js";
+import { getManualMatches } from "./matchOverrides.js";
 import { stageMatchedFiles, prepareStagingDir, type StageResult } from "./reseedStage.js";
 import {
   addTorrentToTransmission,
@@ -36,17 +37,24 @@ export const DEFAULT_RESEED_STAGING_SUBDIR = ".reseed-staging";
 /**
  * Pure library query: parses the .torrent, walks the library (excluding the
  * staging directory itself, so a previous commit's staged hardlinks never
- * get "discovered" as candidates for themselves), and matches. Never writes
- * anything, never touches Transmission - safe to call as often as wanted.
+ * get "discovered" as candidates for themselves), and matches - then layers
+ * on any manual pick a human previously recorded for this exact torrent
+ * (see matchOverrides.ts/reseedApi.ts's /api/reseed/index/resolve route),
+ * keyed by the torrent's own infoHash so a pick made from the Index tab
+ * still applies here even though this call never touched the registry.
+ * Never writes anything, never touches Transmission - safe to call as often
+ * as wanted.
  */
 export async function previewReseed(
   torrentBuf: Buffer,
   libraryRoot: string,
-  stagingRoot: string
+  stagingRoot: string,
+  overridesPath?: string
 ): Promise<ReseedPlan> {
   const meta = parseTorrentFile(torrentBuf);
   const sizeIndex = await buildSizeIndex(libraryRoot, { excludeDirs: [stagingRoot] });
-  return buildReseedPlan(meta, sizeIndex);
+  const plan = buildReseedPlan(meta, sizeIndex);
+  return applyManualOverrides(plan, getManualMatches(meta.infoHash, overridesPath));
 }
 
 export interface ReseedCommitResult extends ReseedPlan {
@@ -84,9 +92,10 @@ export async function commitReseed(
   torrentBuf: Buffer,
   libraryRoot: string,
   stagingRoot: string,
-  transmissionConfig: TransmissionConfig
+  transmissionConfig: TransmissionConfig,
+  overridesPath?: string
 ): Promise<ReseedCommitResult> {
-  const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot);
+  const plan = await previewReseed(torrentBuf, libraryRoot, stagingRoot, overridesPath);
   const requestedDir = join(stagingRoot, plan.torrentName);
 
   if (plan.matchedCount === 0) {

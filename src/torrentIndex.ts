@@ -30,12 +30,13 @@
  */
 
 import { buildSizeIndex } from "./libraryIndex.js";
-import { buildReseedPlan, type ReseedPlan } from "./reseedMatch.js";
+import { buildReseedPlan, applyManualOverrides, type ReseedPlan } from "./reseedMatch.js";
 import { getAllTorrentsWithFiles, type TransmissionConfig } from "./transmission.js";
 import { listRegistry, getRegisteredTorrentBuf } from "./torrentRegistry.js";
 import { parseTorrentFile } from "./torrentFile.js";
 import { computeStorageStatus, findOrphanOriginal, computePercentComplete, type StorageStatus, type OrphanOriginal } from "./seeding.js";
 import { getVerifyResult, type VerifyRecord } from "./verifyState.js";
+import { getManualMatches } from "./matchOverrides.js";
 
 export interface TorrentIndexEntry {
   infoHash: string;
@@ -75,6 +76,8 @@ export interface BuildTorrentIndexOptions {
   downloadsPath: string;
   dedupeStatePath: string;
   verifyStatePath: string;
+  /** Where matchOverrides.ts persists a human's own pick for an ambiguous file (see reseedApi.ts's /api/reseed/index/resolve route) - applied on top of every fresh plan below. */
+  matchOverridesPath: string;
   transmissionConfig: TransmissionConfig | null;
 }
 
@@ -111,7 +114,8 @@ export async function buildTorrentIndex(
         return null;
       }
 
-      const plan = buildReseedPlan(meta, sizeIndex);
+      const overrides = getManualMatches(regEntry.infoHash, opts.matchOverridesPath);
+      const plan = applyManualOverrides(buildReseedPlan(meta, sizeIndex), overrides);
       const inPlex = plan.files.length > 0 && plan.matchedCount === plan.files.length;
       const totalBytes = meta.files.reduce((sum, f) => sum + f.length, 0);
       const lastVerify = getVerifyResult(regEntry.infoHash, opts.verifyStatePath);

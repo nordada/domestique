@@ -23,6 +23,9 @@ import { loadSettings, resolveReseedStagingRoot } from "./settings.js";
 import { previewReseed, commitReseed } from "./reseed.js";
 import { commitDedupe } from "./dedupe.js";
 import { recordDedupeOriginal, clearDedupeOriginal } from "./dedupeState.js";
+import { recordManualMatch, clearManualMatch } from "./matchOverrides.js";
+import { buildSizeIndex } from "./libraryIndex.js";
+import { buildReseedPlan } from "./reseedMatch.js";
 import { getTorrentLocation, removeTorrentAndData, getAllTorrentsWithFiles } from "./transmission.js";
 import { checkTorrentIntegrity } from "./torrentVerify.js";
 import { recordVerifyResult } from "./verifyState.js";
@@ -299,7 +302,7 @@ export async function handleReseedRequest(
     const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
 
     try {
-      const result = await commitDedupe(payload.id, opts.libraryRoot, stagingRoot, settings.transmission);
+      const result = await commitDedupe(payload.id, opts.libraryRoot, stagingRoot, settings.transmission, opts.matchOverridesPath);
       const lines: string[] = [];
       if (!result.staged && !result.reverted) {
         lines.push(
@@ -462,6 +465,7 @@ export async function handleReseedRequest(
         downloadsPath: opts.downloadsPath,
         dedupeStatePath: opts.dedupeStatePath,
         verifyStatePath: opts.verifyStatePath,
+        matchOverridesPath: opts.matchOverridesPath,
         transmissionConfig: settings.transmission ?? null,
       });
 
@@ -509,6 +513,88 @@ export async function handleReseedRequest(
     return true;
   }
 
+  /**
+   * Records a human's own pick for one ambiguous file of a registered
+   * torrent - the manual fallback for whatever reseedMatch.ts's automatic
+   * filename-score guess didn't confidently resolve on its own (see
+   * matchOverrides.ts). `candidate` is never trusted directly: this
+   * re-parses the registered .torrent and re-builds a fresh plan against
+   * the live library right here, then only records the pick if it's still
+   * genuinely one of that file's own live same-size candidates - same
+   * "never blind-trust a client-supplied path" posture as
+   * /api/reseed/delete-original. A stale pick (library changed since the
+   * page loaded) is rejected with a 400 telling the caller to refresh,
+   * rather than silently recorded against a path that's no longer real.
+   * Applied on every future preview/commit/dedupe/index-list of this exact
+   * torrent (see reseed.ts/dedupe.ts/torrentIndex.ts's own
+   * applyManualOverrides calls) - not just the Index tab.
+   */
+  if (req.method === "POST" && url.pathname === "/api/reseed/index/resolve") {
+    let payload: { hash?: unknown; relativePath?: unknown; candidate?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (
+      typeof payload.hash !== "string" ||
+      typeof payload.relativePath !== "string" ||
+      typeof payload.candidate !== "string"
+    ) {
+      sendJson(res, 400, { ok: false, error: "body must include hash, relativePath, and candidate (all strings)" });
+      return true;
+    }
+
+    const buf = await getRegisteredTorrentBuf(payload.hash, opts.torrentRegistryDir);
+    if (!buf) {
+      sendJson(res, 404, { ok: false, error: `no registered torrent with hash "${payload.hash}"` });
+      return true;
+    }
+    let meta;
+    try {
+      meta = parseTorrentFile(buf);
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: `failed to parse registered torrent: ${err}` });
+      return true;
+    }
+
+    const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
+    const stagingRoot = resolveReseedStagingRoot(settings, opts.libraryRoot);
+    const sizeIndex = await buildSizeIndex(opts.libraryRoot, { excludeDirs: [stagingRoot] });
+    const plan = buildReseedPlan(meta, sizeIndex);
+    const file = plan.files.find((f) => f.relativePath === payload.relativePath);
+    if (!file || file.status !== "ambiguous" || !file.candidates?.includes(payload.candidate)) {
+      sendJson(res, 400, {
+        ok: false,
+        error: `"${payload.candidate}" isn't currently one of the ambiguous candidates for "${payload.relativePath}" - refusing to record it. Refresh the Index tab and try again.`,
+      });
+      return true;
+    }
+
+    recordManualMatch(payload.hash, payload.relativePath, payload.candidate, opts.matchOverridesPath);
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+
+  /** Undoes a manual resolve gone wrong (see the route above) - a no-op, not an error, if nothing was recorded for this file. */
+  if (req.method === "POST" && url.pathname === "/api/reseed/index/resolve/clear") {
+    let payload: { hash?: unknown; relativePath?: unknown };
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String(err) });
+      return true;
+    }
+    if (typeof payload.hash !== "string" || typeof payload.relativePath !== "string") {
+      sendJson(res, 400, { ok: false, error: "body must include hash and relativePath (both strings)" });
+      return true;
+    }
+    clearManualMatch(payload.hash, payload.relativePath, opts.matchOverridesPath);
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+
   const knownPaths = new Set(["/api/reseed/preview", "/api/reseed/commit"]);
   if (req.method !== "POST" || !knownPaths.has(url.pathname)) return false;
 
@@ -530,7 +616,7 @@ export async function handleReseedRequest(
 
   if (url.pathname === "/api/reseed/preview") {
     try {
-      const plan = await previewReseed(torrentBuf, opts.libraryRoot, stagingRoot);
+      const plan = await previewReseed(torrentBuf, opts.libraryRoot, stagingRoot, opts.matchOverridesPath);
       sendJson(res, 200, { ok: true, plan });
     } catch (err) {
       sendJson(res, 400, { ok: false, error: String(err) });
@@ -550,7 +636,7 @@ export async function handleReseedRequest(
   }
 
   try {
-    const result = await commitReseed(torrentBuf, opts.libraryRoot, stagingRoot, settings.transmission);
+    const result = await commitReseed(torrentBuf, opts.libraryRoot, stagingRoot, settings.transmission, opts.matchOverridesPath);
     const verify = result.transmission?.verify;
     const lines: string[] = [];
 
@@ -575,9 +661,14 @@ export async function handleReseedRequest(
       } catch (err) {
         console.warn(`[torrent-registry] failed to register "${result.torrentName}": ${err}`);
       }
+      if (result.guessedCount > 0) {
+        lines.push(
+          `🔍 ${result.guessedCount} file(s) matched by filename among multiple same-size candidates - confirmed by Transmission's verify below, not just this app's own guess.`
+        );
+      }
       if (result.ambiguousCount > 0) {
         lines.push(
-          `⚠️ ${result.ambiguousCount} file(s) had multiple same-size candidates in the library - not guessed, left unstaged.`
+          `⚠️ ${result.ambiguousCount} file(s) had multiple same-size candidates in the library that no filename scored clearly - not guessed, left unstaged. Resolve them manually from the Index tab.`
         );
       }
       if (result.unmatchedCount > 0) {
