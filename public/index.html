@@ -1997,10 +1997,33 @@ function torrentMissingFromPlex(t) {
   return t.plan.matchedCount === 0 && t.plan.ambiguousCount === 0;
 }
 
-/** Genuinely worth a human look: a partial or ambiguous library match (some, but not all, files found; or multiple same-size candidates this app deliberately refused to guess between), a live/on-disk percentage mismatch, an unreclaimed dedupe leftover, or a flagged-dirty integrity check. Deliberately does NOT include a torrent that's simply missing from Plex entirely (see torrentMissingFromPlex above) - that's a separate, much more common condition that doesn't need the same one-at-a-time review treatment. */
+/**
+ * Genuinely worth a human look: a partial or ambiguous library match (some,
+ * but not all, files found; or multiple same-size candidates this app
+ * deliberately refused to guess between), a live/on-disk percentage
+ * mismatch, an unreclaimed dedupe leftover, or a flagged-dirty integrity
+ * check. Deliberately does NOT include a torrent that's simply missing from
+ * Plex entirely (see torrentMissingFromPlex above) - that's a separate,
+ * much more common condition that doesn't need the same one-at-a-time
+ * review treatment.
+ *
+ * The partial-match condition additionally requires `percentComplete > 0`
+ * (null/0 for a torrent that's never actually been downloaded - paused at
+ * 0%, or not currently in Transmission at all) - real incident this fixed:
+ * a "matched" file only means SOME library file happens to share its exact
+ * byte size, entirely independent of whether this torrent's OWN data has
+ * ever been downloaded. A torrent sitting at 0% can "partial match" a
+ * completely different, older release of the same content purely by size
+ * coincidence, with nothing actually available to file yet - "Add to Plex
+ * library" on one of these fails outright (ENOENT - Transmission never
+ * created the download folder at all), so flagging it with the same
+ * urgency as an actionable partial match just wastes a click chasing
+ * something there's nothing to do about until the torrent is actually
+ * downloaded.
+ */
 function torrentNeedsAttention(t) {
   return (
-    (t.plan.matchedCount > 0 && t.plan.matchedCount < t.plan.files.length) ||
+    (t.plan.matchedCount > 0 && t.plan.matchedCount < t.plan.files.length && t.percentComplete > 0) ||
     t.plan.ambiguousCount > 0 ||
     (t.inTransmission && Math.abs(t.percentComplete - t.percentDone) > 0.01) ||
     Boolean(t.orphanOriginal) ||
@@ -2160,7 +2183,23 @@ function plexSummary(t) {
       resolvable: true,
     };
   }
-  if (t.plan.matchedCount > 0) return { icon: "⚠️", title: `Partial match: ${t.plan.matchedCount}/${t.plan.files.length} file(s)` };
+  if (t.plan.matchedCount > 0) {
+    // See torrentNeedsAttention's own doc comment - a "match" here is pure
+    // byte-size coincidence, independent of whether this torrent's own data
+    // has ever actually been downloaded, so a 0%-downloaded torrent can
+    // "partial match" a completely different release of the same content
+    // with nothing actually available to file yet. Called out explicitly
+    // rather than left to look identical to an actionable partial match,
+    // which just wastes a click on "Add to Plex library" (ENOENT - nothing
+    // downloaded for it to work from).
+    const notDownloadedYet = !(t.percentComplete > 0);
+    return {
+      icon: "⚠️",
+      title:
+        `Partial match: ${t.plan.matchedCount}/${t.plan.files.length} file(s)` +
+        (notDownloadedYet ? " - coincidental: this torrent hasn't actually been downloaded yet" : ""),
+    };
+  }
   // Genuinely absent, not ambiguous or partial - grey rather than red,
   // since on a large library this can easily be true for hundreds of
   // entries at once (e.g. old archived torrents never filed here), not an
@@ -2439,7 +2478,15 @@ function updateBulkActionBar() {
   const selectedCountEl = document.getElementById("bulk-selected-count");
   selectedCountEl.textContent = `${selected.length} selected ✕`;
 
-  const eligibleAddToLibrary = selected.filter((t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length);
+  // percentComplete > 0 excludes a torrent that's never actually been
+  // downloaded (paused at 0%, or still-queued) - see torrentNeedsAttention's
+  // own doc comment on why a "partial match" there is pure byte-size
+  // coincidence with nothing real to file: Transmission never even creates
+  // the download folder, so this always fails outright with an ENOENT
+  // rather than filing anything.
+  const eligibleAddToLibrary = selected.filter(
+    (t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length && t.percentComplete > 0
+  );
   const eligibleReAdd = selected.filter((t) => !t.inTransmission);
   const eligibleVerify = selected.filter((t) => t.inTransmission);
   const eligibleDedupe = selected.filter((t) => t.storageStatus === "duplicate");
