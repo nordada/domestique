@@ -1356,7 +1356,7 @@ test("POST /api/reseed/verify: a dirty result leaves the torrent paused, records
 });
 
 test("POST /api/reseed/archive removes the torrent from Transmission WITHOUT deleting its data, hides it from the Index, and /clear brings it back", async () => {
-  const { baseUrl, settingsPath, torrentRegistryDir, close: closeApp } = await makeScratchServer();
+  const { baseUrl, settingsPath, torrentRegistryDir, activityPath, close: closeApp } = await makeScratchServer();
   let receivedArgs;
   const { url: transmissionUrl, close: closeTransmission } = await startFakeTransmissionRpc((method, args) => {
     if (method === "torrent-get") return { torrents: [{ id: 8, name: "DVD1", downloadDir: "/downloads" }] };
@@ -1395,6 +1395,10 @@ test("POST /api/reseed/archive removes the torrent from Transmission WITHOUT del
     const afterArchive = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
     assert.deepEqual(afterArchive.torrents, []);
 
+    const activityAfterArchive = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activityAfterArchive[0].torrentName, "DVD1");
+    assert.match(activityAfterArchive[0].lines.join("\n"), /archived "DVD1".*removed from Transmission/i);
+
     const clearRes = await fetch(`${baseUrl}/api/reseed/archive/clear`, {
       method: "POST",
       headers: { Authorization: authHeader(), "Content-Type": "application/json" },
@@ -1405,6 +1409,10 @@ test("POST /api/reseed/archive removes the torrent from Transmission WITHOUT del
     const afterClear = await (await fetch(`${baseUrl}/api/reseed/index`, { headers: { Authorization: authHeader() } })).json();
     assert.equal(afterClear.torrents.length, 1);
     assert.equal(afterClear.torrents[0].infoHash, infoHash);
+
+    const activityAfterClear = JSON.parse(await fs.readFile(activityPath, "utf-8"));
+    assert.equal(activityAfterClear[0].torrentName, "DVD1");
+    assert.match(activityAfterClear[0].lines.join("\n"), /unarchived "DVD1"/i);
   } finally {
     await closeApp();
     await closeTransmission();

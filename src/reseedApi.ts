@@ -225,12 +225,14 @@ export async function handleReseedRequest(
     }
 
     let removedFromTransmission = false;
+    let torrentName: string = payload.hash;
     if (typeof payload.id === "number") {
       const settings = loadSettings(opts.settingsPath, opts.libraryRoot);
       if (settings.transmission) {
         try {
           const location = await getTorrentLocation(settings.transmission, payload.id);
           if (location) {
+            torrentName = location.name;
             await removeTorrentKeepingData(settings.transmission, payload.id);
             removedFromTransmission = true;
           }
@@ -241,8 +243,30 @@ export async function handleReseedRequest(
         }
       }
     }
+    // Not in Transmission (or no id given) - fall back to the registered
+    // .torrent's own name so the activity log still shows something
+    // readable rather than a bare hash.
+    if (torrentName === payload.hash) {
+      try {
+        const buf = await getRegisteredTorrentBuf(payload.hash, opts.torrentRegistryDir);
+        if (buf) torrentName = parseTorrentFile(buf).name;
+      } catch {
+        // Falls back to the bare hash above - still logged either way.
+      }
+    }
 
     recordArchived(payload.hash, { archivedAt: new Date().toISOString() }, opts.archiveStatePath);
+    recordActivity(
+      {
+        timestamp: new Date().toISOString(),
+        torrentName,
+        lines: [
+          `📦 archived "${torrentName}" - hidden from the Index${removedFromTransmission ? " and removed from Transmission (downloaded data kept)" : ""}. Recoverable any time from Settings → Archive.`,
+        ],
+        reviewWorthy: false,
+      },
+      opts.activityPath
+    );
     sendJson(res, 200, { ok: true, removedFromTransmission });
     return true;
   }
@@ -261,6 +285,22 @@ export async function handleReseedRequest(
       return true;
     }
     clearArchived(payload.hash, opts.archiveStatePath);
+    let torrentName: string = payload.hash;
+    try {
+      const buf = await getRegisteredTorrentBuf(payload.hash, opts.torrentRegistryDir);
+      if (buf) torrentName = parseTorrentFile(buf).name;
+    } catch {
+      // Falls back to the bare hash above - still logged either way.
+    }
+    recordActivity(
+      {
+        timestamp: new Date().toISOString(),
+        torrentName,
+        lines: [`📤 unarchived "${torrentName}" - back in the Index.`],
+        reviewWorthy: false,
+      },
+      opts.activityPath
+    );
     sendJson(res, 200, { ok: true });
     return true;
   }
