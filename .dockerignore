@@ -1,0 +1,38 @@
+# Keeps the build context - and therefore the image itself - from ever
+# containing the host's live runtime state or secrets. Without this, the
+# Dockerfile's `COPY config ./config` bakes WHATEVER currently sits in
+# config/ on the build machine (real Plex/Discord secrets in settings.json,
+# activity history, dedupe/verify/archive state, resolve picks) directly
+# into an image layer - harmless for the CI-built GHCR image (a fresh git
+# checkout never has these gitignored files at all), but on TOWER, where
+# docker-compose builds locally FROM the same directory these files are
+# bind-mounted into at runtime, every `docker compose up -d --build` was
+# silently snapshotting real secrets into a local image layer.
+#
+# Real incident this fixed: a container recreated before config/
+# archive-state.json's bind-mount target was ever touch'd got an empty
+# DIRECTORY there (the well-known bind-mount gotcha - see fileseed.ts's
+# ensureSeeded). A build that ran while that directory still existed baked
+# it into the image as a directory, permanently - so even after fixing the
+# host-side path to a real file, the container refused to start at all
+# ("mount ... not a directory") until the image was rebuilt. Excluding
+# these paths from the build context entirely means COPY config ./config
+# only ever ships the git-tracked events.json default, and the runtime
+# bind mounts (plus each state module's own ensureSeeded) are the only
+# thing that ever determines these files' real type/content - never the
+# image.
+config/settings.json
+config/activity.json
+config/dedupe-state.json
+config/verify-state.json
+config/match-overrides.json
+config/archive-state.json
+config/torrent-registry/
+
+# Standard hygiene - large/irrelevant to what actually needs to reach the
+# image, and no reason to send them to the Docker daemon as build context.
+node_modules/
+dist/
+.git/
+.DS_Store
+.env
