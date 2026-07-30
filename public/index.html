@@ -166,10 +166,16 @@
      destructive/irreversible - accent-colored rather than the red/error
      treatment above, so it doesn't overstate the risk. */
   button.confirm-action.armed { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
-  .seeding-summary-badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid; }
+  .seeding-summary-badge { display: inline-block; flex-shrink: 0; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid; }
   .seeding-summary-badge.err { color: var(--err); border-color: var(--err); }
   .seeding-summary-badge.ok { color: var(--ok); border-color: var(--ok); }
-  .seeding-summary-badge.neutral { opacity: 0.75; border-color: var(--border); }
+  /* var(--border) is a deliberately near-invisible hairline (#8888881f,
+     ~12% alpha) meant for subtle dividers/input outlines elsewhere in this
+     app - reusing it here made a neutral pill read as plain floating text
+     rather than an actual pill, regardless of the badge's own opacity.
+     currentColor at a real, visible opacity gives it a genuine (if still
+     muted, compared to the fully-saturated ok/err borders) pill outline. */
+  .seeding-summary-badge.neutral { color: color-mix(in srgb, currentColor 75%, transparent); border-color: color-mix(in srgb, currentColor 55%, transparent); }
   /* Pill-shaped buttons matching the summary-badge pills above (same
      radius/padding/font-size), for the Torrent index's bulk action bar -
      plain rectangular buttons there read as chunky and wasted space on a
@@ -1976,6 +1982,13 @@ const STATUS_SEEDING = 6;
  *     filter stacked on top.
  *   - "stat": not clickable at all - totalsize/plexsize measure aggregates,
  *     not a meaningful binary partition to filter by.
+ * `row` is a separate, purely visual concern from `role` - "total" behaves
+ * as a reset (clickable) but sits in the same row as the plain stats, since
+ * it reads as a running total rather than a real filter dimension. The
+ * "stats" row never wraps in practice (only ever a couple of entries); the
+ * "filters" row is allowed to wrap to a second line at real production
+ * scale (8+ filters, 4+ digit counts) rather than force everything onto
+ * one line via a scrollbar or shrunken text - explicit user call.
  * Pill values are always computed over the full unfiltered
  * torrentIndexEntries, never recursively against whatever other filters
  * are currently active (true faceted-search counts) - a deliberate
@@ -1983,27 +1996,27 @@ const STATUS_SEEDING = 6;
  * narrows.
  */
 const INDEX_PILLS = [
-  { id: "total", role: "reset", colorClass: "neutral", display: "count", alwaysShow: true,
+  { id: "total", role: "reset", row: "stats", colorClass: "neutral", display: "count", alwaysShow: true,
     predicate: () => true, label: (n) => `${n} total` },
-  { id: "plex", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+  { id: "plex", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: true,
     predicate: (t) => t.inPlex, label: (n) => `${n} in Plex` },
-  { id: "transmission", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+  { id: "transmission", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: true,
     predicate: (t) => t.inTransmission, label: (n) => `${n} in Transmission` },
-  { id: "seeding", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+  { id: "seeding", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: true,
     predicate: (t) => t.inTransmission && t.status === STATUS_SEEDING, label: (n) => `${n} seeding` },
-  { id: "ondisk", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+  { id: "ondisk", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: true,
     predicate: (t) => t.percentComplete === 1, label: (n) => `${n} on disk` },
-  { id: "missing", role: "filter", colorClass: "neutral", display: "count", alwaysShow: false,
+  { id: "missing", role: "filter", row: "filters", colorClass: "neutral", display: "count", alwaysShow: false,
     predicate: torrentMissingFromPlex, label: (n) => `${n} missing from Plex` },
-  { id: "attention", role: "filter", colorClass: "err", display: "count", alwaysShow: false,
+  { id: "attention", role: "filter", row: "filters", colorClass: "err", display: "count", alwaysShow: false,
     predicate: torrentNeedsAttention, label: (n) => `⚠️ ${n} need${n === 1 ? "s" : ""} attention` },
-  { id: "deduped", role: "filter", colorClass: "ok", display: "count", alwaysShow: false,
+  { id: "deduped", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: false,
     predicate: (t) => t.storageStatus === "deduped", label: (n) => `🔗 ${n} deduped` },
-  { id: "duplicated", role: "filter", colorClass: "neutral", display: "count", alwaysShow: false,
+  { id: "duplicated", role: "filter", row: "filters", colorClass: "neutral", display: "count", alwaysShow: false,
     predicate: (t) => t.storageStatus === "duplicate", label: (n) => `📦 ${n} duplicated` },
-  { id: "totalsize", role: "stat", colorClass: "neutral", display: "bytes", alwaysShow: true,
+  { id: "totalsize", role: "stat", row: "stats", colorClass: "neutral", display: "bytes", alwaysShow: true,
     predicate: () => true, label: (bytes) => `${formatBytes(bytes)} total size` },
-  { id: "plexsize", role: "stat", colorClass: "neutral", display: "bytes", alwaysShow: true,
+  { id: "plexsize", role: "stat", row: "stats", colorClass: "neutral", display: "bytes", alwaysShow: true,
     predicate: (t) => t.inPlex, label: (bytes) => `${formatBytes(bytes)} on Plex disk` },
 ];
 
@@ -2045,16 +2058,20 @@ function renderIndexPills(entries) {
     return `<button type="button" class="${classes.join(" ")}" data-pill-id="${pill.id}">${label}</button>`;
   };
 
-  statsContainer.innerHTML = INDEX_PILLS.filter((p) => p.role === "stat").map(renderPill).join("");
-  filtersContainer.innerHTML = INDEX_PILLS.filter((p) => p.role !== "stat").map(renderPill).join("");
+  statsContainer.innerHTML = INDEX_PILLS.filter((p) => p.row === "stats").map(renderPill).join("");
+  filtersContainer.innerHTML = INDEX_PILLS.filter((p) => p.row === "filters").map(renderPill).join("");
 
-  filtersContainer.querySelectorAll("button[data-pill-id]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const pill = INDEX_PILLS.find((p) => p.id === btn.dataset.pillId);
-      if (pill.role === "reset") activeIndexFilters.clear();
-      else if (activeIndexFilters.has(pill.id)) activeIndexFilters.delete(pill.id);
-      else activeIndexFilters.add(pill.id);
-      renderTorrentIndex();
+  // "total" (role: "reset") renders into statsContainer, not
+  // filtersContainer, so both containers need their buttons wired here.
+  [statsContainer, filtersContainer].forEach((container) => {
+    container.querySelectorAll("button[data-pill-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pill = INDEX_PILLS.find((p) => p.id === btn.dataset.pillId);
+        if (pill.role === "reset") activeIndexFilters.clear();
+        else if (activeIndexFilters.has(pill.id)) activeIndexFilters.delete(pill.id);
+        else activeIndexFilters.add(pill.id);
+        renderTorrentIndex();
+      });
     });
   });
 }
