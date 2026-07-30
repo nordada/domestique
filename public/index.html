@@ -93,7 +93,10 @@
   h2 { margin-top: 0; font-size: 1.05rem; }
   table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
   th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { opacity: 0.7; font-weight: 600; }
+  /* Dimmed via color, not opacity - opacity on a sticky th also fades its
+     own background, which is exactly what let scrolled row text show
+     through the header (a real bug hit in practice, not theoretical). */
+  th { font-weight: 600; color: color-mix(in srgb, currentColor 70%, transparent); }
   /* Scales with the window instead of a fixed pixel cap - clamp()'s middle
      value (65% of viewport height) does the actual resizing; the min
      (360px, ~8 rows) keeps it usable on a short/split window, the max
@@ -1937,15 +1940,24 @@ let selectedHashes = new Set();
 // the filter/sort logic a second time.
 let lastFilteredEntries = [];
 
-/** Compact single-line Plex summary for the table's Plex column - the full per-file breakdown (planFilesHtml) doesn't fit a fixed-height table row; a fresh Preview drop still shows that detail if genuinely needed for an ambiguous multi-file torrent. */
-function plexSummaryHtml(t) {
+/**
+ * Compact icon + tooltip for the table's Plex column, matching the old
+ * (pre-unification) registry table's own icon-only convention - the full
+ * per-file breakdown (planFilesHtml) and even a single matched path don't
+ * fit a narrow fixed-width column at ~900-row scale; a fresh Preview drop
+ * still shows that detail if genuinely needed for an ambiguous multi-file
+ * torrent. Returns {icon, title} rather than one HTML string so the caller
+ * can put the title on the <td> itself (for a full-width hover target,
+ * not just the icon glyph).
+ */
+function plexSummary(t) {
   if (t.inPlex) {
     const path = t.plan.files.find((f) => f.candidate)?.candidate ?? "";
-    return `✅ ${esc(path)}`;
+    return { icon: "✅", title: path };
   }
-  if (t.plan.ambiguousCount > 0) return `⚠️ ambiguous (${t.plan.ambiguousCount})`;
-  if (t.plan.matchedCount > 0) return `⚠️ partial (${t.plan.matchedCount}/${t.plan.files.length})`;
-  return "❌ no match";
+  if (t.plan.ambiguousCount > 0) return { icon: "⚠️", title: `${t.plan.ambiguousCount} ambiguous same-size candidate(s) - not guessed` };
+  if (t.plan.matchedCount > 0) return { icon: "⚠️", title: `Partial match: ${t.plan.matchedCount}/${t.plan.files.length} file(s)` };
+  return { icon: "❌", title: "No match found in the library" };
 }
 
 function renderTorrentIndex() {
@@ -2015,24 +2027,30 @@ function renderTorrentIndex() {
   const STATUS_SEEDING = 6;
   tbody.innerHTML = filtered.map((t) => {
     const checked = selectedHashes.has(t.infoHash) ? "checked" : "";
-    const statusCell = !t.inTransmission
-      ? `<span class="status-msg" style="display:inline; padding:0.1rem 0.5rem;">Not in Transmission</span>`
-      : (() => {
-          const statusLabel = t.status === STATUS_SEEDING ? "Seeding" : "Paused";
-          const statusClass = t.status === STATUS_SEEDING ? "ok" : "";
-          const mismatch = Math.abs(t.percentComplete - t.percentDone) > 0.01;
-          const title = mismatch
-            ? ` title="Transmission's own percentDone only counts files it considers &quot;wanted&quot; - a torrent with deselected files can report 100% there while having nothing on disk. Transmission reports ${Math.round(t.percentDone * 100)}% here."`
-            : "";
-          return `<span class="status-msg ${statusClass}"${title} style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}${mismatch ? " ⚠️" : ""}</span>`;
-        })();
+
+    // Icon + title-tooltip throughout this row (matching the old
+    // pre-unification registry table's own compact convention) rather than
+    // spelled-out text - at hundreds of rows, verbose text columns were
+    // pushing the table wider than its own scroll container, forcing an
+    // awkward two-directional scroll. Full detail is still one hover away.
+    let statusIcon = "—";
+    let statusTitle = "Not currently in Transmission";
+    if (t.inTransmission) {
+      const mismatch = Math.abs(t.percentComplete - t.percentDone) > 0.01;
+      statusIcon = t.status === STATUS_SEEDING ? "🟢" : "⏸️";
+      statusTitle = t.status === STATUS_SEEDING ? "Seeding" : "Paused";
+      if (mismatch) {
+        statusTitle += ` (Transmission's own percentDone only counts files it considers "wanted" - a torrent with deselected files can report 100% there while having nothing on disk; Transmission reports ${Math.round(t.percentDone * 100)}% here)`;
+      }
+    }
     const percentCell = t.inTransmission ? `${Math.round(t.percentComplete * 100)}%` : "—";
     const ratioCell = t.inTransmission ? formatRatio(t.ratio) : "—";
-    const storageChip = {
-      deduped: '<span title="This torrent\'s data is hardlinked to its Plex library copy - already deduped, zero extra disk.">🔗 Deduped</span>',
-      duplicate: '<span title="This torrent\'s data is a separate full copy from its Plex library match - Dedupe would reclaim this disk space.">📦 Duplicated</span>',
-      mixed: '<span title="Some of this multi-file torrent\'s data is hardlinked to the library, some isn\'t.">🔀 Partial</span>',
-    }[t.storageStatus] || "—";
+    const storageIcon = { deduped: "🔗", duplicate: "📦", mixed: "🔀" }[t.storageStatus] || "—";
+    const storageTitle = {
+      deduped: "Deduped - this torrent's data is hardlinked to its Plex library copy, zero extra disk.",
+      duplicate: "Duplicated - this torrent's data is a separate full copy from its Plex library match. Dedupe would reclaim this disk space.",
+      mixed: "Partially deduped - some of this multi-file torrent's data is hardlinked to the library, some isn't.",
+    }[t.storageStatus] || "Not currently a full Plex match - nothing meaningful to compare.";
     // Durable, not one-shot: recomputed fresh on every list load (see
     // seeding.ts's findOrphanOriginal), so it stays visible any time a
     // dedupe's original download-folder copy hasn't actually been deleted
@@ -2041,18 +2059,19 @@ function renderTorrentIndex() {
     const orphanMarker = t.orphanOriginal
       ? ` <span style="color:var(--err);" title="Original download-folder copy still exists (${formatBytes(t.orphanOriginal.totalBytes)}) - not yet reclaimed.">⚠️</span>`
       : "";
+    const plex = plexSummary(t);
     return `
       <tr>
         <td><input type="checkbox" class="index-row-checkbox" data-hash="${esc(t.infoHash)}" ${checked}></td>
         <td class="truncate" title="${esc(t.torrentName)}">${esc(t.torrentName)}</td>
-        <td>${statusCell}</td>
+        <td title="${esc(statusTitle)}">${statusIcon}</td>
         <td>${percentCell}</td>
         <td>${ratioCell}</td>
-        <td>${storageChip}${orphanMarker}</td>
-        <td class="truncate" title="${esc(plexSummaryHtml(t).replace(/<[^>]+>/g, ""))}">${plexSummaryHtml(t)}</td>
+        <td title="${esc(storageTitle)}">${storageIcon}${orphanMarker}</td>
+        <td title="${esc(plex.title)}">${plex.icon}</td>
         <td>${formatBytes(t.totalBytes)}</td>
         <td>${esc(new Date(t.addedAt).toLocaleDateString())}</td>
-        <td><a href="/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}">Download</a></td>
+        <td><a href="/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}" title="Download .torrent" class="icon-btn subtle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a></td>
       </tr>
     `;
   }).join("");
