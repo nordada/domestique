@@ -102,10 +102,15 @@
   .events-table-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .events-table-scroll table { margin: 0; }
   .events-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
-  /* Same capped-scrollable-box idea as .events-table-scroll above, for the
-     Currently seeding list - a flat stack of blocks rather than a table, so
-     no sticky header to pin, just the height cap + its own scrollbar. */
-  .seeding-list-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 0 0.75rem; }
+  /* Same capped-scrollable-sticky-header idea as .events-table-scroll above,
+     for the Torrent index table - kept as its own selector rather than
+     reusing that one directly so the two tables can diverge in styling
+     later without fighting each other. */
+  .torrent-index-table-scroll { max-height: clamp(360px, 65vh, 900px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .torrent-index-table-scroll table { margin: 0; }
+  .torrent-index-table-scroll thead th { position: sticky; top: 0; background: canvas; z-index: 1; }
+  .torrent-index-table-scroll td.truncate { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bulk-action-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.6rem 0.75rem; margin-bottom: 0.75rem; border: 1px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .sortable-th { cursor: pointer; user-select: none; }
   .sortable-th:hover { opacity: 0.75; }
   .sort-arrow { display: inline-block; width: 0.9em; margin-left: 0.15em; opacity: 0.7; }
@@ -754,9 +759,34 @@
     </label>
   </div>
   <input type="text" id="index-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
+  <div id="bulk-action-bar" class="hidden">
+    <strong id="bulk-selected-count"></strong>
+    <button type="button" id="bulk-add-to-library-btn">Add to Plex library</button>
+    <button type="button" class="icon-btn subtle" id="bulk-force-btn" title="Force file as new version - bypasses the &quot;already have this release&quot; check"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="15" y1="9" x2="6" y2="18"/><rect x="13" y="2.5" width="8" height="5" rx="1" transform="rotate(45 17 5)"/></svg></button>
+    <button type="button" class="confirm-action" id="bulk-dedupe-btn">Dedupe</button>
+    <button type="button" class="danger" id="bulk-delete-original-btn">Delete original copy</button>
+    <button type="button" class="danger" id="bulk-remove-btn">Remove &amp; delete files</button>
+    <button type="button" class="icon-btn subtle" id="bulk-clear-selection-btn" title="Clear selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
   <div id="index-action-status" class="status-msg"></div>
-  <div class="seeding-list-scroll">
-    <div id="index-list">Loading…</div>
+  <div class="torrent-index-table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th><input type="checkbox" id="index-select-all"></th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>On disk</th>
+          <th>Ratio</th>
+          <th>Storage</th>
+          <th>Plex</th>
+          <th>Size</th>
+          <th>Added</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="index-tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
+    </table>
   </div>
 </section>
 
@@ -1060,10 +1090,9 @@ function esc(s) {
 const ICON_REFRESH = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 const ICON_CHECK_CIRCLE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
-// Simple stroke-drawn hammer (handle + a tilted head near the top) rather
-// than a specific icon library's glyph - the "Force file as new version"
-// button on the Currently seeding list.
-const ICON_HAMMER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="15" y1="9" x2="6" y2="18"/><rect x="13" y="2.5" width="8" height="5" rx="1" transform="rotate(45 17 5)"/></svg>';
+// The "Force file as new version" hammer icon lives directly in the bulk
+// action bar's static markup now (see #bulk-force-btn), not built from a
+// JS template string like the per-row version used to be.
 
 function showTab(name) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
@@ -1872,13 +1901,12 @@ function renderReseedPlan(plan) {
 let torrentIndexEntries = [];
 
 async function loadTorrentIndex() {
-  const listEl = document.getElementById("index-list");
   try {
     const data = await api("/api/reseed/index");
     torrentIndexEntries = data.torrents;
     renderTorrentIndex();
   } catch (err) {
-    listEl.innerHTML = `<p class="status-msg err">Failed to load: ${esc(err.message)}</p>`;
+    document.getElementById("index-tbody").innerHTML = `<tr><td colspan="10" class="status-msg err">Failed to load: ${esc(err.message)}</td></tr>`;
   }
 }
 
@@ -1900,8 +1928,28 @@ function torrentNeedsAttention(t) {
   );
 }
 
+/** Which torrent names (by info-hash) are currently checked - persists across a search-filter change or a sort change, cleared after any bulk action completes or a manual refresh, since the underlying rows can change. */
+let selectedHashes = new Set();
+// The filtered set from the most recent render, kept around purely so the
+// header "select all" checkbox's own handler knows what "all" currently
+// means (i.e. all *visible* rows, not literally every one of possibly
+// hundreds of entries regardless of the search box) without re-deriving
+// the filter/sort logic a second time.
+let lastFilteredEntries = [];
+
+/** Compact single-line Plex summary for the table's Plex column - the full per-file breakdown (planFilesHtml) doesn't fit a fixed-height table row; a fresh Preview drop still shows that detail if genuinely needed for an ambiguous multi-file torrent. */
+function plexSummaryHtml(t) {
+  if (t.inPlex) {
+    const path = t.plan.files.find((f) => f.candidate)?.candidate ?? "";
+    return `✅ ${esc(path)}`;
+  }
+  if (t.plan.ambiguousCount > 0) return `⚠️ ambiguous (${t.plan.ambiguousCount})`;
+  if (t.plan.matchedCount > 0) return `⚠️ partial (${t.plan.matchedCount}/${t.plan.files.length})`;
+  return "❌ no match";
+}
+
 function renderTorrentIndex() {
-  const listEl = document.getElementById("index-list");
+  const tbody = document.getElementById("index-tbody");
   const totalBadge = document.getElementById("index-summary-total");
   const plexBadge = document.getElementById("index-summary-plex");
   const transmissionBadge = document.getElementById("index-summary-transmission");
@@ -1910,10 +1958,13 @@ function renderTorrentIndex() {
   const duplicatedBadge = document.getElementById("index-summary-duplicated");
 
   if (torrentIndexEntries.length === 0) {
-    listEl.innerHTML = "<p style=\"opacity:0.7;\">Nothing registered yet - staging a torrent above (or configuring the Transmission-torrents sync in Settings) will populate this list.</p>";
+    tbody.innerHTML = "<tr><td colspan=\"10\" style=\"opacity:0.7;\">Nothing registered yet - staging a torrent above (or configuring the Transmission-torrents sync in Settings) will populate this list.</td></tr>";
     [totalBadge, plexBadge, transmissionBadge, attentionBadge, dedupedBadge, duplicatedBadge].forEach((b) => {
       b.style.display = "none";
     });
+    lastFilteredEntries = [];
+    updateSelectAllCheckboxState();
+    updateBulkActionBar();
     return;
   }
 
@@ -1943,8 +1994,11 @@ function renderTorrentIndex() {
   const filtered = query
     ? torrentIndexEntries.filter((t) => t.torrentName.toLowerCase().includes(query))
     : torrentIndexEntries.slice();
+  lastFilteredEntries = filtered;
   if (filtered.length === 0) {
-    listEl.innerHTML = `<p style="opacity:0.7;">No torrents match "${esc(query)}".</p>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="opacity:0.7;">No torrents match "${esc(query)}".</td></tr>`;
+    updateSelectAllCheckboxState();
+    updateBulkActionBar();
     return;
   }
 
@@ -1959,317 +2013,281 @@ function renderTorrentIndex() {
   });
 
   const STATUS_SEEDING = 6;
-  listEl.innerHTML = filtered.map((t) => {
-    const downloadLink = `<a href="/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}">Download .torrent</a>`;
-
-    // Every action below needs a live Transmission id to actually do
-    // anything (they all either operate on Transmission's own RPC directly,
-    // or ask Transmission where a torrent's data currently lives) - a
-    // registry-only entry (not currently in Transmission) has nothing for
-    // any of them to act on, so all of this is gated on t.inTransmission.
-    if (!t.inTransmission) {
-      return `
-        <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
-          <div><strong>${esc(t.torrentName)}</strong>
-            <span class="status-msg" style="display:inline; padding:0.1rem 0.5rem;">Not in Transmission</span>
-            &nbsp;${formatBytes(t.totalBytes)}&nbsp;&middot; added ${esc(new Date(t.addedAt).toLocaleDateString())}
-          </div>
-          <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
-          <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">${downloadLink}</div>
-        </div>
-      `;
-    }
-
-    const statusLabel = t.status === STATUS_SEEDING ? "Seeding" : "Paused";
-    const statusClass = t.status === STATUS_SEEDING ? "ok" : "";
-    const needsMatch = t.plan.matchedCount < t.plan.files.length;
-    const matchButtons = needsMatch
-      ? `
-          <button type="button" data-add-to-library="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}">Add to Plex library</button>
-          <button type="button" class="icon-btn subtle" data-force-add-to-library="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}" title="Force file as new version - bypasses the &quot;already have this release&quot; check">${ICON_HAMMER}</button>
-        `
-      : "";
-    // percentComplete (bytes actually on disk, computed from the raw file
-    // list) is the trustworthy figure - Transmission's own percentDone can
-    // read 100% for a torrent with deselected files that has nothing on
-    // disk, since it only counts "wanted" files. Flagged explicitly rather
-    // than silently shown, so it's obvious *why* the two numbers disagree
-    // instead of just looking like a bug.
-    const percentOnDisk = Math.round(t.percentComplete * 100);
-    const mismatch = Math.abs(t.percentComplete - t.percentDone) > 0.01;
-    const mismatchNote = mismatch
-      ? `<span title="Transmission's own percentDone only counts files it considers &quot;wanted&quot; - a torrent with deselected files can report 100% there while having nothing on disk."> (Transmission reports ${Math.round(t.percentDone * 100)}% - some files may be deselected)</span>`
-      : "";
-    // Purely informational, independent of the needs-attention badge above
-    // - a full duplicate isn't "wrong", just an opportunity to reclaim disk
-    // space via Dedupe below. "n/a" (not a full match) renders nothing.
+  tbody.innerHTML = filtered.map((t) => {
+    const checked = selectedHashes.has(t.infoHash) ? "checked" : "";
+    const statusCell = !t.inTransmission
+      ? `<span class="status-msg" style="display:inline; padding:0.1rem 0.5rem;">Not in Transmission</span>`
+      : (() => {
+          const statusLabel = t.status === STATUS_SEEDING ? "Seeding" : "Paused";
+          const statusClass = t.status === STATUS_SEEDING ? "ok" : "";
+          const mismatch = Math.abs(t.percentComplete - t.percentDone) > 0.01;
+          const title = mismatch
+            ? ` title="Transmission's own percentDone only counts files it considers &quot;wanted&quot; - a torrent with deselected files can report 100% there while having nothing on disk. Transmission reports ${Math.round(t.percentDone * 100)}% here."`
+            : "";
+          return `<span class="status-msg ${statusClass}"${title} style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}${mismatch ? " ⚠️" : ""}</span>`;
+        })();
+    const percentCell = t.inTransmission ? `${Math.round(t.percentComplete * 100)}%` : "—";
+    const ratioCell = t.inTransmission ? formatRatio(t.ratio) : "—";
     const storageChip = {
-      deduped:
-        '<span title="This torrent\'s data is hardlinked to its Plex library copy - already deduped, zero extra disk." style="opacity:0.75; font-size:0.8rem; margin-left:0.5rem;">🔗 Deduped</span>',
-      duplicate:
-        '<span title="This torrent\'s data is a separate full copy from its Plex library match - Dedupe below would reclaim this disk space." style="opacity:0.75; font-size:0.8rem; margin-left:0.5rem;">📦 Duplicated</span>',
-      mixed:
-        '<span title="Some of this multi-file torrent\'s data is hardlinked to the library, some isn\'t." style="opacity:0.75; font-size:0.8rem; margin-left:0.5rem;">🔀 Partially deduped</span>',
-    }[t.storageStatus] || "";
-    const dedupeButton =
-      t.storageStatus === "duplicate"
-        ? `<button type="button" class="confirm-action" data-dedupe="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}" title="Relinks this torrent to its Plex library copy and asks Transmission to re-verify it there. A clean verify makes the completed-folder copy safe to delete separately; a failed verify automatically reverts Transmission back to its original location - nothing is deleted either way.">Dedupe (reclaim disk space)</button>`
-        : "";
+      deduped: '<span title="This torrent\'s data is hardlinked to its Plex library copy - already deduped, zero extra disk.">🔗 Deduped</span>',
+      duplicate: '<span title="This torrent\'s data is a separate full copy from its Plex library match - Dedupe would reclaim this disk space.">📦 Duplicated</span>',
+      mixed: '<span title="Some of this multi-file torrent\'s data is hardlinked to the library, some isn\'t.">🔀 Partial</span>',
+    }[t.storageStatus] || "—";
     // Durable, not one-shot: recomputed fresh on every list load (see
     // seeding.ts's findOrphanOriginal), so it stays visible any time a
     // dedupe's original download-folder copy hasn't actually been deleted
     // yet - whether that's seconds after Dedupe or after a page reload days
     // later (the real gap a production EROFS incident exposed).
-    const orphanNote = t.orphanOriginal
-      ? `<div style="font-size:0.85rem; color:var(--err); margin-top:0.25rem;">⚠️ original download-folder copy still exists (${formatBytes(t.orphanOriginal.totalBytes)}) - not yet reclaimed.</div>`
-      : "";
-    const deleteOrphanButton = t.orphanOriginal
-      ? `<button type="button" class="danger" style="flex:0 0 auto;" data-delete-orphan="${t.transmissionId}" data-orphan-dir="${esc(t.orphanOriginal.dir)}" data-orphan-name="${esc(t.orphanOriginal.name)}">Delete original copy (${formatBytes(t.orphanOriginal.totalBytes)})</button>`
+    const orphanMarker = t.orphanOriginal
+      ? ` <span style="color:var(--err);" title="Original download-folder copy still exists (${formatBytes(t.orphanOriginal.totalBytes)}) - not yet reclaimed.">⚠️</span>`
       : "";
     return `
-      <div class="seeding-item" style="margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border);">
-        <div><strong>${esc(t.torrentName)}</strong>
-          <span class="status-msg ${statusClass}" style="display:inline; padding:0.1rem 0.5rem;">${statusLabel}</span>
-          &nbsp;${percentOnDisk}% on disk${mismatchNote}&nbsp;&middot; Ratio: ${formatRatio(t.ratio)}${storageChip}
-        </div>
-        ${orphanNote}
-        <div style="font-size:0.85rem; margin-top:0.35rem;">${planFilesHtml(t.plan.files)}</div>
-        <div class="row" style="margin-top:0.5rem; flex:0 0 auto; gap:0.5rem;">
-          ${matchButtons}
-          ${dedupeButton}
-          ${deleteOrphanButton}
-          <button type="button" class="danger" style="flex:0 0 auto;" data-remove-torrent="${t.transmissionId}" data-torrent-name="${esc(t.torrentName)}" data-percent-on-disk="${percentOnDisk}" title="Transmission-only: removes this torrent and deletes its downloaded data from Transmission. Never touches anything already filed in your Plex library.">Remove &amp; delete files</button>
-          ${downloadLink}
-        </div>
-      </div>
+      <tr>
+        <td><input type="checkbox" class="index-row-checkbox" data-hash="${esc(t.infoHash)}" ${checked}></td>
+        <td class="truncate" title="${esc(t.torrentName)}">${esc(t.torrentName)}</td>
+        <td>${statusCell}</td>
+        <td>${percentCell}</td>
+        <td>${ratioCell}</td>
+        <td>${storageChip}${orphanMarker}</td>
+        <td class="truncate" title="${esc(plexSummaryHtml(t).replace(/<[^>]+>/g, ""))}">${plexSummaryHtml(t)}</td>
+        <td>${formatBytes(t.totalBytes)}</td>
+        <td>${esc(new Date(t.addedAt).toLocaleDateString())}</td>
+        <td><a href="/api/reseed/index/download?hash=${encodeURIComponent(t.infoHash)}">Download</a></td>
+      </tr>
     `;
   }).join("");
 
-  listEl.querySelectorAll("[data-remove-torrent]").forEach((btn) => {
-    const originalLabel = btn.textContent;
-    btn.addEventListener("click", () => {
-      armDangerButton(btn, originalLabel, "CONFIRM", () =>
-        removeIndexTorrent(
-          parseInt(btn.dataset.removeTorrent, 10),
-          btn.dataset.torrentName,
-          parseInt(btn.dataset.percentOnDisk, 10),
-          btn
-        )
-      );
+  tbody.querySelectorAll(".index-row-checkbox").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) selectedHashes.add(cb.dataset.hash);
+      else selectedHashes.delete(cb.dataset.hash);
+      updateSelectAllCheckboxState();
+      updateBulkActionBar();
     });
   });
-
-  listEl.querySelectorAll("[data-add-to-library]").forEach((btn) => {
-    btn.addEventListener("click", () =>
-      addIndexTorrentToLibrary(parseInt(btn.dataset.addToLibrary, 10), btn.dataset.torrentName, btn, false)
-    );
-  });
-  listEl.querySelectorAll("[data-force-add-to-library]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const torrentName = btn.dataset.torrentName;
-      const proceed = confirm(
-        `This bypasses the "already have this release" check for "${torrentName}" and files it as a separate version regardless of what's already in the library. Only do this if you've confirmed the existing file is wrong or genuinely different. Continue?`
-      );
-      if (proceed) addIndexTorrentToLibrary(parseInt(btn.dataset.forceAddToLibrary, 10), torrentName, btn, true);
-    });
-  });
-
-  listEl.querySelectorAll("[data-dedupe]").forEach((btn) => {
-    const originalLabel = btn.textContent;
-    btn.addEventListener("click", () => {
-      armDangerButton(btn, originalLabel, "CONFIRM", () =>
-        dedupeIndexTorrent(parseInt(btn.dataset.dedupe, 10), btn.dataset.torrentName, btn)
-      );
-    });
-  });
-
-  listEl.querySelectorAll("[data-delete-orphan]").forEach((btn) => {
-    const originalLabel = btn.textContent;
-    btn.addEventListener("click", () => {
-      armDangerButton(btn, originalLabel, "CONFIRM", () =>
-        deleteOriginalCopy(btn.dataset.orphanDir, btn.dataset.orphanName, btn)
-      );
-    });
-  });
+  updateSelectAllCheckboxState();
+  updateBulkActionBar();
 }
 
-/**
- * Converts a full-duplicate torrent into a hardlink-backed one (see
- * reseedApi.ts's /api/reseed/dedupe and dedupe.ts's commitDedupe) - relinks
- * its matched files to the Plex library copy and asks Transmission to
- * re-verify against them. Deliberately does NOT delete anything itself:
- * loadTorrentIndex() below re-fetches fresh state after a clean verify, and
- * if the original download-folder copy is still there (the common case -
- * see seeding.ts's findOrphanOriginal), the per-item render in
- * renderTorrentIndex() picks it up and shows a durable "Delete original
- * copy" button on that torrent's own entry - not a one-shot button here
- * that vanishes the moment you navigate away or reload, which is exactly
- * the gap a real EROFS incident exposed (dedupe succeeded, the delete
- * failed, and there was no way back to retry it afterward). A failed
- * verify means commitDedupe already auto-reverted Transmission back to its
- * original location server-side - nothing here is broken, just reported.
- */
-async function dedupeIndexTorrent(id, torrentName, btn) {
-  const statusEl = document.getElementById("index-action-status");
-  btn.disabled = true;
-  statusEl.textContent = `Relinking "${torrentName}" to its Plex library copy and asking Transmission to re-verify…`;
-  statusEl.className = "status-msg";
-  try {
-    const data = await api("/api/reseed/dedupe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    const result = data.result;
-    if (result.staged) {
-      statusEl.className = "status-msg ok";
-      statusEl.textContent = `"${torrentName}" is now deduped - Transmission verified 100% against the library copy. If its original download-folder copy still exists, a "Delete original copy" button now appears on its entry below.`;
-      await loadActivity();
-      await loadTorrentIndex();
-    } else if (result.reverted) {
-      statusEl.className = "status-msg err";
-      statusEl.textContent = `⚠️ Dedupe of "${torrentName}" failed Transmission's verify and was automatically reverted - it's untouched, still seeding from its original location.`;
-      btn.disabled = false;
-      await loadActivity();
-    } else {
-      statusEl.className = "status-msg err";
-      statusEl.textContent = `"${torrentName}" isn't a full, unambiguous match against the library - can't dedupe.`;
-      btn.disabled = false;
-    }
-  } catch (err) {
-    statusEl.className = "status-msg err";
-    statusEl.textContent = `Failed to dedupe "${torrentName}": ${err.message}`;
-    btn.disabled = false;
-  }
-}
-
-/**
- * Deletes the now-orphaned original download-folder copy of a torrent that
- * was already deduped (its own durable button in renderTorrentIndex() -
- * recomputed fresh on every list load via seeding.ts's findOrphanOriginal,
- * so it's available any time the original hasn't actually been deleted
- * yet, not just in the few seconds right after a Dedupe click) - the
- * explicit, separate follow-up step, never combined with dedupe itself.
- * Reports failure on the button's own text rather than a shared status
- * element, since a failure shouldn't wipe out anything else on the page.
- * On success, refreshes the index so the item's warning note and this
- * button both disappear immediately rather than lingering stale.
- */
-async function deleteOriginalCopy(dir, name, btn) {
-  btn.disabled = true;
-  try {
-    await api("/api/reseed/delete-original", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dir, name }),
-    });
-    btn.textContent = "Deleted";
-    await loadActivity();
-    await loadTorrentIndex();
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = `Delete failed: ${err.message}`;
-  }
-}
-
-/**
- * Runs a seeding torrent Transmission already has through the normal
- * parse/match/copy pipeline (see reseedApi.ts's /api/reseed/add-to-library)
- * - for the case where the torrent's data was never filed into Plex at
- * all, or the filed copy is gone, rather than the size-matching this tab
- * otherwise relies on. `force` (the hammer-icon button, gated behind a
- * confirm() above) bypasses the "already have this release" dedupe check
- * and always files a distinctly-tagged copy - for when that check gets it
- * wrong (e.g. the existing file shares a broadcaster tag but is actually a
- * different release). The result is shown in the section-level
- * #index-action-status, not inline in the (about to be replaced) list
- * item - loadTorrentIndex() below does a full re-render of #index-list to
- * reflect the new match state, which would otherwise wipe out a
- * message shown inside that same container before there was any chance to
- * read it.
- */
-async function addIndexTorrentToLibrary(id, torrentName, btn, force) {
-  const statusEl = document.getElementById("index-action-status");
-  btn.disabled = true;
-  statusEl.textContent = force
-    ? `Forcing "${torrentName}" into the Plex library as a new version…`
-    : `Adding "${torrentName}" to Plex library…`;
-  statusEl.className = "status-msg";
-  try {
-    const data = await api("/api/reseed/add-to-library", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, force }),
-    });
-    renderUploadResults(statusEl, data.results);
-    statusEl.textContent = `"${torrentName}":\n${statusEl.textContent}`;
-    await loadActivity();
-    await loadTorrentIndex();
-  } catch (err) {
-    statusEl.textContent = `Failed to add "${torrentName}": ${err.message}`;
-    statusEl.className = "status-msg err";
-    btn.disabled = false;
-  }
-}
-
-/**
- * Removes a torrent from Transmission and deletes its downloaded data from
- * disk (see reseedApi.ts's /api/reseed/remove) - for a torrent that's
- * stuck, a duplicate, or just no longer wanted. Irreversible and
- * deliberately Transmission-only (never touches anything already filed in
- * the Plex library), both spelled out in the confirm() dialog before this
- * ever sends a request.
- */
-/**
- * Two-click confirm for an irreversible action, in place of a native
- * confirm() popup: first click swaps the button to a loud "armed" state
- * (see the .danger.armed CSS rule) showing confirmLabel; a second click
- * while still armed actually runs onConfirm. Auto-disarms itself after
- * DANGER_ARM_MS if no second click comes - an armed button must never
- * stay armed indefinitely, since that would turn an accidental later
- * click into an unintended irreversible action.
- */
-const DANGER_ARM_MS = 4000;
-
-function armDangerButton(btn, originalLabel, confirmLabel, onConfirm) {
-  if (btn.dataset.armed === "1") {
-    clearTimeout(btn._disarmTimer);
-    disarmDangerButton(btn, originalLabel);
-    onConfirm();
+/** Reflects whether every currently-*filtered* row is selected (checked), none are (unchecked), or some are (the native indeterminate state) - "select all" only ever means "all visible under the current search filter," never literally every entry regardless of it. */
+function updateSelectAllCheckboxState() {
+  const selectAll = document.getElementById("index-select-all");
+  if (lastFilteredEntries.length === 0) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
     return;
   }
-  btn.dataset.armed = "1";
-  btn.textContent = confirmLabel;
-  btn.classList.add("armed");
-  btn._disarmTimer = setTimeout(() => disarmDangerButton(btn, originalLabel), DANGER_ARM_MS);
+  const selectedCount = lastFilteredEntries.filter((t) => selectedHashes.has(t.infoHash)).length;
+  selectAll.checked = selectedCount === lastFilteredEntries.length;
+  selectAll.indeterminate = selectedCount > 0 && selectedCount < lastFilteredEntries.length;
 }
 
-function disarmDangerButton(btn, originalLabel) {
-  btn.dataset.armed = "";
-  btn.textContent = originalLabel;
-  btn.classList.remove("armed");
+/**
+ * Shows/hides the bulk action bar and computes each button's own eligible
+ * count from the current selection independently - a mixed selection
+ * (some rows qualify for an action, some don't) keeps that action's button
+ * enabled, labeled with just the eligible count; running it only ever acts
+ * on the eligible subset and reports what was skipped and why, rather than
+ * requiring a uniform selection up front.
+ */
+function updateBulkActionBar() {
+  const bar = document.getElementById("bulk-action-bar");
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  if (selected.length === 0) {
+    bar.classList.add("hidden");
+    return;
+  }
+  bar.classList.remove("hidden");
+  document.getElementById("bulk-selected-count").textContent = `${selected.length} selected`;
+
+  const eligibleAddToLibrary = selected.filter((t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length);
+  const eligibleDedupe = selected.filter((t) => t.storageStatus === "duplicate");
+  const eligibleDeleteOriginal = selected.filter((t) => t.orphanOriginal);
+  const eligibleRemove = selected.filter((t) => t.inTransmission);
+
+  const addBtn = document.getElementById("bulk-add-to-library-btn");
+  addBtn.textContent = `Add to Plex library (${eligibleAddToLibrary.length})`;
+  addBtn.disabled = eligibleAddToLibrary.length === 0;
+
+  const forceBtn = document.getElementById("bulk-force-btn");
+  forceBtn.disabled = eligibleAddToLibrary.length === 0;
+  forceBtn.title = `Force ${eligibleAddToLibrary.length} file(s) as a new version - bypasses the "already have this release" check`;
+
+  const dedupeBtn = document.getElementById("bulk-dedupe-btn");
+  dedupeBtn.textContent = `Dedupe (${eligibleDedupe.length})`;
+  dedupeBtn.disabled = eligibleDedupe.length === 0;
+
+  const deleteOriginalBtn = document.getElementById("bulk-delete-original-btn");
+  deleteOriginalBtn.textContent = `Delete original copy (${eligibleDeleteOriginal.length})`;
+  deleteOriginalBtn.disabled = eligibleDeleteOriginal.length === 0;
+
+  const removeBtn = document.getElementById("bulk-remove-btn");
+  removeBtn.textContent = `Remove & delete files (${eligibleRemove.length})`;
+  removeBtn.disabled = eligibleRemove.length === 0;
 }
 
-async function removeIndexTorrent(id, torrentName, percentOnDisk, btn) {
+/** Shared sequential-loop runner for the bulk actions below - one request at a time (never concurrent, so Transmission isn't hammered by a large batch), same pattern processReseedBatch already established for the drop-zone's own batch queue. */
+async function runBulkAction(entries, progressVerb, runOne) {
   const statusEl = document.getElementById("index-action-status");
-  btn.disabled = true;
-  statusEl.textContent = `Removing "${torrentName}" from Transmission and deleting its downloaded data (${percentOnDisk}% of its bytes were on disk) - this does not touch anything already filed in your Plex library…`;
-  statusEl.className = "status-msg";
-  try {
-    await api("/api/reseed/remove", {
+  let succeeded = 0;
+  let failed = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const t = entries[i];
+    statusEl.textContent = `${progressVerb} ${i + 1}/${entries.length}: "${t.torrentName}"…`;
+    statusEl.className = "status-msg";
+    try {
+      await runOne(t);
+      succeeded++;
+    } catch (err) {
+      failed++;
+      console.error(`${progressVerb} failed for "${t.torrentName}": ${err.message}`);
+    }
+  }
+  return { succeeded, failed };
+}
+
+function bulkSkippedSuffix(selectedCount, eligibleCount) {
+  const skipped = selectedCount - eligibleCount;
+  return skipped > 0 ? ` (${skipped} of the ${selectedCount} selected weren't eligible for this action, skipped.)` : "";
+}
+
+async function finishBulkAction() {
+  selectedHashes.clear();
+  await loadActivity();
+  await loadTorrentIndex();
+}
+
+/**
+ * Runs each eligible torrent through the normal parse/match/copy pipeline
+ * (see reseedApi.ts's /api/reseed/add-to-library) - for torrents whose data
+ * was never filed into Plex at all, or whose filed copy is gone. `force`
+ * bypasses the "already have this release" dedupe check and always files a
+ * distinctly-tagged copy - gated behind its own confirm() since it's a
+ * deliberate override, same warning text the old per-row hammer button used.
+ */
+async function bulkAddToLibrary(force) {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  const eligible = selected.filter((t) => t.inTransmission && t.plan.matchedCount < t.plan.files.length);
+  if (eligible.length === 0) return;
+  if (force) {
+    const proceed = confirm(
+      `This bypasses the "already have this release" check for ${eligible.length} torrent(s) and files each as a separate version regardless of what's already in the library. Only do this if you've confirmed the existing files are wrong or genuinely different. Continue?`
+    );
+    if (!proceed) return;
+  }
+  const { succeeded, failed } = await runBulkAction(eligible, force ? "Forcing" : "Adding to Plex library", (t) =>
+    api("/api/reseed/add-to-library", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    statusEl.textContent = `"${torrentName}" removed from Transmission and its downloaded data deleted.`;
-    statusEl.className = "status-msg ok";
-    await loadActivity();
-    await loadTorrentIndex();
-  } catch (err) {
-    statusEl.textContent = `Failed to remove "${torrentName}": ${err.message}`;
-    statusEl.className = "status-msg err";
-    btn.disabled = false;
+      body: JSON.stringify({ id: t.transmissionId, force }),
+    })
+  );
+  const statusEl = document.getElementById("index-action-status");
+  statusEl.textContent = `${succeeded} added${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
+  statusEl.className = failed ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
+}
+
+/**
+ * Converts each eligible full-duplicate torrent into a hardlink-backed one
+ * (see reseedApi.ts's /api/reseed/dedupe and dedupe.ts's commitDedupe) -
+ * relinks matched files to the Plex library copy and asks Transmission to
+ * re-verify against them. Non-destructive (a failed verify auto-reverts
+ * that one torrent back to its original location server-side, nothing is
+ * ever deleted by this step) but affects real state across potentially
+ * many torrents at once, so still gets a lightweight confirm() first.
+ */
+async function bulkDedupe() {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  const eligible = selected.filter((t) => t.storageStatus === "duplicate");
+  if (eligible.length === 0) return;
+  const proceed = confirm(
+    `Relink ${eligible.length} torrent(s) to their Plex library copy and ask Transmission to re-verify each. A failed verify automatically reverts that one torrent back to its original location - nothing is ever deleted by this step. Continue?`
+  );
+  if (!proceed) return;
+
+  const statusEl = document.getElementById("index-action-status");
+  let staged = 0;
+  let reverted = 0;
+  let failed = 0;
+  for (let i = 0; i < eligible.length; i++) {
+    const t = eligible[i];
+    statusEl.textContent = `Deduping ${i + 1}/${eligible.length}: "${t.torrentName}"…`;
+    statusEl.className = "status-msg";
+    try {
+      const data = await api("/api/reseed/dedupe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: t.transmissionId }),
+      });
+      if (data.result.staged) staged++;
+      else if (data.result.reverted) reverted++;
+    } catch (err) {
+      failed++;
+      console.error(`Dedupe failed for "${t.torrentName}": ${err.message}`);
+    }
   }
+  statusEl.textContent =
+    `${staged} deduped${reverted ? `, ${reverted} failed verify and reverted (untouched)` : ""}${failed ? `, ${failed} errored` : ""}.` +
+    bulkSkippedSuffix(selected.length, eligible.length);
+  statusEl.className = failed || reverted ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
+}
+
+/**
+ * Deletes the now-orphaned original download-folder copy for each eligible
+ * already-deduped torrent (see reseedApi.ts's /api/reseed/delete-original)
+ * - the explicit, separate follow-up step, never combined with dedupe
+ * itself. Irreversible, so gated behind a confirm() stating the exact count.
+ */
+async function bulkDeleteOriginal() {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  const eligible = selected.filter((t) => t.orphanOriginal);
+  if (eligible.length === 0) return;
+  const proceed = confirm(`This permanently deletes the original download-folder copy for ${eligible.length} already-deduped torrent(s). Continue?`);
+  if (!proceed) return;
+
+  const { succeeded, failed } = await runBulkAction(eligible, "Deleting original copy", (t) =>
+    api("/api/reseed/delete-original", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir: t.orphanOriginal.dir, name: t.orphanOriginal.name }),
+    })
+  );
+  const statusEl = document.getElementById("index-action-status");
+  statusEl.textContent = `${succeeded} deleted${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
+  statusEl.className = failed ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
+}
+
+/**
+ * Removes each eligible torrent from Transmission and deletes its
+ * downloaded data from disk (see reseedApi.ts's /api/reseed/remove) - for
+ * torrents that are stuck, duplicates, or just no longer wanted.
+ * Irreversible and deliberately Transmission-only (never touches anything
+ * already filed in the Plex library), both spelled out in the confirm()
+ * dialog before this ever sends a request.
+ */
+async function bulkRemove() {
+  const selected = torrentIndexEntries.filter((t) => selectedHashes.has(t.infoHash));
+  const eligible = selected.filter((t) => t.inTransmission);
+  if (eligible.length === 0) return;
+  const proceed = confirm(
+    `This removes ${eligible.length} torrent(s) from Transmission and deletes their downloaded data. This does not touch anything already filed in your Plex library. Continue?`
+  );
+  if (!proceed) return;
+
+  const { succeeded, failed } = await runBulkAction(eligible, "Removing", (t) =>
+    api("/api/reseed/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: t.transmissionId }),
+    })
+  );
+  const statusEl = document.getElementById("index-action-status");
+  statusEl.textContent = `${succeeded} removed${failed ? `, ${failed} failed` : ""}.${bulkSkippedSuffix(selected.length, eligible.length)}`;
+  statusEl.className = failed ? "status-msg err" : "status-msg ok";
+  await finishBulkAction();
 }
 
 /**
@@ -2863,9 +2881,11 @@ document.getElementById("refresh-activity-btn").addEventListener("click", () => 
 });
 document.getElementById("refresh-index-btn").addEventListener("click", () => {
   // Manual refresh is a deliberate "clean slate" action - unlike the
-  // automatic refresh after Add/Force/Remove (which deliberately leaves
+  // automatic refresh after a bulk action (which deliberately leaves
   // #index-action-status alone so its result stays readable), clear it
-  // here so old action results don't linger indefinitely.
+  // here so old action results don't linger indefinitely. Selection is
+  // cleared too, since the underlying rows can change on reload.
+  selectedHashes.clear();
   const statusEl = document.getElementById("index-action-status");
   statusEl.textContent = "";
   statusEl.className = "status-msg";
@@ -2877,6 +2897,20 @@ document.getElementById("refresh-index-btn").addEventListener("click", () => {
 });
 document.getElementById("index-search").addEventListener("input", renderTorrentIndex);
 document.getElementById("index-sort").addEventListener("change", renderTorrentIndex);
+document.getElementById("index-select-all").addEventListener("change", (e) => {
+  if (e.target.checked) lastFilteredEntries.forEach((t) => selectedHashes.add(t.infoHash));
+  else lastFilteredEntries.forEach((t) => selectedHashes.delete(t.infoHash));
+  renderTorrentIndex();
+});
+document.getElementById("bulk-add-to-library-btn").addEventListener("click", () => bulkAddToLibrary(false));
+document.getElementById("bulk-force-btn").addEventListener("click", () => bulkAddToLibrary(true));
+document.getElementById("bulk-dedupe-btn").addEventListener("click", bulkDedupe);
+document.getElementById("bulk-delete-original-btn").addEventListener("click", bulkDeleteOriginal);
+document.getElementById("bulk-remove-btn").addEventListener("click", bulkRemove);
+document.getElementById("bulk-clear-selection-btn").addEventListener("click", () => {
+  selectedHashes.clear();
+  renderTorrentIndex();
+});
 document.getElementById("clear-reseed-btn").addEventListener("click", () => {
   clearReseedResults();
   const flashEl = document.getElementById("reseed-clear-flash");
