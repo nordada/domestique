@@ -187,6 +187,12 @@
      currentColor at a real, visible opacity gives it a genuine (if still
      muted, compared to the fully-saturated ok/err borders) pill outline. */
   .seeding-summary-badge.neutral { color: color-mix(in srgb, currentColor 75%, transparent); border-color: color-mix(in srgb, currentColor 55%, transparent); }
+  /* More muted than .neutral - for a pill that's expected/normal at scale
+     (e.g. "missing from Plex" on a large library) rather than worth equal
+     visual weight to the others. Border stays at a real, if lower, opacity
+     rather than dropping toward var(--border)'s near-invisible ~12% alpha -
+     same lesson as the .neutral fix above, just dialed down further. */
+  .seeding-summary-badge.dim { color: color-mix(in srgb, currentColor 50%, transparent); border-color: color-mix(in srgb, currentColor 32%, transparent); }
   /* Pill-shaped buttons matching the summary-badge pills above (same
      radius/padding/font-size), for the Torrent index's bulk action bar -
      plain rectangular buttons there read as chunky and wasted space on a
@@ -2070,14 +2076,19 @@ const INDEX_PILLS = [
     predicate: (t) => t.inTransmission && t.status === STATUS_SEEDING, label: (n) => `${n} seeding` },
   { id: "ondisk", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: true,
     predicate: (t) => t.percentComplete === 1, label: (n) => `${n} on disk` },
-  { id: "missing", role: "filter", row: "filters", colorClass: "neutral", display: "count", alwaysShow: false,
-    predicate: torrentMissingFromPlex, label: (n) => `${n} missing from Plex` },
   { id: "attention", role: "filter", row: "filters", colorClass: "err", display: "count", alwaysShow: false,
     predicate: torrentNeedsAttention, label: (n) => `⚠️ ${n} need${n === 1 ? "s" : ""} attention` },
   { id: "deduped", role: "filter", row: "filters", colorClass: "ok", display: "count", alwaysShow: false,
     predicate: (t) => t.storageStatus === "deduped", label: (n) => `🔗 ${n} deduped` },
   { id: "duplicated", role: "filter", row: "filters", colorClass: "neutral", display: "count", alwaysShow: false,
     predicate: (t) => t.storageStatus === "duplicate", label: (n) => `📦 ${n} duplicated` },
+  // Last in the filters row, and deliberately more muted (.dim, not
+  // .neutral) than every other pill here - on a large library this can
+  // genuinely be true for hundreds of entries at once (old archived
+  // torrents never filed here), expected/normal rather than something
+  // worth the same visual weight as a real filter dimension.
+  { id: "missing", role: "filter", row: "filters", colorClass: "dim", display: "count", alwaysShow: false,
+    predicate: torrentMissingFromPlex, label: (n) => `${n} missing from Plex` },
   { id: "totalsize", role: "stat", row: "stats", colorClass: "neutral", display: "bytes", alwaysShow: true,
     predicate: () => true, label: (bytes) => `${formatBytes(bytes)} total size` },
   { id: "plexsize", role: "stat", row: "stats", colorClass: "neutral", display: "bytes", alwaysShow: true,
