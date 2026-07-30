@@ -167,6 +167,10 @@
      selection) rather than separate text + a separate icon-button, for the
      same compactness reason. */
   .seeding-summary-badge.clickable { cursor: pointer; }
+  /* Engaged filter pill (Torrent index) - an accent border/tint so it's
+     obvious at a glance which pills are currently narrowing the table,
+     distinct from a pill's own semantic color (.ok/.err/.neutral). */
+  .seeding-summary-badge.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
   button:hover { opacity: 0.85; }
   h3 { font-size: 0.92rem; margin: 1rem 0 0.5rem; }
   h3:first-child { margin-top: 0; }
@@ -758,14 +762,7 @@
     (removed from Transmission after seeding, or cleaned out of Plex), so
     neither column is authoritative over the other.
   </p>
-  <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
-    <span id="index-summary-total" class="seeding-summary-badge neutral" style="display:none;"></span>
-    <span id="index-summary-plex" class="seeding-summary-badge ok" style="display:none;"></span>
-    <span id="index-summary-transmission" class="seeding-summary-badge ok" style="display:none;"></span>
-    <span id="index-summary-attention" class="seeding-summary-badge err" style="display:none;"></span>
-    <span id="index-summary-deduped" class="seeding-summary-badge ok" style="display:none;"></span>
-    <span id="index-summary-duplicated" class="seeding-summary-badge neutral" style="display:none;"></span>
-  </div>
+  <div id="index-summary-pills" style="display:flex; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;"></div>
   <input type="text" id="index-search" placeholder="Filter by torrent name…" style="margin-bottom:0.75rem;">
   <div id="bulk-action-bar" class="hidden">
     <button type="button" class="seeding-summary-badge neutral clickable" id="bulk-selected-count" title="Clear selection"></button>
@@ -1944,6 +1941,96 @@ function torrentNeedsAttention(t) {
   );
 }
 
+// From Transmission's RPC spec (tr_torrent_activity): 6 = seeding.
+const STATUS_SEEDING = 6;
+
+/**
+ * One config entry drives one summary pill above the Torrent index table -
+ * adding a future pill is one array entry here, no new HTML and no new
+ * render code needed elsewhere. Three roles, not just a clickable/not
+ * boolean, because they're genuinely different interactions:
+ *   - "filter": clickable, toggles itself in/out of activeIndexFilters.
+ *   - "reset" (just "total"): clickable, but clears every active filter
+ *     rather than toggling itself - clicking "N total" while another pill
+ *     is active means "show me everything again," not a no-op always-true
+ *     filter stacked on top.
+ *   - "stat": not clickable at all - totalsize/plexsize measure aggregates,
+ *     not a meaningful binary partition to filter by.
+ * Pill values are always computed over the full unfiltered
+ * torrentIndexEntries, never recursively against whatever other filters
+ * are currently active (true faceted-search counts) - a deliberate
+ * simplification, not an oversight: the table itself is what actually
+ * narrows.
+ */
+const INDEX_PILLS = [
+  { id: "total", role: "reset", colorClass: "neutral", display: "count", alwaysShow: true,
+    predicate: () => true, label: (n) => `${n} total` },
+  { id: "plex", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+    predicate: (t) => t.inPlex, label: (n) => `${n} in Plex` },
+  { id: "transmission", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+    predicate: (t) => t.inTransmission, label: (n) => `${n} in Transmission` },
+  { id: "seeding", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+    predicate: (t) => t.inTransmission && t.status === STATUS_SEEDING, label: (n) => `${n} seeding` },
+  { id: "ondisk", role: "filter", colorClass: "ok", display: "count", alwaysShow: true,
+    predicate: (t) => t.percentComplete === 1, label: (n) => `${n} on disk` },
+  { id: "attention", role: "filter", colorClass: "err", display: "count", alwaysShow: false,
+    predicate: torrentNeedsAttention, label: (n) => `⚠️ ${n} need${n === 1 ? "s" : ""} attention` },
+  { id: "deduped", role: "filter", colorClass: "ok", display: "count", alwaysShow: false,
+    predicate: (t) => t.storageStatus === "deduped", label: (n) => `🔗 ${n} deduped` },
+  { id: "duplicated", role: "filter", colorClass: "neutral", display: "count", alwaysShow: false,
+    predicate: (t) => t.storageStatus === "duplicate", label: (n) => `📦 ${n} duplicated` },
+  { id: "totalsize", role: "stat", colorClass: "neutral", display: "bytes", alwaysShow: true,
+    predicate: () => true, label: (bytes) => `${formatBytes(bytes)} total size` },
+  { id: "plexsize", role: "stat", colorClass: "neutral", display: "bytes", alwaysShow: true,
+    predicate: (t) => t.inPlex, label: (bytes) => `${formatBytes(bytes)} on Plex disk` },
+];
+
+/** Pill ids currently toggled on - persists across search changes/refreshes, same as the search box itself; only cleared via the "total" reset pill. */
+let activeIndexFilters = new Set();
+
+function computeIndexPillValue(pill, entries) {
+  const matched = entries.filter(pill.predicate);
+  return pill.display === "bytes" ? matched.reduce((sum, t) => sum + t.totalBytes, 0) : matched.length;
+}
+
+/** ANDs every currently-active pill filter together - a row must pass all of them, same "every active constraint narrows further" model the search box already uses. */
+function passesActiveIndexFilters(t) {
+  for (const id of activeIndexFilters) {
+    const pill = INDEX_PILLS.find((p) => p.id === id);
+    if (pill && !pill.predicate(t)) return false;
+  }
+  return true;
+}
+
+function renderIndexPills(entries) {
+  const container = document.getElementById("index-summary-pills");
+  container.innerHTML = INDEX_PILLS.map((pill) => {
+    const value = computeIndexPillValue(pill, entries);
+    // Hide a zero-count optional pill UNLESS it's the active filter right
+    // now - otherwise a filter that zeroes itself out (e.g. the last
+    // "needs attention" row gets resolved while that filter is still
+    // toggled on) would vanish with no way left to click it back off.
+    if (!pill.alwaysShow && value === 0 && !activeIndexFilters.has(pill.id)) return "";
+    const label = esc(pill.label(value));
+    if (pill.role === "stat") {
+      return `<span class="seeding-summary-badge ${pill.colorClass}">${label}</span>`;
+    }
+    const classes = ["seeding-summary-badge", pill.colorClass, "clickable"];
+    if (pill.role === "filter" && activeIndexFilters.has(pill.id)) classes.push("active");
+    return `<button type="button" class="${classes.join(" ")}" data-pill-id="${pill.id}">${label}</button>`;
+  }).join("");
+
+  container.querySelectorAll("button[data-pill-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pill = INDEX_PILLS.find((p) => p.id === btn.dataset.pillId);
+      if (pill.role === "reset") activeIndexFilters.clear();
+      else if (activeIndexFilters.has(pill.id)) activeIndexFilters.delete(pill.id);
+      else activeIndexFilters.add(pill.id);
+      renderTorrentIndex();
+    });
+  });
+}
+
 /** Which torrent names (by info-hash) are currently checked - persists across a search-filter change or a sort change, cleared after any bulk action completes or a manual refresh, since the underlying rows can change. */
 let selectedHashes = new Set();
 // The filtered set from the most recent render, kept around purely so the
@@ -1987,7 +2074,7 @@ const INDEX_STORAGE_SORT_ORDER = { "n/a": 0, duplicate: 1, mixed: 2, deduped: 3 
 function indexSortValue(t, col) {
   switch (col) {
     case "name": return t.torrentName.toLowerCase();
-    case "status": return t.inTransmission ? (t.status === 6 ? 2 : 1) : 0;
+    case "status": return t.inTransmission ? (t.status === STATUS_SEEDING ? 2 : 1) : 0;
     case "onDisk": return t.inTransmission ? t.percentComplete : -1;
     case "ratio": return t.inTransmission ? t.ratio : -1;
     case "storage": return INDEX_STORAGE_SORT_ORDER[t.storageStatus] ?? 0;
@@ -2025,50 +2112,22 @@ function updateIndexSortHeaders() {
 
 function renderTorrentIndex() {
   const tbody = document.getElementById("index-tbody");
-  const totalBadge = document.getElementById("index-summary-total");
-  const plexBadge = document.getElementById("index-summary-plex");
-  const transmissionBadge = document.getElementById("index-summary-transmission");
-  const attentionBadge = document.getElementById("index-summary-attention");
-  const dedupedBadge = document.getElementById("index-summary-deduped");
-  const duplicatedBadge = document.getElementById("index-summary-duplicated");
 
   if (torrentIndexEntries.length === 0) {
     tbody.innerHTML = "<tr><td colspan=\"10\" style=\"opacity:0.7;\">Nothing registered yet - staging a torrent above (or configuring the Transmission-torrents sync in Settings) will populate this list.</td></tr>";
-    [totalBadge, plexBadge, transmissionBadge, attentionBadge, dedupedBadge, duplicatedBadge].forEach((b) => {
-      b.style.display = "none";
-    });
+    document.getElementById("index-summary-pills").innerHTML = "";
     lastFilteredEntries = [];
     updateSelectAllCheckboxState();
     updateBulkActionBar();
     return;
   }
 
-  totalBadge.textContent = `${torrentIndexEntries.length} total`;
-  totalBadge.style.display = "inline-block";
-  plexBadge.textContent = `${torrentIndexEntries.filter((t) => t.inPlex).length} in Plex`;
-  plexBadge.style.display = "inline-block";
-  transmissionBadge.textContent = `${torrentIndexEntries.filter((t) => t.inTransmission).length} in Transmission`;
-  transmissionBadge.style.display = "inline-block";
-
-  const attentionCount = torrentIndexEntries.filter(torrentNeedsAttention).length;
-  attentionBadge.textContent = `⚠️ ${attentionCount} need${attentionCount === 1 ? "s" : ""} attention`;
-  attentionBadge.style.display = attentionCount > 0 ? "inline-block" : "none";
-
-  // At-a-glance view of how much of what's currently seeding is already
-  // deduped vs. still costing double disk - independent of the
-  // needs-attention badge above (storageStatus isn't a correctness signal),
-  // and "n/a" (not currently in Transmission) for neither.
-  const dedupedCount = torrentIndexEntries.filter((t) => t.storageStatus === "deduped").length;
-  const duplicatedCount = torrentIndexEntries.filter((t) => t.storageStatus === "duplicate").length;
-  dedupedBadge.textContent = `🔗 ${dedupedCount} deduped`;
-  dedupedBadge.style.display = dedupedCount > 0 ? "inline-block" : "none";
-  duplicatedBadge.textContent = `📦 ${duplicatedCount} duplicated`;
-  duplicatedBadge.style.display = duplicatedCount > 0 ? "inline-block" : "none";
+  renderIndexPills(torrentIndexEntries);
 
   const query = document.getElementById("index-search").value.trim().toLowerCase();
-  const filtered = query
-    ? torrentIndexEntries.filter((t) => t.torrentName.toLowerCase().includes(query))
-    : torrentIndexEntries.slice();
+  const filtered = torrentIndexEntries.filter(
+    (t) => (!query || t.torrentName.toLowerCase().includes(query)) && passesActiveIndexFilters(t)
+  );
   lastFilteredEntries = filtered;
   if (filtered.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" style="opacity:0.7;">No torrents match "${esc(query)}".</td></tr>`;
@@ -2079,7 +2138,6 @@ function renderTorrentIndex() {
 
   const sorted = sortIndexRows(filtered);
 
-  const STATUS_SEEDING = 6;
   tbody.innerHTML = sorted.map((t) => {
     const checked = selectedHashes.has(t.infoHash) ? "checked" : "";
 
