@@ -1,11 +1,15 @@
 <CommunityApplications>
   <!-- Required profile -->
   <Profile>
-    This repository hosts the Community Applications template for **Domestique**: a boutique PVR for bike racing, built on the same idea as Sonarr/Radarr but specifically for how race footage actually gets released (multi-part stages, the same race re-released by different broadcasters, trackers that name every file slightly differently). It watches a downloads folder (via a Transmission webhook, a watched hot folder, or a direct upload) and automatically files finished race downloads into a clean, Plex-ready library.
+    This repository hosts the Community Applications templates for two related, separately-maintained apps - each has its own GitHub repo and Docker image; this repository only holds the template XML files describing them to Community Applications.
 
-    Also includes a password-gated web UI for managing show/event definitions and testing the file-name matcher, optional Plex partial-scan refresh, optional Discord notifications, and optional Wikipedia-backed cover-art logo search.
+    **Domestique** (`unraid-template.xml`): a boutique PVR for bike racing, built on the same idea as Sonarr/Radarr but specifically for how race footage actually gets released (multi-part stages, the same race re-released by different broadcasters, trackers that name every file slightly differently). It watches a downloads folder (via a Transmission webhook, a watched hot folder, or a direct upload) and automatically files finished race downloads into a clean, Plex-ready library. See https://github.com/nordada/domestique.
 
-    This repository only ships this one application. For support or to report an issue, please use this repository's GitHub Issues.
+    **Paddock** (`paddock.xml`): the same idea generalized beyond one sport, via a configurable "event profile" - cycling and Formula 1 ship built in. See https://github.com/nordada/paddock.
+
+    Both include a password-gated web UI for managing show/event definitions and testing the file-name matcher, optional Plex partial-scan refresh, optional Discord notifications, and optional Wikipedia-backed cover-art logo search.
+
+    For support or to report an issue with either app, please use that app's own repository's GitHub Issues, not this one.
   </Profile>
   <!-- Icon -->
   <Icon>https://raw.githubusercontent.com/nordada/domestique/main/public/icon.png</Icon>
