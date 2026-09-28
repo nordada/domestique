@@ -5,7 +5,7 @@
 # (see core.hooksPath in git config) so the number stays in sync regardless
 # of who commits. This is intentionally baked into package.json rather than
 # computed at runtime from git history, since the deployed copy on TOWER
-# excludes .git entirely (see scripts/deploy-to-tower.sh.example).
+# excludes .git entirely (see scripts/deploy-domestique-to-tower.sh.example).
 #
 # Middle digit bumped 0.1 -> 0.2 on 2026-07-30, marking the Index tab
 # (hash-keyed unified torrent view, Archive, and the whole session's worth
