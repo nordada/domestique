@@ -45,4 +45,4 @@ rsync -av \
   --exclude 'config/match-overrides.json' \
   --exclude 'config/archive-state.json' \
   --exclude 'config/torrent-registry' \
-  ~/projects/domestique/ user@YOUR-SERVER-IP:/path/to/domestique/
+  "${PROJECTS:-$HOME/Projects}"/domestique/ user@YOUR-SERVER-IP:/path/to/domestique/
